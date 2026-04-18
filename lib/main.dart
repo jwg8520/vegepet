@@ -54,12 +54,104 @@ class _HomePageState extends State<HomePage> {
   String? _selectedSpeciesId;
   bool _isAdopting = false;
 
+  List<Map<String, dynamic>> _todayMealLogs = [];
+  bool _isLoggingMeal = false;
+  bool _firstMealPopupShownThisSession = false;
+
+  final TextEditingController _nicknameController = TextEditingController();
+  final TextEditingController _resolutionController = TextEditingController();
+  String? _selectedGender;
+  String? _selectedDietGoal;
+  bool _isSavingProfile = false;
+
+  static const List<String> _genderOptions = ['여자', '남자'];
+  static const List<String> _dietGoalOptions = ['다이어트', '근력향상', '혈당조정'];
+
   bool _debugExpanded = false;
 
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _nicknameController.dispose();
+    _resolutionController.dispose();
+    super.dispose();
+  }
+
+  bool _isProfileComplete() {
+    final p = _profile;
+    if (p == null) return false;
+    bool nonEmpty(dynamic v) =>
+        v != null && v.toString().trim().isNotEmpty;
+    return nonEmpty(p['nickname']) &&
+        nonEmpty(p['gender']) &&
+        nonEmpty(p['diet_goal']) &&
+        nonEmpty(p['resolution_text']);
+  }
+
+  void _syncProfileFormFromFetched() {
+    final p = _profile;
+    if (p == null) return;
+    if (_nicknameController.text.isEmpty && p['nickname'] != null) {
+      _nicknameController.text = p['nickname'].toString();
+    }
+    if (_resolutionController.text.isEmpty && p['resolution_text'] != null) {
+      _resolutionController.text = p['resolution_text'].toString();
+    }
+    _selectedGender ??= p['gender']?.toString();
+    _selectedDietGoal ??= p['diet_goal']?.toString();
+  }
+
+  Future<void> _saveProfile() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+
+    final nickname = _nicknameController.text.trim();
+    final resolution = _resolutionController.text.trim();
+
+    if (nickname.isEmpty) {
+      _showSnack('닉네임을 입력해주세요.');
+      return;
+    }
+    if (_selectedGender == null) {
+      _showSnack('성별을 선택해주세요.');
+      return;
+    }
+    if (_selectedDietGoal == null) {
+      _showSnack('식단 목적을 선택해주세요.');
+      return;
+    }
+    if (resolution.isEmpty) {
+      _showSnack('다짐 한마디를 입력해주세요.');
+      return;
+    }
+
+    setState(() => _isSavingProfile = true);
+    try {
+      await supabase.from('profiles').update({
+        'nickname': nickname,
+        'gender': _selectedGender,
+        'diet_goal': _selectedDietGoal,
+        'resolution_text': resolution,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user.id);
+
+      await _fetchProfile();
+
+      if (!mounted) return;
+      setState(() => _isSavingProfile = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSavingProfile = false);
+      _showSnack('프로필 저장 실패: $e');
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -77,7 +169,10 @@ class _HomePageState extends State<HomePage> {
         _fetchProfile(),
         _fetchPetSpecies(),
         _fetchActivePet(),
+        _fetchTodayMealLogs(),
       ]);
+
+      _syncProfileFormFromFetched();
 
       if (!mounted) return;
       setState(() {
@@ -136,6 +231,144 @@ class _HomePageState extends State<HomePage> {
     _activePet = data == null ? null : Map<String, dynamic>.from(data);
   }
 
+  Future<void> _fetchTodayMealLogs() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _todayMealLogs = [];
+      return;
+    }
+    final today = _todayDateStr();
+    final data = await supabase
+        .from('meal_logs')
+        .select('id, meal_slot, result_type, affection_gain, created_at')
+        .eq('user_id', user.id)
+        .eq('meal_date', today);
+
+    _todayMealLogs = List<Map<String, dynamic>>.from(data);
+  }
+
+  Future<void> _logMeal(String slot) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+    if (_activePet == null) {
+      _showSnack('먼저 펫을 분양받아주세요.');
+      return;
+    }
+    if (_isLoggingMeal) return;
+
+    if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
+      _showSnack('이미 해당 식단 인증을 완료했어요.');
+      return;
+    }
+
+    setState(() => _isLoggingMeal = true);
+
+    try {
+      final existing = await supabase
+          .from('meal_logs')
+          .select('id')
+          .eq('user_id', user.id);
+      final isFirstEver = (existing as List).isEmpty;
+
+      final today = _todayDateStr();
+
+      final dup = await supabase
+          .from('meal_logs')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('meal_date', today)
+          .eq('meal_slot', slot)
+          .maybeSingle();
+
+      if (dup != null) {
+        if (!mounted) return;
+        setState(() => _isLoggingMeal = false);
+        _showSnack('이미 해당 식단 인증을 완료했어요.');
+        await _fetchTodayMealLogs();
+        if (mounted) setState(() {});
+        return;
+      }
+
+      final petId = _activePet!['id'];
+      final currentAffection =
+          (_activePet!['affection'] as num?)?.toInt() ?? 0;
+
+      await supabase.from('meal_logs').insert({
+        'user_id': user.id,
+        'user_pet_id': petId,
+        'meal_date': today,
+        'meal_slot': slot,
+        'result_type': 'good',
+        'affection_gain': 5,
+        'image_path': null,
+        'memo': null,
+      });
+
+      await supabase
+          .from('user_pets')
+          .update({'affection': currentAffection + 5}).eq('id', petId);
+
+      await Future.wait([
+        _fetchTodayMealLogs(),
+        _fetchActivePet(),
+      ]);
+
+      if (!mounted) return;
+      setState(() => _isLoggingMeal = false);
+
+      _showSnack(slot == 'brunch' ? '아점 인증 완료 (+5)' : '저녁 인증 완료 (+5)');
+
+      if (isFirstEver && !_firstMealPopupShownThisSession) {
+        _firstMealPopupShownThisSession = true;
+        await _showEmailLinkDialog();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoggingMeal = false);
+      _showSnack('식단 인증 저장 실패: $e');
+    }
+  }
+
+  Future<void> _showEmailLinkDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('베지펫을 지켜주세요'),
+          content: const Text(
+            '헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('나중에 할게요'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _showSnack('나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.');
+              },
+              child: const Text('지금 연동하기'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _todayDateStr() {
+    final d = DateTime.now();
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$m-$day';
+  }
+
   Future<void> _adoptSelectedPet() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -149,10 +382,17 @@ class _HomePageState extends State<HomePage> {
     }
 
     setState(() => _isAdopting = true);
+final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
+if (selectedSpeciesId == null) {
+  if (!mounted) return;
+  setState(() => _isAdopting = false);
+  _showSnack('펫 선택값이 올바르지 않아요.');
+  return;
+}
     try {
       await supabase.from('user_pets').insert({
         'user_id': user.id,
-        'pet_species_id': _selectedSpeciesId,
+        'pet_species_id': selectedSpeciesId,
         'nickname': null,
         'stage': 'baby',
         'affection': 0,
@@ -199,7 +439,10 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _refreshActivePet() async {
     try {
-      await _fetchActivePet();
+      await Future.wait([
+        _fetchActivePet(),
+        _fetchTodayMealLogs(),
+      ]);
       if (mounted) setState(() {});
     } catch (e) {
       _showSnack('펫 정보 조회 실패: $e');
@@ -215,6 +458,12 @@ class _HomePageState extends State<HomePage> {
         _petSpecies = [];
         _activePet = null;
         _selectedSpeciesId = null;
+        _todayMealLogs = [];
+        _firstMealPopupShownThisSession = false;
+        _nicknameController.clear();
+        _resolutionController.clear();
+        _selectedGender = null;
+        _selectedDietGoal = null;
       });
       await _bootstrap();
     } catch (e) {
@@ -245,7 +494,17 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildReadyScaffold() {
+    final profileComplete = _isProfileComplete();
     final hasActivePet = _activePet != null;
+
+    final List<Widget> mainChildren;
+    if (!profileComplete) {
+      mainChildren = _buildProfileFormContent();
+    } else if (!hasActivePet) {
+      mainChildren = _buildAdoptContent();
+    } else {
+      mainChildren = _buildYardContent();
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -258,7 +517,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (hasActivePet) ..._buildYardContent() else ..._buildAdoptContent(),
+              ...mainChildren,
               const SizedBox(height: 24),
               _buildDebugSection(),
             ],
@@ -274,8 +533,115 @@ class _HomePageState extends State<HomePage> {
     return [
       _buildYardCard(),
       const SizedBox(height: 16),
+      _buildMealSection(),
+      const SizedBox(height: 16),
       _buildYardActions(),
     ];
+  }
+
+  Widget _buildMealSection() {
+    final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
+    final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
+    final theme = Theme.of(context);
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.restaurant_outlined, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '오늘의 식단 인증 (테스트)',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildMealButton(
+                    label: '아점 먹이주기 테스트',
+                    done: brunchDone,
+                    onPressed: (brunchDone || _isLoggingMeal)
+                        ? null
+                        : () => _logMeal('brunch'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildMealButton(
+                    label: '저녁 먹이주기 테스트',
+                    done: dinnerDone,
+                    onPressed: (dinnerDone || _isLoggingMeal)
+                        ? null
+                        : () => _logMeal('dinner'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _mealStatusChip('아점', brunchDone),
+                const SizedBox(width: 6),
+                _mealStatusChip('저녁', dinnerDone),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMealButton({
+    required String label,
+    required bool done,
+    required VoidCallback? onPressed,
+  }) {
+    if (done) {
+      return OutlinedButton.icon(
+        onPressed: null,
+        icon: const Icon(Icons.check_circle_outline, size: 18),
+        label: Text('$label · 완료'),
+      );
+    }
+    return FilledButton.tonalIcon(
+      onPressed: onPressed,
+      icon: _isLoggingMeal
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.restaurant, size: 18),
+      label: Text(label),
+    );
+  }
+
+  Widget _mealStatusChip(String label, bool done) {
+    final color = done ? Colors.green : Colors.grey;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        done ? '$label 완료' : '$label 대기중',
+        style: TextStyle(
+          fontSize: 11,
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 
   Widget _buildYardCard() {
@@ -396,6 +762,138 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
+    );
+  }
+
+  // ---------- 프로필 입력 (미완성 상태) ----------
+
+  List<Widget> _buildProfileFormContent() {
+    final theme = Theme.of(context);
+    return [
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '프로필을 입력해주세요',
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '베지펫이 더 잘 도와드릴 수 있도록 기본 정보를 입력해주세요.',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: Colors.grey[700]),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileFormCard(
+        label: '닉네임',
+        child: TextField(
+          controller: _nicknameController,
+          maxLength: 20,
+          decoration: const InputDecoration(
+            hintText: '예: 초록이',
+            border: OutlineInputBorder(),
+            counterText: '',
+            isDense: true,
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileFormCard(
+        label: '성별',
+        child: Wrap(
+          spacing: 8,
+          children: _genderOptions.map((g) {
+            final selected = _selectedGender == g;
+            return ChoiceChip(
+              label: Text(g),
+              selected: selected,
+              onSelected: (v) {
+                setState(() => _selectedGender = v ? g : null);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileFormCard(
+        label: '식단 목적',
+        child: Wrap(
+          spacing: 8,
+          children: _dietGoalOptions.map((g) {
+            final selected = _selectedDietGoal == g;
+            return ChoiceChip(
+              label: Text(g),
+              selected: selected,
+              onSelected: (v) {
+                setState(() => _selectedDietGoal = v ? g : null);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileFormCard(
+        label: '다짐 한마디',
+        child: TextField(
+          controller: _resolutionController,
+          maxLines: 3,
+          maxLength: 100,
+          decoration: const InputDecoration(
+            hintText: '예: 매일 채소 한 끼는 꼭 지킬게요!',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
+      const SizedBox(height: 16),
+      SizedBox(
+        height: 52,
+        child: FilledButton.icon(
+          onPressed: _isSavingProfile ? null : _saveProfile,
+          icon: _isSavingProfile
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.check),
+          label: Text(_isSavingProfile ? '저장 중...' : '시작하기'),
+        ),
+      ),
+    ];
+  }
+
+  Widget _profileFormCard({required String label, required Widget child}) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            child,
+          ],
+        ),
+      ),
     );
   }
 
@@ -530,6 +1028,11 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 12),
             _debugBlock(
+              title: 'today meal_logs (${_todayMealLogs.length}개)',
+              children: _buildTodayMealRows(),
+            ),
+            const SizedBox(height: 12),
+            _debugBlock(
               title: 'pet_species',
               children: [
                 _kv('count', '${_petSpecies.length}종'),
@@ -594,9 +1097,16 @@ class _HomePageState extends State<HomePage> {
     final rows = <Widget>[
       _kv('id', p['id']?.toString() ?? '-'),
       _kv('email', p['email']?.toString() ?? '(없음)'),
+      _kv('nickname', p['nickname']?.toString() ?? '(없음)'),
+      _kv('gender', p['gender']?.toString() ?? '(없음)'),
+      _kv('diet_goal', p['diet_goal']?.toString() ?? '(없음)'),
+      _kv('resolution_text', p['resolution_text']?.toString() ?? '(없음)'),
       _kv('account_type', accountType),
       _kv('gold_balance', p['gold_balance']?.toString() ?? '-'),
+      _kv('linked_at', p['linked_at']?.toString() ?? '(null)'),
       _kv('created_at', p['created_at']?.toString() ?? '-'),
+      _kv('updated_at', p['updated_at']?.toString() ?? '-'),
+      _kv('profile_complete', _isProfileComplete() ? 'true' : 'false'),
     ];
 
     if (accountType == 'guest') {
@@ -651,6 +1161,22 @@ class _HomePageState extends State<HomePage> {
     ];
   }
 
+  List<Widget> _buildTodayMealRows() {
+    final today = _todayDateStr();
+    final brunch = _todayMealLogs.where((m) => m['meal_slot'] == 'brunch');
+    final dinner = _todayMealLogs.where((m) => m['meal_slot'] == 'dinner');
+
+    return [
+      _kv('meal_date', today),
+      _kv('brunch', brunch.isEmpty ? '대기중' : '완료'),
+      _kv('dinner', dinner.isEmpty ? '대기중' : '완료'),
+      _kv(
+        'first_popup_shown',
+        _firstMealPopupShownThisSession ? 'true (이번 세션)' : 'false',
+      ),
+    ];
+  }
+
   // ---------- 공통 유틸 ----------
 
   String _familyToKorean(String family) {
@@ -670,9 +1196,9 @@ class _HomePageState extends State<HomePage> {
         return '유아기';
       case 'child':
         return '유년기';
-      case 'growth':
+      case 'grown':
         return '성장기';
-      case 'mature':
+      case 'adult':
         return '성숙기';
       default:
         return stage;
