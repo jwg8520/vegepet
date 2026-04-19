@@ -68,6 +68,7 @@ class _HomePageState extends State<HomePage> {
   static const List<String> _dietGoalOptions = ['다이어트', '근력향상', '혈당조정'];
 
   bool _debugExpanded = false;
+  bool _isInteracting = false;
 
   @override
   void initState() {
@@ -222,7 +223,7 @@ class _HomePageState extends State<HomePage> {
     final data = await supabase
         .from('user_pets')
         .select(
-          'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, created_at, pet_species:pet_species_id(id, code, name_ko, family, sort_order)',
+          'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, created_at, last_played_on, last_petted_on, pet_species:pet_species_id(id, code, name_ko, family, sort_order)',
         )
         .eq('user_id', user.id)
         .eq('is_active', true)
@@ -270,7 +271,8 @@ class _HomePageState extends State<HomePage> {
       final existing = await supabase
           .from('meal_logs')
           .select('id')
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .limit(1);
       final isFirstEver = (existing as List).isEmpty;
 
       final today = _todayDateStr();
@@ -332,6 +334,57 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // 간단 MVP 상호작용: user_pets.affection을 +1 올리고 마지막 사용 날짜를 저장한다.
+  // 하루 1회 제한은 user_pets.last_played_on / last_petted_on 값을
+  // 오늘 날짜(yyyy-mm-dd)와 비교해서 강제한다.
+  // action: 'play' | 'pet'
+  Future<void> _interactPet(String action) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+    if (_activePet == null) {
+      _showSnack('먼저 펫을 분양받아주세요.');
+      return;
+    }
+    if (_isInteracting) return;
+
+    final isPlay = action == 'play';
+    final label = isPlay ? '놀아주기' : '쓰다듬기';
+    final dateColumn = isPlay ? 'last_played_on' : 'last_petted_on';
+
+    final today = _todayDateStr();
+    final lastUsedOn = _activePet![dateColumn]?.toString();
+    if (lastUsedOn == today) {
+      _showSnack(isPlay ? '오늘은 이미 놀아줬어요.' : '오늘은 이미 쓰다듬었어요.');
+      return;
+    }
+
+    setState(() => _isInteracting = true);
+
+    try {
+      final petId = _activePet!['id'];
+      final currentAffection =
+          (_activePet!['affection'] as num?)?.toInt() ?? 0;
+
+      await supabase.from('user_pets').update({
+        'affection': currentAffection + 1,
+        dateColumn: today,
+      }).eq('id', petId);
+
+      await _fetchActivePet();
+
+      if (!mounted) return;
+      setState(() => _isInteracting = false);
+      _showSnack('$label 성공! 애정도 +1');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isInteracting = false);
+      _showSnack('$label 실패: $e');
+    }
+  }
+
   Future<void> _showEmailLinkDialog() async {
     if (!mounted) return;
     await showDialog<void>(
@@ -381,14 +434,14 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
+    if (selectedSpeciesId == null) {
+      _showSnack('펫 선택값이 올바르지 않아요.');
+      return;
+    }
+
     setState(() => _isAdopting = true);
-final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
-if (selectedSpeciesId == null) {
-  if (!mounted) return;
-  setState(() => _isAdopting = false);
-  _showSnack('펫 선택값이 올바르지 않아요.');
-  return;
-}
+
     try {
       await supabase.from('user_pets').insert({
         'user_id': user.id,
@@ -408,10 +461,129 @@ if (selectedSpeciesId == null) {
         _selectedSpeciesId = null;
         _isAdopting = false;
       });
+
+      // 분양 완료 직후, 닉네임이 아직 null인 상태에서 바로 마당이 노출되지 않도록
+      // 이름 짓기 다이얼로그를 띄운다.
+      await _showNicknameDialog();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isAdopting = false);
       _showSnack('분양 저장에 실패했어요: $e');
+    }
+  }
+
+  // 분양 직후에 뜨는 닉네임 입력 다이얼로그.
+  // 허용 문자: 한글/영문 대소문자/숫자, 길이 2~8자, 공백·특수문자 금지.
+  Future<void> _showNicknameDialog() async {
+    final pet = _activePet;
+    if (pet == null || !mounted) return;
+
+    final controller = TextEditingController();
+    final pattern = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
+    String? errorText;
+    bool saving = false;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              Future<void> save() async {
+                final text = controller.text.trim();
+                if (text.isEmpty) {
+                  setDialogState(() => errorText = '이름을 입력해주세요.');
+                  return;
+                }
+                if (text.length < 2 || text.length > 8) {
+                  setDialogState(() => errorText = '이름은 2~8자로 입력해주세요.');
+                  return;
+                }
+                if (!pattern.hasMatch(text)) {
+                  setDialogState(
+                      () => errorText = '특수문자는 사용할 수 없어요.');
+                  return;
+                }
+
+                setDialogState(() {
+                  saving = true;
+                  errorText = null;
+                });
+
+                try {
+                  await supabase
+                      .from('user_pets')
+                      .update({'nickname': text}).eq('id', pet['id']);
+
+                  await _fetchActivePet();
+
+                  if (!mounted) return;
+                  setState(() {});
+
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  _showSnack('이름이 저장되었어요!');
+                } catch (e) {
+                  if (!ctx.mounted) return;
+                  setDialogState(() {
+                    saving = false;
+                    errorText = '저장 실패: $e';
+                  });
+                }
+              }
+
+              return AlertDialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                title: const Text('아기 베지펫이 분양 되었어요🥹'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('귀여운 이름을 지어주세요!'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      maxLength: 8,
+                      enabled: !saving,
+                      decoration: InputDecoration(
+                        hintText: '예: 초록이',
+                        border: const OutlineInputBorder(),
+                        errorText: errorText,
+                        helperText: '한글·영문·숫자 2~8자 (공백/특수문자 불가)',
+                        counterText: '',
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) {
+                        if (!saving) save();
+                      },
+                    ),
+                  ],
+                ),
+                actions: [
+                  FilledButton(
+                    onPressed: saving ? null : save,
+                    child: saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('저장'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -531,24 +703,473 @@ if (selectedSpeciesId == null) {
 
   List<Widget> _buildYardContent() {
     return [
-      _buildYardCard(),
-      const SizedBox(height: 16),
-      _buildMealSection(),
+      _buildYardHeader(),
       const SizedBox(height: 16),
       _buildYardActions(),
     ];
   }
 
-  Widget _buildMealSection() {
+  // 가로형 마당 느낌의 홈 헤더.
+  // 상단에는 좌측 펫정보 아이콘 버튼 1개 / 우측 게임 메뉴 아이콘 버튼 1개만 보인다.
+  // 각각 눌러야 패널이 열리도록 BottomSheet로 전환했다.
+  Widget _buildYardHeader() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: SizedBox(
+        height: 320,
+        child: Stack(
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFFDAF3DD), Color(0xFF8ECB94)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 80,
+              child: Container(color: const Color(0xFF62A86B)),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 18,
+              child: _buildCenterPetVisual(),
+            ),
+            Positioned(
+              top: 12,
+              left: 12,
+              child: _cornerIconButton(
+                icon: Icons.pets,
+                tooltip: '펫 정보',
+                onTap: _openPetStatusSheet,
+              ),
+            ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: _cornerIconButton(
+                icon: Icons.apps_rounded,
+                tooltip: '메뉴',
+                onTap: _openMenuSheet,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cornerIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.white.withValues(alpha: 0.95),
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Tooltip(
+            message: tooltip,
+            child: Icon(icon, size: 22, color: theme.colorScheme.primary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCenterPetVisual() {
+    final theme = Theme.of(context);
+    final pet = _activePet!;
+    final species = pet['pet_species'] is Map
+        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
+        : <String, dynamic>{};
+    final family = species['family']?.toString() ?? '';
+    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final nickname = pet['nickname']?.toString();
+    final displayName =
+        (nickname == null || nickname.isEmpty) ? speciesName : nickname;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.9),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(
+            family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
+            size: 40,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            '$displayName이(가) 마당에서 기다리고 있어요',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 좌측 상단 펫정보 아이콘 버튼을 누르면 열리는 펫 상호작용 상태창.
+  void _openPetStatusSheet() {
+    if (_activePet == null) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Future<void> runInteraction(String action) async {
+              await _interactPet(action);
+              if (sheetCtx.mounted) setSheetState(() {});
+            }
+
+            return _buildPetStatusSheetContent(
+              onMeal: () {
+                Navigator.of(sheetCtx).pop();
+                _openMealSheet();
+              },
+              onPlay: () => runInteraction('play'),
+              onPet: () => runInteraction('pet'),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPetStatusSheetContent({
+    required VoidCallback onMeal,
+    required VoidCallback onPlay,
+    required VoidCallback onPet,
+  }) {
+    final theme = Theme.of(context);
+    final pet = _activePet!;
+    final species = pet['pet_species'] is Map
+        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
+        : <String, dynamic>{};
+
+    final family = species['family']?.toString() ?? '';
+    final familyKo = _familyToKorean(family);
+    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final nickname = pet['nickname']?.toString();
+    final displayName =
+        (nickname == null || nickname.isEmpty) ? speciesName : nickname;
+    final stage = pet['stage']?.toString() ?? 'baby';
+    final stageKo = _stageToKorean(stage);
+    final affection = pet['affection']?.toString() ?? '0';
+
+    final today = _todayDateStr();
+    final playedToday = pet['last_played_on']?.toString() == today;
+    final pettedToday = pet['last_petted_on']?.toString() == today;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: theme.colorScheme.primaryContainer,
+                  child: Icon(
+                    family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '$familyKo · $speciesName',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _sheetStatChip(
+                    Icons.child_care_outlined,
+                    '성장 단계',
+                    stageKo,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _sheetStatChip(
+                    Icons.favorite_outline,
+                    '애정도',
+                    affection,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _sheetActionTile(
+                    label: '먹이주기',
+                    icon: Icons.restaurant,
+                    onTap: _isInteracting ? null : onMeal,
+                    subtitle: Text(
+                      '아점 : 06시 ~ 14시\n저녁 : 17시 ~ 22시',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 9,
+                        height: 1.3,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onPrimaryContainer
+                            .withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _sheetActionTile(
+                    label: '놀아주기',
+                    icon: Icons.toys_outlined,
+                    onTap: (_isInteracting || playedToday) ? null : onPlay,
+                    loading: _isInteracting,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _sheetActionTile(
+                    label: '쓰다듬기',
+                    icon: Icons.back_hand_outlined,
+                    onTap: (_isInteracting || pettedToday) ? null : onPet,
+                    loading: _isInteracting,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _interactionStatusChip('놀아주기', playedToday),
+                const SizedBox(width: 8),
+                _interactionStatusChip('쓰다듬기', pettedToday),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _interactionStatusChip(String label, bool doneToday) {
+    final color = doneToday ? Colors.orange : Colors.green;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$label: ${doneToday ? '완료' : '가능'}',
+        style: TextStyle(
+          fontSize: 11,
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetStatChip(IconData icon, String label, String value) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sheetActionTile({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onTap,
+    bool loading = false,
+    Widget? subtitle,
+  }) {
+    final theme = Theme.of(context);
+    final disabled = onTap == null;
+
+    return Opacity(
+      opacity: disabled && !loading ? 0.5 : 1,
+      child: Material(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                loading
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
+                      )
+                    : Icon(
+                        icon,
+                        size: 22,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  subtitle,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 펫 상태창 > 먹이주기에서 호출되는 식단 인증 전용 BottomSheet.
+  // 아점/저녁 선택 UI와 오늘 완료 여부를 이 시트 안에서 한 번에 처리한다.
+  void _openMealSheet() {
+    if (_activePet == null) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Future<void> runLog(String slot) async {
+              await _logMeal(slot);
+              if (sheetCtx.mounted) setSheetState(() {});
+            }
+
+            return _buildMealSheetContent(onLog: runLog);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMealSheetContent({
+    required Future<void> Function(String slot) onLog,
+  }) {
+    final theme = Theme.of(context);
     final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
     final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
-    final theme = Theme.of(context);
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    return SafeArea(
+      top: false,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
@@ -557,8 +1178,9 @@ if (selectedSpeciesId == null) {
                 const SizedBox(width: 8),
                 Text(
                   '오늘의 식단 인증 (테스트)',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
@@ -571,7 +1193,7 @@ if (selectedSpeciesId == null) {
                     done: brunchDone,
                     onPressed: (brunchDone || _isLoggingMeal)
                         ? null
-                        : () => _logMeal('brunch'),
+                        : () => onLog('brunch'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -581,12 +1203,12 @@ if (selectedSpeciesId == null) {
                     done: dinnerDone,
                     onPressed: (dinnerDone || _isLoggingMeal)
                         ? null
-                        : () => _logMeal('dinner'),
+                        : () => onLog('dinner'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Row(
               children: [
                 _mealStatusChip('아점', brunchDone),
@@ -598,6 +1220,118 @@ if (selectedSpeciesId == null) {
         ),
       ),
     );
+  }
+
+  // 우측 상단 게임 메뉴 아이콘 버튼을 누르면 열리는 8개 메뉴 허브.
+  void _openMenuSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return _buildMenuSheetContent(
+          onTap: (label) {
+            Navigator.of(sheetCtx).pop();
+            _onMenuTap(label);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuSheetContent({required ValueChanged<String> onTap}) {
+    final items = <(IconData, String)>[
+      (Icons.person_outline, '프로필'),
+      (Icons.event_note_outlined, '식단일지'),
+      (Icons.backpack_outlined, '가방'),
+      (Icons.storefront_outlined, '상점'),
+      (Icons.menu_book_outlined, '도감'),
+      (Icons.auto_stories_outlined, '스토리'),
+      (Icons.help_outline, '도움말'),
+      (Icons.settings_outlined, '설정'),
+    ];
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '게임 메뉴',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 4,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 0.95,
+              children: items
+                  .map((item) => _sheetMenuTile(
+                        icon: item.$1,
+                        label: item.$2,
+                        onTap: () => onTap(item.$2),
+                      ))
+                  .toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetMenuTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.6),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 26,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _onMenuTap(String label) {
+    if (label == '설정') {
+      _showSnack('나중에 이메일 연동 메뉴가 여기에 들어올 예정입니다.');
+    } else {
+      _showSnack('나중에 구현 예정: $label');
+    }
   }
 
   Widget _buildMealButton({
@@ -644,124 +1378,11 @@ if (selectedSpeciesId == null) {
     );
   }
 
-  Widget _buildYardCard() {
-    final theme = Theme.of(context);
-    final pet = _activePet!;
-    final species = pet['pet_species'] is Map
-        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
-        : <String, dynamic>{};
-
-    final family = species['family']?.toString() ?? '';
-    final familyKo = _familyToKorean(family);
-    final speciesName = species['name_ko']?.toString() ?? '펫';
-    final nickname = pet['nickname']?.toString();
-    final displayName =
-        (nickname == null || nickname.isEmpty) ? speciesName : nickname;
-    final stage = pet['stage']?.toString() ?? 'baby';
-    final stageKo = _stageToKorean(stage);
-    final affection = pet['affection']?.toString() ?? '0';
-
-    return Card(
-      elevation: 0,
-      color: theme.colorScheme.primaryContainer,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-        child: Column(
-          children: [
-            Icon(
-              family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
-              size: 64,
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '마당에 입장했어요',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    displayName,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$familyKo · $speciesName',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _statItem(Icons.child_care_outlined, '성장', stageKo),
-                      _statItem(
-                          Icons.favorite_outline, '애정도', affection.toString()),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '이제 식단 인증과 상호작용으로\n베지펫을 키워보세요.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _statItem(IconData icon, String label, String value) {
-    return Column(
-      children: [
-        Icon(icon, size: 20),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        const SizedBox(height: 2),
-        Text(value,
-            style:
-                const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
-
   Widget _buildYardActions() {
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _refreshAll,
-            icon: const Icon(Icons.refresh),
-            label: const Text('체험 새로고침'),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _refreshSpecies,
-            icon: const Icon(Icons.pets_outlined),
-            label: const Text('분양 데이터 다시 조회'),
-          ),
-        ),
-      ],
+    return OutlinedButton.icon(
+      onPressed: _refreshAll,
+      icon: const Icon(Icons.refresh),
+      label: const Text('마당 새로고침'),
     );
   }
 
@@ -1156,6 +1777,8 @@ if (selectedSpeciesId == null) {
       _kv('affection', pet['affection']?.toString() ?? '-'),
       _kv('is_active', pet['is_active']?.toString() ?? '-'),
       _kv('is_resident', pet['is_resident']?.toString() ?? '-'),
+      _kv('last_played_on', pet['last_played_on']?.toString() ?? '(null)'),
+      _kv('last_petted_on', pet['last_petted_on']?.toString() ?? '(null)'),
       _kv('graduated_at', pet['graduated_at']?.toString() ?? '(null)'),
       _kv('created_at', pet['created_at']?.toString() ?? '-'),
     ];
