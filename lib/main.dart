@@ -1,8 +1,136 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
 const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
+
+// ============================================================================
+// 식단 사진 업로드 + AI 판정 구조 (Edge Function 연동 준비)
+// ----------------------------------------------------------------------------
+// 최종 아키텍처 (아직 구현 전, 이번 단계에서는 뼈대/주석만 잡는다):
+//   1) Flutter: 실시간 카메라로 식단 사진 촬영 (사진첩 업로드 금지)
+//   2) Flutter: Supabase Storage bucket `_kMealPhotoBucket`에 업로드
+//      경로 규약 예) `{user_id}/{meal_date}/{slot}-{timestamp}.jpg`
+//   3) Flutter: `supabase.functions.invoke(_kMealEvaluateFunction, ...)` 호출
+//   4) Edge Function(서버 측):
+//      - profiles.gender, profiles.diet_goal, meal_slot, 업로드된 이미지 URL을
+//        기반으로 OpenAI(vision)에 판정 요청
+//      - 응답에서 result_type/affection_gain을 계산
+//      - meal_logs insert + user_pets.affection update까지 서버에서 수행
+//        (서비스 롤 키 사용, RLS bypass)
+//   5) Flutter: 결과를 받아 meal_logs / active pet을 재조회하고 UI에 반영
+//
+// 보안 원칙:
+//   - OpenAI API 키는 앱 코드에 절대 포함하지 않는다.
+//   - 키는 Edge Function 환경 변수(예: `OPENAI_API_KEY`)로만 보관한다.
+//   - 따라서 Flutter(main.dart)에서는 OpenAI를 직접 호출하지 않는다.
+//
+// Edge Function 요청 바디(JSON) 예시:
+//   {
+//     "user_pet_id": "<uuid>",
+//     "meal_slot": "brunch" | "dinner",
+//     "meal_date": "yyyy-MM-dd",
+//     "storage_path": "<step 2에서 얻은 storage 경로>"
+//   }
+//
+// Edge Function 응답(JSON) 예시:
+//   {
+//     "result_type": "good" | "supplement_needed" | "bad" | "uncertain",
+//     "affection_gain": 5 | 3 | 0
+//   }
+// ============================================================================
+
+// Supabase Storage 버킷명: 촬영한 식단 사진이 올라가는 곳.
+const String _kMealPhotoBucket = 'meal-photos';
+
+// Supabase Edge Function 이름: OpenAI를 호출해서 식단을 판정해준다.
+const String _kMealEvaluateFunction = 'meal-evaluate';
+
+// ignore: unused_element
+const List<String> _kMealResultTypes = <String>[
+  'good',
+  'supplement_needed',
+  'bad',
+  'uncertain',
+];
+
+const Map<String, int> _kMealAffectionGainByResult = <String, int>{
+  'good': 5,
+  'supplement_needed': 3,
+  'bad': 0,
+  'uncertain': 0,
+};
+
+// ----------------------------------------------------------------------------
+// AI 판정 결과별 감성 메시지 세트.
+//
+// OpenAI(Edge Function)는 result_type 과 feedback_text 만 반환하고,
+// 최종 유저용 메시지는 Flutter가 이 상수들로 조합한다.
+// ----------------------------------------------------------------------------
+
+const List<String> _kGoodMessages = <String>[
+  '건강한 음식을 먹은 탓일까? 기분이 좋아 보인다!',
+  '만족스럽게 한 끼를 먹었다! 지금처럼 균형을 유지하면 좋을 것 같다!',
+];
+
+// feedback_text가 있을 때 사용. `{feedback}` 부분에 Edge Function이 돌려준 문장이 들어간다.
+const List<String> _kSupplementMessagesWithFeedback = <String>[
+  '맛있게 음식을 먹은 것 같다! 다음에는 {feedback} 보완해보는 것이 좋을 것 같다!',
+  '만족스러운 한 끼를 먹은 것 같다! 다음 식사에서는 {feedback} 방향으로 맞춰보자!',
+];
+
+// feedback_text가 비어 있을 때 쓰는 기본 메시지.
+const List<String> _kSupplementMessagesFallback = <String>[
+  '베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보는 것이 좋을 것 같다!',
+];
+
+const List<String> _kBadMessagesWithFeedback = <String>[
+  '음식을 먹긴 했지만, 다음에는 {feedback} 조절이 필요해 보인다..!',
+  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback} 방향으로 바꿔보자..!',
+];
+
+const List<String> _kBadMessagesFallback = <String>[
+  '베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보는 것이 좋을 것 같다!',
+];
+
+// uncertain은 고정 문구 1개만 사용한다.
+const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요. 다시 촬영해보세요!';
+
+final Random _mealMessageRandom = Random();
+
+/// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
+///
+/// feedback_text가 비어 있거나 null 이면 fallback 메시지 세트에서 선택한다.
+String _buildAiStatusMessage(String? resultType, String? feedbackText) {
+  final feedback = feedbackText?.trim() ?? '';
+  final hasFeedback = feedback.isNotEmpty;
+
+  List<String> pickList;
+  switch (resultType) {
+    case 'good':
+      pickList = _kGoodMessages;
+      break;
+    case 'supplement_needed':
+      pickList = hasFeedback
+          ? _kSupplementMessagesWithFeedback
+          : _kSupplementMessagesFallback;
+      break;
+    case 'bad':
+      pickList = hasFeedback ? _kBadMessagesWithFeedback : _kBadMessagesFallback;
+      break;
+    case 'uncertain':
+    default:
+      return _kUncertainMessage;
+  }
+
+  final template = pickList[_mealMessageRandom.nextInt(pickList.length)];
+  if (!hasFeedback) return template;
+  return template.replaceAll('{feedback}', feedback);
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,8 +183,18 @@ class _HomePageState extends State<HomePage> {
   bool _isAdopting = false;
 
   List<Map<String, dynamic>> _todayMealLogs = [];
-  bool _isLoggingMeal = false;
+  // ignore: unused_field
+  bool _isLoggingMeal = false; // 기존 _logMeal 경로 호환용 (현재 UI에서는 사용하지 않음)
   bool _firstMealPopupShownThisSession = false;
+
+  // 사진 업로드 + AI 판정 관련 상태.
+  bool _isUploadingMeal = false;
+  String? _uploadingSlot; // 'brunch' | 'dinner' | null
+  String? _lastResultType;
+  String? _lastFeedbackText;
+  String? _lastStatusMessage;
+  int? _lastAffectionGain;
+  String? _lastImagePath;
 
   final TextEditingController _nicknameController = TextEditingController();
   final TextEditingController _resolutionController = TextEditingController();
@@ -248,6 +386,10 @@ class _HomePageState extends State<HomePage> {
     _todayMealLogs = List<Map<String, dynamic>>.from(data);
   }
 
+  // 기존: Flutter에서 직접 meal_logs insert + user_pets.affection update를 수행하던 경로.
+  // 이제는 meal-evaluate Edge Function이 이 역할을 대신하므로 UI에서는 호출하지 않는다.
+  // 향후 디버그/백업 용도로 남겨둔다.
+  // ignore: unused_element
   Future<void> _logMeal(String slot) async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -1131,26 +1273,289 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 식단 사진 업로드 + AI 판정 실제 연결
+  //
+  // 전체 흐름:
+  //   1) _pickMealPhoto               : image_picker로 실시간 카메라 촬영
+  //   2) _uploadPhotoToStorage        : Supabase Storage `meal-photos` 업로드
+  //   3) _invokeMealEvaluateFunction  : Supabase Edge Function `meal-evaluate` 호출
+  //   4) 응답에서 result_type/feedback_text/affection_gain/next_affection 파싱
+  //   5) _applyMealEvaluationResult   : meal_logs/active pet 재조회 + 감성 메시지 생성
+  //
+  // Flutter는 OpenAI를 직접 호출하지 않는다. 키는 Edge Function 환경변수에만 존재.
+  // --------------------------------------------------------------------------
+
+  /// 먹이주기 시트에서 "아점/저녁 식단 사진 올리기" 버튼을 눌렀을 때의 메인 엔트리.
+  Future<void> _uploadMealPhotoAndEvaluate(String slot) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+    if (_activePet == null) {
+      _showSnack('먼저 펫을 분양받아주세요.');
+      return;
+    }
+    if (_isUploadingMeal) return;
+
+    if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
+      _showSnack('이미 해당 식단 인증을 완료했어요.');
+      return;
+    }
+
+    // 첫 식단 성공 후 이메일 연동 팝업을 띄우기 위해 업로드 전에 상태를 미리 본다.
+    bool wasFirstEver = false;
+    try {
+      final existing = await supabase
+          .from('meal_logs')
+          .select('id')
+          .eq('user_id', user.id)
+          .limit(1);
+      wasFirstEver = (existing as List).isEmpty;
+    } catch (_) {
+      // 선제 조회가 실패해도 업로드 흐름 자체는 계속 진행한다.
+      wasFirstEver = false;
+    }
+
+    setState(() {
+      _isUploadingMeal = true;
+      _uploadingSlot = slot;
+    });
+
+    try {
+      // 1) 실시간 카메라 촬영 (사진첩 업로드는 허용하지 않는다)
+      final photo = await _pickMealPhoto();
+      if (photo == null) {
+        if (!mounted) return;
+        setState(() {
+          _isUploadingMeal = false;
+          _uploadingSlot = null;
+        });
+        return;
+      }
+
+      // 2) Supabase Storage 업로드
+      final imagePath =
+          await _uploadPhotoToStorage(slot: slot, file: photo);
+      if (imagePath == null) {
+        if (!mounted) return;
+        setState(() {
+          _isUploadingMeal = false;
+          _uploadingSlot = null;
+        });
+        _showSnack('사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _lastImagePath = imagePath;
+        });
+      }
+
+      // 3) Edge Function 호출
+      final result = await _invokeMealEvaluateFunction(
+        slot: slot,
+        imagePath: imagePath,
+      );
+      if (result == null) {
+        if (!mounted) return;
+        setState(() {
+          _isUploadingMeal = false;
+          _uploadingSlot = null;
+        });
+        _showSnack('AI 판정에 실패했어요. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      // 4~5) 응답 반영 + meal_logs / active pet 재조회 + 상태메세지 생성
+      await _applyMealEvaluationResult(result);
+
+      if (!mounted) return;
+      setState(() {
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+      });
+
+      // 첫 식단 성공 시(단, uncertain은 보통 meal_logs에 기록되지 않으므로 제외) 이메일 유도 팝업.
+      final resultType = result['ok'] == true
+          ? result['result_type']?.toString()
+          : null;
+      final wasLogged = resultType != null && resultType != 'uncertain';
+      if (wasFirstEver && wasLogged && !_firstMealPopupShownThisSession) {
+        _firstMealPopupShownThisSession = true;
+        await _showEmailLinkDialog();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+      });
+      _showSnack('식단 인증 중 오류가 발생했어요: $e');
+    }
+  }
+
+  /// 실시간 카메라로 식단 사진 1장을 촬영한다.
+  /// 사진첩(갤러리) 선택은 허용하지 않는다.
+  Future<XFile?> _pickMealPhoto() async {
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1600,
+      );
+      return xfile;
+    } catch (e) {
+      _showSnack('카메라를 사용할 수 없어요: $e');
+      return null;
+    }
+  }
+
+  /// 촬영한 사진을 Supabase Storage(`meal-photos`) 버킷에 업로드한다.
+  ///
+  /// 경로 규약: `{user.id}/{timestamp}_{slot}.jpg`
+  /// 성공 시 업로드된 storage path 를 반환한다. 실패 시 null.
+  Future<String?> _uploadPhotoToStorage({
+    required String slot,
+    required XFile file,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return null;
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final imagePath = '${user.id}/${ts}_$slot.jpg';
+
+    try {
+      final bytes = await File(file.path).readAsBytes();
+      await supabase.storage.from(_kMealPhotoBucket).uploadBinary(
+            imagePath,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: false,
+            ),
+          );
+      return imagePath;
+    } catch (e) {
+      debugPrint('meal-photos upload failed: $e');
+      return null;
+    }
+  }
+
+  /// Supabase Edge Function `meal-evaluate` 를 호출한다.
+  ///
+  /// 요청 바디:
+  /// ```json
+  /// { "slot": "brunch|dinner", "imagePath": "<storage path>" }
+  /// ```
+  ///
+  /// 응답(성공 시) 예시:
+  /// ```json
+  /// {
+  ///   "ok": true,
+  ///   "meal_date": "2026-04-19",
+  ///   "meal_slot": "brunch",
+  ///   "result_type": "good|supplement_needed|bad|uncertain",
+  ///   "feedback_text": "문자열 또는 null",
+  ///   "affection_gain": 5,
+  ///   "next_affection": 23
+  /// }
+  /// ```
+  Future<Map<String, dynamic>?> _invokeMealEvaluateFunction({
+    required String slot,
+    required String imagePath,
+  }) async {
+    try {
+      final res = await supabase.functions.invoke(
+        _kMealEvaluateFunction,
+        body: {
+          'slot': slot,
+          'imagePath': imagePath,
+        },
+      );
+      final data = res.data;
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      debugPrint('meal-evaluate unexpected response: $data');
+      return null;
+    } catch (e) {
+      debugPrint('meal-evaluate invoke failed: $e');
+      return null;
+    }
+  }
+
+  /// Edge Function 응답을 UI에 반영한다.
+  /// - meal_logs insert / user_pets.affection update 는 서버에서 처리됐다고 가정한다.
+  /// - 여기서는 로컬 데이터를 재조회하고 감성 메시지만 만들어 보여준다.
+  Future<void> _applyMealEvaluationResult(Map<String, dynamic> result) async {
+    final ok = result['ok'] == true;
+    final resultType = result['result_type']?.toString();
+    final feedbackText = result['feedback_text']?.toString();
+    final gain = (result['affection_gain'] as num?)?.toInt() ??
+        _kMealAffectionGainByResult[resultType] ??
+        0;
+
+    final statusMessage = ok
+        ? _buildAiStatusMessage(resultType, feedbackText)
+        : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.';
+
+    await Future.wait([
+      _fetchTodayMealLogs(),
+      _fetchActivePet(),
+    ]);
+
+    if (!mounted) return;
+    setState(() {
+      _lastResultType = resultType;
+      _lastFeedbackText = feedbackText;
+      _lastAffectionGain = gain;
+      _lastStatusMessage = statusMessage;
+    });
+
+    _showSnack(statusMessage);
+  }
+
+  String _resultTypeToKorean(String? type) {
+    switch (type) {
+      case 'good':
+        return '좋아요';
+      case 'supplement_needed':
+        return '보충 필요';
+      case 'bad':
+        return '아쉬워요';
+      case 'uncertain':
+        return '판단 어려움';
+      default:
+        return '-';
+    }
+  }
+
   // 펫 상태창 > 먹이주기에서 호출되는 식단 인증 전용 BottomSheet.
-  // 아점/저녁 선택 UI와 오늘 완료 여부를 이 시트 안에서 한 번에 처리한다.
+  // 아점/저녁 사진 업로드 버튼, 오늘 완료 여부, 최근 AI 판정 결과까지 보여준다.
   void _openMealSheet() {
     if (_activePet == null) return;
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isDismissible: !_isUploadingMeal,
+      enableDrag: !_isUploadingMeal,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            Future<void> runLog(String slot) async {
-              await _logMeal(slot);
+            Future<void> runUpload(String slot) async {
+              await _uploadMealPhotoAndEvaluate(slot);
               if (sheetCtx.mounted) setSheetState(() {});
             }
 
-            return _buildMealSheetContent(onLog: runLog);
+            return _buildMealSheetContent(onUpload: runUpload);
           },
         );
       },
@@ -1158,11 +1563,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildMealSheetContent({
-    required Future<void> Function(String slot) onLog,
+    required Future<void> Function(String slot) onUpload,
   }) {
     final theme = Theme.of(context);
     final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
     final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
+
+    final uploading = _isUploadingMeal;
+    final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
+    final uploadingDinner = uploading && _uploadingSlot == 'dinner';
 
     return SafeArea(
       top: false,
@@ -1177,38 +1586,40 @@ class _HomePageState extends State<HomePage> {
                 const Icon(Icons.restaurant_outlined, size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  '오늘의 식단 인증 (테스트)',
+                  '오늘의 식단 인증',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
-                  child: _buildMealButton(
-                    label: '아점 먹이주기 테스트',
+                  child: _buildPhotoMealButton(
+                    slot: 'brunch',
+                    label: '아점 식단 사진 올리기',
                     done: brunchDone,
-                    onPressed: (brunchDone || _isLoggingMeal)
-                        ? null
-                        : () => onLog('brunch'),
+                    uploading: uploadingBrunch,
+                    disabled: uploading,
+                    onTap: () => onUpload('brunch'),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildMealButton(
-                    label: '저녁 먹이주기 테스트',
+                  child: _buildPhotoMealButton(
+                    slot: 'dinner',
+                    label: '저녁 식단 사진 올리기',
                     done: dinnerDone,
-                    onPressed: (dinnerDone || _isLoggingMeal)
-                        ? null
-                        : () => onLog('dinner'),
+                    uploading: uploadingDinner,
+                    disabled: uploading,
+                    onTap: () => onUpload('dinner'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Row(
               children: [
                 _mealStatusChip('아점', brunchDone),
@@ -1216,8 +1627,142 @@ class _HomePageState extends State<HomePage> {
                 _mealStatusChip('저녁', dinnerDone),
               ],
             ),
+            const SizedBox(height: 12),
+            Text(
+              '실시간 카메라로 촬영한 사진만 AI 판정에 사용돼요.\n아점 06~14시 / 저녁 17~22시 사이에 올려주세요.',
+              style: TextStyle(
+                fontSize: 10,
+                height: 1.4,
+                color: Colors.grey[600],
+              ),
+            ),
+            if (_lastStatusMessage != null) ...[
+              const SizedBox(height: 14),
+              _buildAiResultCard(),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  // ignore: unused_element
+  Widget _mealSheetSectionLabel(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: Colors.grey[700],
+        letterSpacing: 0.2,
+      ),
+    );
+  }
+
+  Widget _buildPhotoMealButton({
+    required String slot,
+    required String label,
+    required bool done,
+    required bool uploading,
+    required bool disabled,
+    required VoidCallback onTap,
+  }) {
+    if (done) {
+      return OutlinedButton.icon(
+        onPressed: null,
+        icon: const Icon(Icons.check_circle_outline, size: 18),
+        label: Text('$label · 완료'),
+      );
+    }
+    if (uploading) {
+      return FilledButton.tonalIcon(
+        onPressed: null,
+        icon: const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        label: const Text('판정 중...'),
+      );
+    }
+    return FilledButton.tonalIcon(
+      onPressed: disabled ? null : onTap,
+      icon: const Icon(Icons.camera_alt_outlined, size: 18),
+      label: Text(label),
+    );
+  }
+
+  // 최근 AI 판정 결과를 보여주는 결과 카드 (먹이주기 시트 하단).
+  Widget _buildAiResultCard() {
+    final theme = Theme.of(context);
+    final resultType = _lastResultType;
+    final message = _lastStatusMessage ?? '';
+    final gain = _lastAffectionGain ?? 0;
+
+    Color chipColor;
+    switch (resultType) {
+      case 'good':
+        chipColor = Colors.green;
+        break;
+      case 'supplement_needed':
+        chipColor = Colors.orange;
+        break;
+      case 'bad':
+        chipColor = Colors.redAccent;
+        break;
+      case 'uncertain':
+      default:
+        chipColor = Colors.grey;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: chipColor.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: chipColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _resultTypeToKorean(resultType),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: chipColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '애정도 +$gain',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: const TextStyle(fontSize: 13, height: 1.4),
+          ),
+        ],
       ),
     );
   }
@@ -1334,6 +1879,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ignore: unused_element
   Widget _buildMealButton({
     required String label,
     required bool done,
@@ -1654,6 +2200,11 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 12),
             _debugBlock(
+              title: 'last AI meal evaluation',
+              children: _buildLastAiResultRows(),
+            ),
+            const SizedBox(height: 12),
+            _debugBlock(
               title: 'pet_species',
               children: [
                 _kv('count', '${_petSpecies.length}종'),
@@ -1797,6 +2348,30 @@ class _HomePageState extends State<HomePage> {
         'first_popup_shown',
         _firstMealPopupShownThisSession ? 'true (이번 세션)' : 'false',
       ),
+    ];
+  }
+
+  List<Widget> _buildLastAiResultRows() {
+    if (_lastResultType == null && _lastStatusMessage == null) {
+      return const [
+        Text(
+          '아직 AI 판정 기록이 없어요.',
+          style: TextStyle(color: Colors.grey),
+        ),
+      ];
+    }
+
+    return [
+      _kv('result_type', _lastResultType ?? '(null)'),
+      _kv(
+        'feedback_text',
+        (_lastFeedbackText == null || _lastFeedbackText!.isEmpty)
+            ? '(null)'
+            : _lastFeedbackText!,
+      ),
+      _kv('affection_gain', _lastAffectionGain?.toString() ?? '-'),
+      _kv('status_message', _lastStatusMessage ?? '-'),
+      _kv('image_path', _lastImagePath ?? '-'),
     ];
   }
 
