@@ -790,6 +790,108 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // 개발용 전체 초기화
+  //
+  // 현재 로그인된 익명 유저 기준으로 테스트 데이터를 싹 비우고,
+  // 앱이 처음 시작된 것처럼 "프로필 입력 화면"부터 다시 흐름이 시작되게 만든다.
+  //
+  // 동작 순서:
+  //   1) meal_logs / user_pets 삭제 (user_id 기준)
+  //   2) profiles 초기화 (nickname/gender/diet_goal/resolution_text = null)
+  //   3) 로컬 상태/폼/진행중 플래그 싹 정리
+  //   4) _bootstrap() 재호출
+  //
+  // 오직 디버그 섹션에서만 노출하며, 실제 서비스 기능이 아님에 주의.
+  // --------------------------------------------------------------------------
+
+  Future<bool> _confirmResetForTesting() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('개발용 전체 초기화'),
+          content: const Text(
+            '개발용 전체 초기화를 진행할까요?\n'
+            '현재 계정의 펫, 식단 기록, 프로필 입력값이 모두 초기화됩니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('초기화 실행'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _resetForTesting() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인 상태가 아니어서 초기화할 수 없어요.');
+      return;
+    }
+
+    final ok = await _confirmResetForTesting();
+    if (!ok) return;
+    if (!mounted) return;
+
+    try {
+      await supabase.from('meal_logs').delete().eq('user_id', user.id);
+      await supabase.from('user_pets').delete().eq('user_id', user.id);
+      await supabase.from('profiles').update({
+        'nickname': null,
+        'gender': null,
+        'diet_goal': null,
+        'resolution_text': null,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user.id);
+
+      if (!mounted) return;
+      setState(() {
+        _lastResultType = null;
+        _lastFeedbackText = null;
+        _lastStatusMessage = null;
+        _lastAffectionGain = null;
+        _lastImagePath = null;
+
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+        _isInteracting = false;
+        _isAdopting = false;
+        _isSavingProfile = false;
+        _isLoggingMeal = false;
+        _firstMealPopupShownThisSession = false;
+
+        _selectedSpeciesId = null;
+        _nicknameController.clear();
+        _resolutionController.clear();
+        _selectedGender = null;
+        _selectedDietGoal = null;
+      });
+
+      await _bootstrap();
+
+      if (!mounted) return;
+      _showSnack('개발용 초기화가 완료되었어요.');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('개발용 초기화에 실패했어요: $e');
+    }
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2252,6 +2354,11 @@ class _HomePageState extends State<HomePage> {
                   onPressed: _signOut,
                   icon: const Icon(Icons.logout, size: 18),
                   label: const Text('로그아웃'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _resetForTesting,
+                  icon: const Icon(Icons.delete_forever, size: 18),
+                  label: const Text('개발용 전체 초기화'),
                 ),
               ],
             ),
