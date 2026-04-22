@@ -774,6 +774,11 @@ class _HomePageState extends State<HomePage> {
         _selectedSpeciesId = null;
         _todayMealLogs = [];
         _firstMealPopupShownThisSession = false;
+
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+        _isInteracting = false;
+
         _nicknameController.clear();
         _resolutionController.clear();
         _selectedGender = null;
