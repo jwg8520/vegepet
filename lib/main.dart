@@ -17,8 +17,9 @@ const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
 //      경로 규약 예) `{user_id}/{meal_date}/{slot}-{timestamp}.jpg`
 //   3) Flutter: `supabase.functions.invoke(_kMealEvaluateFunction, ...)` 호출
 //   4) Edge Function(서버 측):
-//      - profiles.gender, profiles.diet_goal, meal_slot, 업로드된 이미지 URL을
-//        기반으로 OpenAI(vision)에 판정 요청
+//      - profiles.gender, profiles.age_range, profiles.diet_goal, meal_slot,
+//        업로드된 이미지 URL을 기반으로 OpenAI(vision)에 판정 요청
+//        (age_range까지 포함해 연령대별 영양 기준을 반영할 수 있도록 확장 가능)
 //      - 응답에서 result_type/affection_gain을 계산
 //      - meal_logs insert + user_pets.affection update까지 서버에서 수행
 //        (서비스 롤 키 사용, RLS bypass)
@@ -73,14 +74,14 @@ const Map<String, int> _kMealAffectionGainByResult = <String, int>{
 // ----------------------------------------------------------------------------
 
 const List<String> _kGoodMessages = <String>[
-  '건강한 음식을 먹은 탓일까? 기분이 좋아 보인다!',
+  '건강한 음식을 먹어서 그런가? 기분이 좋아 보인다!',
   '만족스럽게 한 끼를 먹었다! 지금처럼 균형을 유지하면 좋을 것 같다!',
 ];
 
 // feedback_text가 있을 때 사용. `{feedback}` 부분에 Edge Function이 돌려준 문장이 들어간다.
 const List<String> _kSupplementMessagesWithFeedback = <String>[
-  '맛있게 음식을 먹은 것 같다! 다음에는 {feedback} 보완해보는 것이 좋을 것 같다!',
-  '만족스러운 한 끼를 먹은 것 같다! 다음 식사에서는 {feedback} 방향으로 맞춰보자!',
+  '맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 실천해보면 어떨까?!',
+  '만족스러운 한 끼를 먹은 것 같다! 다음 식사에서는 {feedback}를 반영한 식사를 해보자!',
 ];
 
 // feedback_text가 비어 있을 때 쓰는 기본 메시지.
@@ -89,8 +90,8 @@ const List<String> _kSupplementMessagesFallback = <String>[
 ];
 
 const List<String> _kBadMessagesWithFeedback = <String>[
-  '음식을 먹긴 했지만, 다음에는 {feedback} 조절이 필요해 보인다..!',
-  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback} 방향으로 바꿔보자..!',
+  '음식을 먹긴 했지만, 다음에는 {feedback}를 실천해 볼 필요가 있을 것 같다..!',
+  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback}를 해보자..!',
 ];
 
 const List<String> _kBadMessagesFallback = <String>[
@@ -199,10 +200,18 @@ class _HomePageState extends State<HomePage> {
   final TextEditingController _nicknameController = TextEditingController();
   final TextEditingController _resolutionController = TextEditingController();
   String? _selectedGender;
+  String? _selectedAgeRange;
   String? _selectedDietGoal;
   bool _isSavingProfile = false;
 
   static const List<String> _genderOptions = ['여자', '남자'];
+  static const List<String> _ageRangeOptions = [
+    '10대',
+    '20대',
+    '30대',
+    '40대',
+    '50대',
+  ];
   static const List<String> _dietGoalOptions = ['다이어트', '근력향상', '혈당조정'];
 
   bool _debugExpanded = false;
@@ -228,6 +237,7 @@ class _HomePageState extends State<HomePage> {
         v != null && v.toString().trim().isNotEmpty;
     return nonEmpty(p['nickname']) &&
         nonEmpty(p['gender']) &&
+        nonEmpty(p['age_range']) &&
         nonEmpty(p['diet_goal']) &&
         nonEmpty(p['resolution_text']);
   }
@@ -242,6 +252,7 @@ class _HomePageState extends State<HomePage> {
       _resolutionController.text = p['resolution_text'].toString();
     }
     _selectedGender ??= p['gender']?.toString();
+    _selectedAgeRange ??= p['age_range']?.toString();
     _selectedDietGoal ??= p['diet_goal']?.toString();
   }
 
@@ -263,6 +274,10 @@ class _HomePageState extends State<HomePage> {
       _showSnack('성별을 선택해주세요.');
       return;
     }
+    if (_selectedAgeRange == null) {
+      _showSnack('나이대를 선택해주세요.');
+      return;
+    }
     if (_selectedDietGoal == null) {
       _showSnack('식단 목적을 선택해주세요.');
       return;
@@ -277,6 +292,7 @@ class _HomePageState extends State<HomePage> {
       await supabase.from('profiles').update({
         'nickname': nickname,
         'gender': _selectedGender,
+        'age_range': _selectedAgeRange,
         'diet_goal': _selectedDietGoal,
         'resolution_text': resolution,
         'updated_at': DateTime.now().toIso8601String(),
@@ -782,6 +798,7 @@ class _HomePageState extends State<HomePage> {
         _nicknameController.clear();
         _resolutionController.clear();
         _selectedGender = null;
+        _selectedAgeRange = null;
         _selectedDietGoal = null;
       });
       await _bootstrap();
@@ -798,7 +815,7 @@ class _HomePageState extends State<HomePage> {
   //
   // 동작 순서:
   //   1) meal_logs / user_pets 삭제 (user_id 기준)
-  //   2) profiles 초기화 (nickname/gender/diet_goal/resolution_text = null)
+  //   2) profiles 초기화 (nickname/gender/age_range/diet_goal/resolution_text = null)
   //   3) 로컬 상태/폼/진행중 플래그 싹 정리
   //   4) _bootstrap() 재호출
   //
@@ -854,6 +871,7 @@ class _HomePageState extends State<HomePage> {
       await supabase.from('profiles').update({
         'nickname': null,
         'gender': null,
+        'age_range': null,
         'diet_goal': null,
         'resolution_text': null,
         'updated_at': DateTime.now().toIso8601String(),
@@ -879,6 +897,7 @@ class _HomePageState extends State<HomePage> {
         _nicknameController.clear();
         _resolutionController.clear();
         _selectedGender = null;
+        _selectedAgeRange = null;
         _selectedDietGoal = null;
       });
 
@@ -2097,6 +2116,23 @@ class _HomePageState extends State<HomePage> {
       ),
       const SizedBox(height: 12),
       _profileFormCard(
+        label: '나이대',
+        child: Wrap(
+          spacing: 8,
+          children: _ageRangeOptions.map((a) {
+            final selected = _selectedAgeRange == a;
+            return ChoiceChip(
+              label: Text(a),
+              selected: selected,
+              onSelected: (v) {
+                setState(() => _selectedAgeRange = v ? a : null);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileFormCard(
         label: '식단 목적',
         child: Wrap(
           spacing: 8,
@@ -2383,6 +2419,7 @@ class _HomePageState extends State<HomePage> {
       _kv('email', p['email']?.toString() ?? '(없음)'),
       _kv('nickname', p['nickname']?.toString() ?? '(없음)'),
       _kv('gender', p['gender']?.toString() ?? '(없음)'),
+      _kv('age_range', p['age_range']?.toString() ?? '(없음)'),
       _kv('diet_goal', p['diet_goal']?.toString() ?? '(없음)'),
       _kv('resolution_text', p['resolution_text']?.toString() ?? '(없음)'),
       _kv('account_type', accountType),
