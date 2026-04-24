@@ -198,7 +198,6 @@ class _HomePageState extends State<HomePage> {
   String? _lastImagePath;
 
   final TextEditingController _nicknameController = TextEditingController();
-  final TextEditingController _resolutionController = TextEditingController();
   String? _selectedGender;
   String? _selectedAgeRange;
   String? _selectedDietGoal;
@@ -226,7 +225,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _nicknameController.dispose();
-    _resolutionController.dispose();
     super.dispose();
   }
 
@@ -238,8 +236,7 @@ class _HomePageState extends State<HomePage> {
     return nonEmpty(p['nickname']) &&
         nonEmpty(p['gender']) &&
         nonEmpty(p['age_range']) &&
-        nonEmpty(p['diet_goal']) &&
-        nonEmpty(p['resolution_text']);
+        nonEmpty(p['diet_goal']);
   }
 
   void _syncProfileFormFromFetched() {
@@ -247,9 +244,6 @@ class _HomePageState extends State<HomePage> {
     if (p == null) return;
     if (_nicknameController.text.isEmpty && p['nickname'] != null) {
       _nicknameController.text = p['nickname'].toString();
-    }
-    if (_resolutionController.text.isEmpty && p['resolution_text'] != null) {
-      _resolutionController.text = p['resolution_text'].toString();
     }
     _selectedGender ??= p['gender']?.toString();
     _selectedAgeRange ??= p['age_range']?.toString();
@@ -264,7 +258,6 @@ class _HomePageState extends State<HomePage> {
     }
 
     final nickname = _nicknameController.text.trim();
-    final resolution = _resolutionController.text.trim();
 
     if (nickname.isEmpty) {
       _showSnack('닉네임을 입력해주세요.');
@@ -282,10 +275,6 @@ class _HomePageState extends State<HomePage> {
       _showSnack('식단 목적을 선택해주세요.');
       return;
     }
-    if (resolution.isEmpty) {
-      _showSnack('다짐 한마디를 입력해주세요.');
-      return;
-    }
 
     setState(() => _isSavingProfile = true);
     try {
@@ -294,7 +283,6 @@ class _HomePageState extends State<HomePage> {
         'gender': _selectedGender,
         'age_range': _selectedAgeRange,
         'diet_goal': _selectedDietGoal,
-        'resolution_text': resolution,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
 
@@ -796,7 +784,6 @@ class _HomePageState extends State<HomePage> {
         _isInteracting = false;
 
         _nicknameController.clear();
-        _resolutionController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
         _selectedDietGoal = null;
@@ -815,7 +802,7 @@ class _HomePageState extends State<HomePage> {
   //
   // 동작 순서:
   //   1) meal_logs / user_pets 삭제 (user_id 기준)
-  //   2) profiles 초기화 (nickname/gender/age_range/diet_goal/resolution_text = null)
+  //   2) profiles 초기화 (nickname/gender/age_range/diet_goal = null)
   //   3) 로컬 상태/폼/진행중 플래그 싹 정리
   //   4) _bootstrap() 재호출
   //
@@ -873,7 +860,6 @@ class _HomePageState extends State<HomePage> {
         'gender': null,
         'age_range': null,
         'diet_goal': null,
-        'resolution_text': null,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
 
@@ -895,7 +881,6 @@ class _HomePageState extends State<HomePage> {
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
-        _resolutionController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
         _selectedDietGoal = null;
@@ -2148,21 +2133,6 @@ class _HomePageState extends State<HomePage> {
           }).toList(),
         ),
       ),
-      const SizedBox(height: 12),
-      _profileFormCard(
-        label: '다짐 한마디',
-        child: TextField(
-          controller: _resolutionController,
-          maxLines: 3,
-          maxLength: 100,
-          decoration: const InputDecoration(
-            hintText: '예: 매일 채소 한 끼는 꼭 지킬게요!',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-      ),
       const SizedBox(height: 16),
       SizedBox(
         height: 52,
@@ -2421,7 +2391,6 @@ class _HomePageState extends State<HomePage> {
       _kv('gender', p['gender']?.toString() ?? '(없음)'),
       _kv('age_range', p['age_range']?.toString() ?? '(없음)'),
       _kv('diet_goal', p['diet_goal']?.toString() ?? '(없음)'),
-      _kv('resolution_text', p['resolution_text']?.toString() ?? '(없음)'),
       _kv('account_type', accountType),
       _kv('gold_balance', p['gold_balance']?.toString() ?? '-'),
       _kv('linked_at', p['linked_at']?.toString() ?? '(null)'),
