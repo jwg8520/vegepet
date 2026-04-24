@@ -216,6 +216,10 @@ class _HomePageState extends State<HomePage> {
   bool _debugExpanded = false;
   bool _isInteracting = false;
 
+  // 가방 안의 랜덤 분양권(user_items.quantity 합계) 상태.
+  // 졸업 처리 / 분양권 사용 테스트 후 디버그 섹션에 즉시 반영하기 위해 들고 다닌다.
+  int _randomTicketCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -313,6 +317,7 @@ class _HomePageState extends State<HomePage> {
         _fetchPetSpecies(),
         _fetchActivePet(),
         _fetchTodayMealLogs(),
+        _fetchRandomTicketCount(),
       ]);
 
       _syncProfileFormFromFetched();
@@ -388,6 +393,38 @@ class _HomePageState extends State<HomePage> {
         .eq('meal_date', today);
 
     _todayMealLogs = List<Map<String, dynamic>>.from(data);
+  }
+
+  /// 가방에 쌓여 있는 랜덤 분양권(`random_adoption_ticket`)의 총 수량을 조회한다.
+  ///
+  /// user_items 를 item_masters 와 join 해서 `code = 'random_adoption_ticket'`
+  /// 인 행들의 quantity 합계를 계산한다. 실패해도 앱은 계속 동작해야 하므로
+  /// 예외 발생 시 0 으로 떨어뜨린다.
+  Future<void> _fetchRandomTicketCount() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _randomTicketCount = 0;
+      return;
+    }
+    try {
+      final data = await supabase
+          .from('user_items')
+          .select('quantity, item_masters:item_master_id(code)')
+          .eq('user_id', user.id);
+
+      var total = 0;
+      for (final row in (data as List)) {
+        if (row is! Map) continue;
+        final master = row['item_masters'];
+        final code = master is Map ? master['code']?.toString() : null;
+        if (code != 'random_adoption_ticket') continue;
+        total += (row['quantity'] as num?)?.toInt() ?? 0;
+      }
+      _randomTicketCount = total;
+    } catch (e) {
+      debugPrint('fetch random ticket count failed: $e');
+      _randomTicketCount = 0;
+    }
   }
 
   // 기존: Flutter에서 직접 meal_logs insert + user_pets.affection update를 수행하던 경로.
@@ -480,6 +517,154 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // 성장 단계 (stage) 자동 갱신 로직
+  //
+  // affection 값만을 기준으로 stage 를 결정한다:
+  //   0 ~ 29    : baby    (유아기)
+  //   30 ~ 69   : child   (유년기)
+  //   70 ~ 109  : grown   (성장기)
+  //   110 이상  : adult   (성숙기)
+  //
+  // 사용 위치:
+  //   - 놀아주기 / 쓰다듬기 성공 시 (_interactPet)
+  //   - AI 식단 판정 후 affection 이 서버에서 올라갔을 때
+  //     (_applyMealEvaluationResult 에서 재조회 후 동기화)
+  //   - 디버그 섹션의 애정도 조작 버튼
+  //
+  // 최초 adult 도달 시:
+  //   user_pets.is_resident = true, graduated_at = now() 로 기록하고 "육성 완료" 처리.
+  //   이미 adult 였거나 is_resident / graduated_at 이 이미 채워져 있으면 중복 실행하지 않는다.
+  // --------------------------------------------------------------------------
+
+  String _stageFromAffection(int affection) {
+    if (affection >= 110) return 'adult';
+    if (affection >= 70) return 'grown';
+    if (affection >= 30) return 'child';
+    return 'baby';
+  }
+
+  String? _stageGrowthMessage(String? beforeStage, String afterStage) {
+    if (beforeStage == null || beforeStage == afterStage) return null;
+    switch (afterStage) {
+      case 'child':
+        return '베지펫이 유년기로 성장했어요!';
+      case 'grown':
+        return '베지펫이 성장기로 자랐어요!';
+      case 'adult':
+        return '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+      default:
+        return null;
+    }
+  }
+
+  /// affection 변경 후 _activePet 을 다시 조회한 상태에서 호출한다.
+  /// - DB 의 stage 가 affection 기준과 다르면 stage 컬럼을 맞춰준다.
+  /// - 단계 변화가 있으면 SnackBar 로 안내.
+  /// - 최초 adult 도달 시 [_handleAdultGraduationIfNeeded] 로 육성 완료 처리.
+  Future<void> _syncStageAfterAffectionChange({
+    required String? beforeStage,
+  }) async {
+    if (_activePet == null) return;
+    final affection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
+    final dbStage = _activePet!['stage']?.toString() ?? 'baby';
+    final targetStage = _stageFromAffection(affection);
+
+    if (dbStage != targetStage) {
+      try {
+        await supabase
+            .from('user_pets')
+            .update({'stage': targetStage}).eq('id', _activePet!['id']);
+        await _fetchActivePet();
+        if (mounted) setState(() {});
+      } catch (e) {
+        debugPrint('stage sync failed: $e');
+      }
+    }
+
+    // adult 도달은 _handleAdultGraduationIfNeeded 안에서 별도 스낵바를 띄우므로
+    // 여기서는 child/grown 전환만 안내한다.
+    if (targetStage != 'adult') {
+      final message = _stageGrowthMessage(beforeStage, targetStage);
+      if (message != null && mounted) _showSnack(message);
+    }
+
+    await _handleAdultGraduationIfNeeded(beforeStage: beforeStage);
+  }
+
+  /// 최초 성숙기(adult) 도달 처리.
+  ///
+  /// 실제 졸업(도감 등록 + 랜덤 분양권 지급 + user_pets 상태 갱신)은
+  /// SQL 함수 `public.finalize_pet_graduation(p_user_pet_id uuid)` 가 원자적으로 수행한다.
+  /// 여기서는 "언제 호출할지"만 책임진다.
+  ///
+  /// 호출 전 _activePet 이 최신 상태여야 한다.
+  /// - beforeStage 가 이미 'adult' 이거나,
+  ///   is_resident/graduated_at 이 이미 채워져 있으면 중복 실행하지 않는다.
+  Future<void> _handleAdultGraduationIfNeeded({
+    required String? beforeStage,
+  }) async {
+    if (_activePet == null) return;
+    final currentStage = _activePet!['stage']?.toString() ?? 'baby';
+    if (currentStage != 'adult') return;
+    if (beforeStage == 'adult') return;
+
+    final alreadyResident = _activePet!['is_resident'] == true;
+    final alreadyGraduated = _activePet!['graduated_at'] != null;
+    if (alreadyResident && alreadyGraduated) return;
+
+    final petId = _activePet!['id']?.toString();
+    if (petId == null) return;
+
+    dynamic rpcResult;
+    try {
+      rpcResult = await supabase.rpc(
+        'finalize_pet_graduation',
+        params: {'p_user_pet_id': petId},
+      );
+    } catch (e) {
+      if (mounted) _showSnack('성숙기 전환 처리 실패: $e');
+      return;
+    }
+
+    // finalize_pet_graduation 실행 후 user_pets 상태와 가방(user_items) 이 모두 바뀌었을 수 있다.
+    try {
+      await Future.wait([
+        _fetchActivePet(),
+        _fetchRandomTicketCount(),
+      ]);
+    } catch (e) {
+      debugPrint('post-graduation refetch failed: $e');
+    }
+    if (!mounted) return;
+    setState(() {});
+
+    // 반환값은 DB 구현에 따라 Map 이거나 Map 배열일 수 있다. 방어적으로 파싱.
+    Map<String, dynamic>? payload;
+    if (rpcResult is Map) {
+      payload = Map<String, dynamic>.from(rpcResult);
+    } else if (rpcResult is List && rpcResult.isNotEmpty) {
+      final first = rpcResult.first;
+      if (first is Map) payload = Map<String, dynamic>.from(first);
+    }
+
+    final alreadyGraduatedFlag = payload?['already_graduated'] == true;
+    // ticket_granted 키가 명시적으로 false 가 아닌 한 지급된 것으로 간주한다.
+    final ticketGranted = payload == null
+        ? true
+        : payload['ticket_granted'] != false;
+
+    if (alreadyGraduatedFlag) {
+      _showSnack('이미 졸업 처리된 베지펫이에요.');
+      return;
+    }
+
+    _showSnack('베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!');
+    if (ticketGranted) {
+      _showSnack('랜덤 분양권을 획득했어요!');
+    }
+  }
+
   // 간단 MVP 상호작용: user_pets.affection을 +1 올리고 마지막 사용 날짜를 저장한다.
   // 하루 1회 제한은 user_pets.last_played_on / last_petted_on 값을
   // 오늘 날짜(yyyy-mm-dd)와 비교해서 강제한다.
@@ -513,9 +698,14 @@ class _HomePageState extends State<HomePage> {
       final petId = _activePet!['id'];
       final currentAffection =
           (_activePet!['affection'] as num?)?.toInt() ?? 0;
+      final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
+
+      final nextAffection = currentAffection + 1;
+      final nextStage = _stageFromAffection(nextAffection);
 
       await supabase.from('user_pets').update({
-        'affection': currentAffection + 1,
+        'affection': nextAffection,
+        'stage': nextStage,
         dateColumn: today,
       }).eq('id', petId);
 
@@ -524,6 +714,8 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() => _isInteracting = false);
       _showSnack('$label 성공! 애정도 +1');
+
+      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isInteracting = false);
@@ -561,8 +753,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // Edge Function(meal-evaluate)이 KST 기준으로 meal_date 를 저장하므로,
+  // Flutter 쪽 조회/비교 기준도 KST(UTC+9)로 고정한다.
+  // (기기 로컬 타임존과 무관하게 항상 동일한 meal_date 문자열이 나오도록 처리)
   String _todayDateStr() {
-    final d = DateTime.now();
+    final d = DateTime.now().toUtc().add(const Duration(hours: 9));
     final m = d.month.toString().padLeft(2, '0');
     final day = d.day.toString().padLeft(2, '0');
     return '${d.year}-$m-$day';
@@ -682,7 +877,7 @@ class _HomePageState extends State<HomePage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
-                title: const Text('아기 베지펫이 분양 되었어요🥹'),
+                title: const Text('아기 베지펫이 분양 되었어요🥹 건강하게 키워주세요~!'),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -695,7 +890,7 @@ class _HomePageState extends State<HomePage> {
                       maxLength: 8,
                       enabled: !saving,
                       decoration: InputDecoration(
-                        hintText: '예: 초록이',
+                        hintText: '예: 구름이',
                         border: const OutlineInputBorder(),
                         errorText: errorText,
                         helperText: '한글·영문·숫자 2~8자 (공백/특수문자 불가)',
@@ -760,6 +955,7 @@ class _HomePageState extends State<HomePage> {
       await Future.wait([
         _fetchActivePet(),
         _fetchTodayMealLogs(),
+        _fetchRandomTicketCount(),
       ]);
       if (mounted) setState(() {});
     } catch (e) {
@@ -778,6 +974,7 @@ class _HomePageState extends State<HomePage> {
         _selectedSpeciesId = null;
         _todayMealLogs = [];
         _firstMealPopupShownThisSession = false;
+        _randomTicketCount = 0;
 
         _isUploadingMeal = false;
         _uploadingSlot = null;
@@ -878,6 +1075,7 @@ class _HomePageState extends State<HomePage> {
         _isSavingProfile = false;
         _isLoggingMeal = false;
         _firstMealPopupShownThisSession = false;
+        _randomTicketCount = 0;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -894,6 +1092,164 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       _showSnack('개발용 초기화에 실패했어요: $e');
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // 개발용: 성장 단계 테스트 보조 함수
+  //
+  // 실제 서비스 기능이 아님. 디버그 섹션 버튼에서만 호출한다.
+  // affection 을 임의로 조작한 뒤 _syncStageAfterAffectionChange 로
+  // stage 갱신 / 성숙기 도달 처리가 의도대로 동작하는지 빠르게 확인하기 위한 용도.
+  // --------------------------------------------------------------------------
+
+  Future<void> _debugAdjustAffection(int delta) async {
+    if (_activePet == null) {
+      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
+      return;
+    }
+    final petId = _activePet!['id'];
+    final current = (_activePet!['affection'] as num?)?.toInt() ?? 0;
+    final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
+    final next = (current + delta) < 0 ? 0 : (current + delta);
+    final nextStage = _stageFromAffection(next);
+
+    try {
+      await supabase.from('user_pets').update({
+        'affection': next,
+        'stage': nextStage,
+      }).eq('id', petId);
+
+      await _fetchActivePet();
+      if (!mounted) return;
+      setState(() {});
+      _showSnack('[디버그] 애정도 $current → $next');
+
+      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('[디버그] 애정도 조작 실패: $e');
+    }
+  }
+
+  Future<void> _debugSetAffectionAndStage({
+    required int affection,
+    required String stage,
+  }) async {
+    if (_activePet == null) {
+      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
+      return;
+    }
+    final petId = _activePet!['id'];
+    try {
+      await supabase.from('user_pets').update({
+        'affection': affection,
+        'stage': stage,
+      }).eq('id', petId);
+
+      await _fetchActivePet();
+      if (!mounted) return;
+      setState(() {});
+      _showSnack('[디버그] 세팅 완료 (affection=$affection, stage=$stage)');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('[디버그] 세팅 실패: $e');
+    }
+  }
+
+  Future<void> _debugSetJustBeforeAdult() async {
+    // 성숙기 직전 상태로 세팅: affection=109, stage=grown
+    //
+    // 이전에 이미 졸업 처리됐던 펫이라면 is_resident/graduated_at 이 남아 있어
+    // _handleAdultGraduationIfNeeded 의 중복 방지 가드에 걸려
+    // finalize_pet_graduation 재테스트가 불가능하다.
+    // 따라서 졸업 플래그도 함께 초기화한다.
+    if (_activePet == null) {
+      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
+      return;
+    }
+    final petId = _activePet!['id'];
+    try {
+      await supabase.from('user_pets').update({
+        'affection': 109,
+        'stage': 'grown',
+        'is_resident': false,
+        'graduated_at': null,
+      }).eq('id', petId);
+
+      await _fetchActivePet();
+      if (!mounted) return;
+      setState(() {});
+      _showSnack('[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('[디버그] 세팅 실패: $e');
+    }
+  }
+
+  Future<void> _debugTriggerAdult() async {
+    // 성숙기 도달 테스트: affection +1 (109 → 110) 으로 adult 전환을 유도.
+    // _activePet 이 이미 adult 라면 _syncStageAfterAffectionChange 내부에서
+    // 중복 실행이 방지된다.
+    await _debugAdjustAffection(1);
+  }
+
+  /// 디버그: 가방(user_items) 의 랜덤 분양권 수량만 다시 조회해서 상태를 갱신한다.
+  Future<void> _debugRefreshRandomTicket() async {
+    try {
+      await _fetchRandomTicketCount();
+      if (!mounted) return;
+      setState(() {});
+      _showSnack('[디버그] 랜덤 분양권 수량: $_randomTicketCount');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('[디버그] 분양권 조회 실패: $e');
+    }
+  }
+
+  /// 디버그: 랜덤 분양권을 1장 사용해 랜덤 pet_species_id 가 반환되는지 확인한다.
+  ///
+  /// SQL 함수 `public.use_random_adoption_ticket(p_user_id uuid)` 를 호출하고,
+  /// 반환되는 pet_species_id / ticket_remaining 을 스낵바로 보여준다.
+  /// 실제 분양(user_pets insert) 흐름까지는 이 단계에서 연결하지 않는다.
+  Future<void> _debugUseRandomAdoptionTicket() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인 상태가 아니에요.');
+      return;
+    }
+
+    dynamic rpcResult;
+    try {
+      rpcResult = await supabase.rpc(
+        'use_random_adoption_ticket',
+        params: {'p_user_id': user.id},
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('[디버그] 분양권 사용 실패: $e');
+      return;
+    }
+
+    Map<String, dynamic>? payload;
+    if (rpcResult is Map) {
+      payload = Map<String, dynamic>.from(rpcResult);
+    } else if (rpcResult is List && rpcResult.isNotEmpty) {
+      final first = rpcResult.first;
+      if (first is Map) payload = Map<String, dynamic>.from(first);
+    }
+
+    final speciesId = payload?['pet_species_id'];
+    final remaining = payload?['ticket_remaining'];
+
+    try {
+      await _fetchRandomTicketCount();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {});
+
+    _showSnack(
+      '[디버그] 분양권 사용 완료! pet_species_id: ${speciesId ?? '-'} / 남은 수량: ${remaining ?? _randomTicketCount}',
+    );
   }
 
   void _showSnack(String message) {
@@ -1614,6 +1970,9 @@ class _HomePageState extends State<HomePage> {
         ? _buildAiStatusMessage(resultType, feedbackText)
         : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.';
 
+    // 서버에서 affection 이 갱신되기 전의 단계를 기억해 둔다.
+    final beforeStage = _activePet?['stage']?.toString();
+
     await Future.wait([
       _fetchTodayMealLogs(),
       _fetchActivePet(),
@@ -1628,6 +1987,12 @@ class _HomePageState extends State<HomePage> {
     });
 
     _showSnack(statusMessage);
+
+    // 서버(Edge Function)가 affection 만 올리고 stage 는 갱신하지 않을 수 있으므로,
+    // 클라이언트에서 affection 기준으로 stage 를 동기화한다.
+    if (ok && gain > 0) {
+      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+    }
   }
 
   String _resultTypeToKorean(String? type) {
@@ -2331,6 +2696,13 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            _debugBlock(
+              title: 'user_items',
+              children: [
+                _kv('random_adoption_ticket', '$_randomTicketCount장'),
+              ],
+            ),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
@@ -2365,6 +2737,60 @@ class _HomePageState extends State<HomePage> {
                   onPressed: _resetForTesting,
                   icon: const Icon(Icons.delete_forever, size: 18),
                   label: const Text('개발용 전체 초기화'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '성장 단계 테스트',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _activePet == null
+                      ? null
+                      : () => _debugAdjustAffection(10),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('애정도 +10'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _activePet == null
+                      ? null
+                      : () => _debugAdjustAffection(50),
+                  icon: const Icon(Icons.add_circle_outline, size: 18),
+                  label: const Text('애정도 +50'),
+                ),
+                OutlinedButton.icon(
+                  onPressed:
+                      _activePet == null ? null : _debugSetJustBeforeAdult,
+                  icon: const Icon(Icons.hourglass_bottom, size: 18),
+                  label: const Text('성숙기 직전 세팅(aff 109 / grown)'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _activePet == null ? null : _debugTriggerAdult,
+                  icon: const Icon(Icons.emoji_events_outlined, size: 18),
+                  label: const Text('성숙기 테스트 실행 (+1)'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _debugRefreshRandomTicket,
+                  icon: const Icon(Icons.confirmation_number_outlined,
+                      size: 18),
+                  label: const Text('랜덤 분양권 다시 조회'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _randomTicketCount > 0
+                      ? _debugUseRandomAdoptionTicket
+                      : null,
+                  icon: const Icon(Icons.card_giftcard_outlined, size: 18),
+                  label: const Text('랜덤 분양권 사용 테스트'),
                 ),
               ],
             ),
