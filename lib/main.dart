@@ -74,14 +74,14 @@ const Map<String, int> _kMealAffectionGainByResult = <String, int>{
 // ----------------------------------------------------------------------------
 
 const List<String> _kGoodMessages = <String>[
-  '건강한 음식을 먹어서 그런가? 기분이 좋아 보인다!',
-  '만족스럽게 한 끼를 먹었다! 지금처럼 균형을 유지하면 좋을 것 같다!',
+  '건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!',
+  '베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!',
 ];
 
 // feedback_text가 있을 때 사용. `{feedback}` 부분에 Edge Function이 돌려준 문장이 들어간다.
 const List<String> _kSupplementMessagesWithFeedback = <String>[
-  '맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 실천해보면 어떨까?!',
-  '만족스러운 한 끼를 먹은 것 같다! 다음 식사에서는 {feedback}를 반영한 식사를 해보자!',
+  '베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 반영한 음식을 줘보는 것이 어떨까?!',
+  '나름 기분이 좋아보인다! 다음에는 {feedback}를 반영한 음식을 줘보자!',
 ];
 
 // feedback_text가 비어 있을 때 쓰는 기본 메시지.
@@ -90,8 +90,8 @@ const List<String> _kSupplementMessagesFallback = <String>[
 ];
 
 const List<String> _kBadMessagesWithFeedback = <String>[
-  '음식을 먹긴 했지만, 다음에는 {feedback}를 실천해 볼 필요가 있을 것 같다..!',
-  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback}를 해보자..!',
+  '기운이 빠지는 식사인 것 같다.. 다음에는 {feedback}를 반영한 음식을 줘보자..!',
+  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback}를 반영한 음식을 줘보자..!',
 ];
 
 const List<String> _kBadMessagesFallback = <String>[
@@ -219,6 +219,10 @@ class _HomePageState extends State<HomePage> {
   // 가방 안의 랜덤 분양권(user_items.quantity 합계) 상태.
   // 졸업 처리 / 분양권 사용 테스트 후 디버그 섹션에 즉시 반영하기 위해 들고 다닌다.
   int _randomTicketCount = 0;
+
+  // 가방에서 랜덤 분양권 사용 중 연타/중복 분양 방지 플래그.
+  // RPC 호출 + user_pets insert 가 원자적이지 않으므로, UI 레벨에서라도 락을 걸어둔다.
+  bool _isUsingRandomTicket = false;
 
   @override
   void initState() {
@@ -979,6 +983,7 @@ class _HomePageState extends State<HomePage> {
         _isUploadingMeal = false;
         _uploadingSlot = null;
         _isInteracting = false;
+        _isUsingRandomTicket = false;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -998,11 +1003,15 @@ class _HomePageState extends State<HomePage> {
   // 앱이 처음 시작된 것처럼 "프로필 입력 화면"부터 다시 흐름이 시작되게 만든다.
   //
   // 동작 순서:
-  //   1) meal_logs / user_pets 삭제 (user_id 기준)
-  //   2) profiles 초기화 (nickname/gender/age_range/diet_goal = null)
-  //   3) 로컬 상태/폼/진행중 플래그 싹 정리
-  //   4) _bootstrap() 재호출
+  //   1) meal_logs 삭제 (user_pets 보다 먼저 — FK 참조 회피)
+  //   2) pokedex_entries 삭제 (source_user_pet_id 등으로 user_pets 참조 가능)
+  //   3) user_items 삭제 (랜덤 분양권 등 보유 아이템 전부)
+  //   4) user_pets 삭제
+  //   5) profiles 초기화 (nickname/gender/age_range/diet_goal = null)
+  //   6) 로컬 상태/폼/진행중 플래그 싹 정리
+  //   7) _bootstrap() 재호출
   //
+  // Storage bucket(meal-photos) 의 사진 파일 삭제는 이번 단계에서 다루지 않는다.
   // 오직 디버그 섹션에서만 노출하며, 실제 서비스 기능이 아님에 주의.
   // --------------------------------------------------------------------------
 
@@ -1017,7 +1026,7 @@ class _HomePageState extends State<HomePage> {
           title: const Text('개발용 전체 초기화'),
           content: const Text(
             '개발용 전체 초기화를 진행할까요?\n'
-            '현재 계정의 펫, 식단 기록, 프로필 입력값이 모두 초기화됩니다.',
+            '현재 계정의 펫, 식단 기록, 도감 기록, 보유 아이템/분양권, 프로필 입력값이 모두 초기화됩니다.',
           ),
           actions: [
             TextButton(
@@ -1050,7 +1059,13 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
 
     try {
+      // 삭제 순서 주의:
+      //   meal_logs / pokedex_entries 가 user_pets 를 FK 로 참조할 수 있으므로
+      //   user_pets 보다 먼저 비워야 한다. user_items 는 user_pets 와 무관하지만
+      //   "전체 초기화" 의 의미상 같은 사이클에서 함께 정리한다.
       await supabase.from('meal_logs').delete().eq('user_id', user.id);
+      await supabase.from('pokedex_entries').delete().eq('user_id', user.id);
+      await supabase.from('user_items').delete().eq('user_id', user.id);
       await supabase.from('user_pets').delete().eq('user_id', user.id);
       await supabase.from('profiles').update({
         'nickname': null,
@@ -1071,6 +1086,7 @@ class _HomePageState extends State<HomePage> {
         _isUploadingMeal = false;
         _uploadingSlot = null;
         _isInteracting = false;
+        _isUsingRandomTicket = false;
         _isAdopting = false;
         _isSavingProfile = false;
         _isLoggingMeal = false;
@@ -1250,6 +1266,323 @@ class _HomePageState extends State<HomePage> {
     _showSnack(
       '[디버그] 분양권 사용 완료! pet_species_id: ${speciesId ?? '-'} / 남은 수량: ${remaining ?? _randomTicketCount}',
     );
+  }
+
+  // --------------------------------------------------------------------------
+  // 가방 (Bag) 화면
+  //
+  // 우측 상단 게임 메뉴 > 가방 진입 시 열리는 BottomSheet.
+  // 이번 단계에서는 분양권 카테고리만 노출하고, 가구/장난감은 후속 단계에서 추가한다.
+  // 분양권 카드 탭 → 사용 확인 AlertDialog → 실제 분양 흐름은
+  // _useRandomAdoptionTicketFromBag() 가 담당한다.
+  // --------------------------------------------------------------------------
+
+  // 가방 BottomSheet.
+  //
+  // BottomSheet 내부에서 AlertDialog 를 직접 띄우거나, sheetCtx 를 await 이후에
+  // Navigator 에 사용하면 `_dependents.isEmpty is not true` 위젯 트리 오류가
+  // 발생할 수 있다. 그래서 시트 안에서는 "사용 의사"만 bool 로 pop 해서 반환하고,
+  // 확인 다이얼로그 / 실제 분양 흐름은 시트가 완전히 닫힌 뒤 HomePage 의
+  // context 에서 차례로 실행한다.
+  Future<void> _openBagSheet() async {
+    final shouldUseTicket = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return _buildBagSheetContent(
+          onUseTicket: () {
+            Navigator.of(sheetCtx).pop(true);
+          },
+        );
+      },
+    );
+
+    if (!mounted || shouldUseTicket != true) return;
+
+    // 시트 dispose 가 끝난 뒤 다이얼로그를 띄우도록 한 틱 양보.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+
+    final confirmed = await _confirmUseRandomTicket();
+    if (!mounted || !confirmed) return;
+
+    await _useRandomAdoptionTicketFromBag();
+  }
+
+  Widget _buildBagSheetContent({
+    required VoidCallback onUseTicket,
+  }) {
+    final theme = Theme.of(context);
+    final hasTicket = _randomTicketCount > 0;
+    final disabled = !hasTicket || _isUsingRandomTicket;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.backpack_outlined, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  '가방',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '분양권',
+              style: theme.textTheme.labelLarge
+                  ?.copyWith(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 6),
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: theme.colorScheme.outlineVariant,
+                ),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor:
+                      theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
+                  child: Icon(
+                    Icons.card_giftcard_outlined,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                title: const Text(
+                  '랜덤 분양권',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  hasTicket
+                      ? '도감에 없는 베지펫 중 1마리가 랜덤으로 분양돼요\n보유 수량: $_randomTicketCount장'
+                      : '보유 중인 분양권이 없어요',
+                ),
+                trailing: _isUsingRandomTicket
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        hasTicket ? '사용' : '없음',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: hasTicket
+                              ? theme.colorScheme.primary
+                              : Colors.grey,
+                        ),
+                      ),
+                onTap: disabled ? null : onUseTicket,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '※ 가구 / 장난감 카테고리는 추후 추가될 예정이에요.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "분양권(랜덤)을 사용할까요?" 확인 다이얼로그.
+  /// 확인을 누르면 true, 취소/dismiss 면 false.
+  Future<bool> _confirmUseRandomTicket() async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text('분양권(랜덤)을 사용할까요?'),
+          content: const Text('도감에 등록되지 않은 베지펫 중 1마리가 랜덤으로 분양돼요.'),
+          actions: [
+            TextButton(
+              onPressed: _isUsingRandomTicket
+                  ? null
+                  : () => Navigator.of(ctx).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: _isUsingRandomTicket
+                  ? null
+                  : () => Navigator.of(ctx).pop(true),
+              child: const Text('사용하기'),
+            ),
+          ],
+        );
+      },
+    );
+    return result == true;
+  }
+
+  /// 가방에서 랜덤 분양권을 실제로 사용해 새 베지펫을 분양받는다.
+  ///
+  /// 흐름:
+  ///   1) 보유 수량 / activePet 상태 가드
+  ///   2) `use_random_adoption_ticket` RPC 호출 → pet_species_id 획득
+  ///   3) 도감 중복 방어 체크(pokedex_entries)
+  ///   4) 졸업 완료된 기존 activePet 은 is_active=false 로만 비활성화
+  ///      (is_resident / graduated_at 은 유지 → 마당 거주 펫으로 남음)
+  ///   5) 새 user_pets insert (stage=baby, affection=0, is_active=true)
+  ///   6) 상태 재조회 + setState
+  ///   7) 기존 분양 직후와 동일한 _showNicknameDialog() 재사용
+  Future<void> _useRandomAdoptionTicketFromBag() async {
+    if (_isUsingRandomTicket) return;
+
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+    if (_randomTicketCount <= 0) {
+      _showSnack('보유 중인 랜덤 분양권이 없어요.');
+      return;
+    }
+
+    // 현재 활성 펫이 아직 성숙기 졸업 처리가 끝나지 않은 상태라면 사용 불가.
+    // 성숙기 + is_resident=true + graduated_at!=null 셋이 모두 갖춰진 경우에만
+    // 새 펫을 분양받을 수 있다.
+    final currentPet = _activePet;
+    final isCurrentGraduated = currentPet != null &&
+        currentPet['stage']?.toString() == 'adult' &&
+        currentPet['is_resident'] == true &&
+        currentPet['graduated_at'] != null;
+    if (currentPet != null && !isCurrentGraduated) {
+      _showSnack('현재 육성 중인 베지펫이 있어요. 성숙기 달성 후 사용할 수 있어요.');
+      return;
+    }
+
+    setState(() => _isUsingRandomTicket = true);
+
+    try {
+      // 1) RPC 호출
+      dynamic rpcResult;
+      try {
+        rpcResult = await supabase.rpc(
+          'use_random_adoption_ticket',
+          params: {'p_user_id': user.id},
+        );
+      } catch (e) {
+        if (!mounted) return;
+        _showSnack('분양권 사용 실패: $e');
+        return;
+      }
+
+      Map<String, dynamic>? payload;
+      if (rpcResult is Map) {
+        payload = Map<String, dynamic>.from(rpcResult);
+      } else if (rpcResult is List && rpcResult.isNotEmpty) {
+        final first = rpcResult.first;
+        if (first is Map) payload = Map<String, dynamic>.from(first);
+      }
+
+      final speciesIdRaw = payload?['pet_species_id'];
+      final speciesId = speciesIdRaw is int
+          ? speciesIdRaw
+          : int.tryParse(speciesIdRaw?.toString() ?? '');
+      if (speciesId == null) {
+        if (!mounted) return;
+        _showSnack('분양 결과를 해석할 수 없어요. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      // 2) Flutter 측 방어 체크 — 도감 중복 분양 차단
+      try {
+        final existingPokedex = await supabase
+            .from('pokedex_entries')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('pet_species_id', speciesId)
+            .maybeSingle();
+        if (existingPokedex != null) {
+          if (!mounted) return;
+          _showSnack('이미 도감에 등록된 베지펫이 반환되었어요. 분양 로직을 확인해주세요.');
+          // 분양권 수량은 RPC 단계에서 이미 차감됐을 수 있으므로 재조회만 해둔다.
+          await _fetchRandomTicketCount();
+          if (mounted) setState(() {});
+          return;
+        }
+      } catch (e) {
+        debugPrint('pokedex precheck failed: $e');
+        // precheck 자체에 실패한 경우는 RPC 인터락이 살아있다고 가정하고 진행.
+      }
+
+      // 3) 졸업한 기존 펫은 is_active=false 로만 비활성화 (마당 거주 유지)
+      if (isCurrentGraduated) {
+        try {
+          await supabase
+              .from('user_pets')
+              .update({'is_active': false}).eq('id', currentPet['id']);
+        } catch (e) {
+          if (!mounted) return;
+          _showSnack('기존 펫 비활성화 실패: $e');
+          return;
+        }
+      }
+
+      // 4) 새 user_pets insert
+      try {
+        await supabase.from('user_pets').insert({
+          'user_id': user.id,
+          'pet_species_id': speciesId,
+          'nickname': null,
+          'stage': 'baby',
+          'affection': 0,
+          'is_active': true,
+          'is_resident': false,
+          'graduated_at': null,
+        });
+      } catch (e) {
+        if (!mounted) return;
+        _showSnack('새 베지펫 분양 저장 실패: $e');
+        return;
+      }
+
+      // 5) 상태 재조회
+      try {
+        await Future.wait([
+          _fetchActivePet(),
+          _fetchRandomTicketCount(),
+          _fetchTodayMealLogs(),
+        ]);
+      } catch (e) {
+        debugPrint('post-adopt refetch failed: $e');
+      }
+
+      if (!mounted) return;
+      setState(() {});
+
+      _showSnack('새 베지펫이 분양되었어요!');
+
+      // 6) 첫 분양 때와 동일한 이름 짓기 다이얼로그 재사용.
+      await _showNicknameDialog();
+    } finally {
+      if (mounted) {
+        setState(() => _isUsingRandomTicket = false);
+      } else {
+        _isUsingRandomTicket = false;
+      }
+    }
   }
 
   void _showSnack(String message) {
@@ -2244,8 +2577,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   // 우측 상단 게임 메뉴 아이콘 버튼을 누르면 열리는 8개 메뉴 허브.
-  void _openMenuSheet() {
-    showModalBottomSheet<void>(
+  //
+  // BottomSheet 내부 builder의 BuildContext를 await 이후에 사용하면
+  // `_dependents.isEmpty is not true` 같은 위젯 트리 정리 타이밍 오류가 날 수 있다.
+  // 그래서 sheetCtx 에서는 라벨만 pop 으로 반환하고, 후속 동작(_onMenuTap)은
+  // BottomSheet 가 완전히 닫힌 뒤 HomePage 의 context 에서 실행한다.
+  Future<void> _openMenuSheet() async {
+    final selectedLabel = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
@@ -2254,12 +2592,20 @@ class _HomePageState extends State<HomePage> {
       builder: (sheetCtx) {
         return _buildMenuSheetContent(
           onTap: (label) {
-            Navigator.of(sheetCtx).pop();
-            _onMenuTap(label);
+            Navigator.of(sheetCtx).pop(label);
           },
         );
       },
     );
+
+    if (!mounted || selectedLabel == null) return;
+
+    // 다음 frame 까지 한 틱 양보해서 BottomSheet 트리가 dispose 된 뒤
+    // 다음 화면/시트가 열리도록 한다.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+
+    _onMenuTap(selectedLabel);
   }
 
   Widget _buildMenuSheetContent({required ValueChanged<String> onTap}) {
@@ -2350,6 +2696,8 @@ class _HomePageState extends State<HomePage> {
   void _onMenuTap(String label) {
     if (label == '설정') {
       _showSnack('나중에 이메일 연동 메뉴가 여기에 들어올 예정입니다.');
+    } else if (label == '가방') {
+      _openBagSheet();
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
