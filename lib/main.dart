@@ -249,6 +249,23 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _pokedexEntries = [];
   bool _isLoadingPokedex = false;
 
+  // ----- 식단일지 (diet diary) -----
+  //
+  // 식단일지 BottomSheet 는 "달력 / 월 선택 / 상세" 3가지 모드로 동작한다.
+  // 시트 내부 StatefulBuilder 에서 mode/visibleMonth/selectedDate 를 직접
+  // 들고 다니고, HomePage 의 아래 상태들은 "마지막으로 본 월"을 기억해서
+  // 시트를 다시 열 때 같은 월로 복귀하기 위한 용도다.
+  //
+  // 범위: 2026-01 ~ 2035-12 (10년치)
+  static final DateTime _diaryMinMonth = DateTime(2026, 1);
+  static final DateTime _diaryMaxMonth = DateTime(2035, 12);
+
+  DateTime _diaryVisibleMonth = DateTime(2026, 1);
+  // 현재 _diaryVisibleMonth 의 meal_logs 캐시. 도장 표시용.
+  // key: yyyy-MM-dd, value: 그 날짜의 meal_logs row 들.
+  Map<String, List<Map<String, dynamic>>> _diaryLogsByDate = {};
+  bool _isLoadingDiary = false;
+
   @override
   void initState() {
     super.initState();
@@ -1235,6 +1252,9 @@ class _HomePageState extends State<HomePage> {
         _randomTicketCount = 0;
         _pokedexEntries = [];
         _isLoadingPokedex = false;
+        _diaryVisibleMonth = _diaryMinMonth;
+        _diaryLogsByDate = {};
+        _isLoadingDiary = false;
 
         _isUploadingMeal = false;
         _uploadingSlot = null;
@@ -1360,6 +1380,9 @@ class _HomePageState extends State<HomePage> {
         _pokedexEntries = [];
         _isLoadingPokedex = false;
         _residentPets = [];
+        _diaryVisibleMonth = _diaryMinMonth;
+        _diaryLogsByDate = {};
+        _isLoadingDiary = false;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -3821,6 +3844,8 @@ class _HomePageState extends State<HomePage> {
       await _openPokedexSheet();
     } else if (label == '프로필') {
       await _openProfileSheet();
+    } else if (label == '식단일지') {
+      await _openDietDiarySheet();
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
@@ -4110,6 +4135,657 @@ class _HomePageState extends State<HomePage> {
         size: 54,
         color: theme.colorScheme.onSurfaceVariant,
       ),
+    );
+  }
+
+  // ==========================================================================
+  // 식단일지 (diet diary)
+  // --------------------------------------------------------------------------
+  // 게임 메뉴 > "식단일지" 진입 시 BottomSheet 형태로 열린다.
+  //
+  // 시트 안에서 3가지 모드가 토글된다:
+  //   - calendar    : 월 달력 + 식단 인증 도장
+  //   - monthPicker : 같은 연도의 1~12월 그리드에서 월 선택
+  //   - detail      : 특정 날짜의 아점/저녁 사진 + 체중/노트 입력
+  //
+  // 상세 화면(detail)은 TextEditingController 두 개를 들고 있어야 해서
+  // StatefulBuilder 안에서 만들면 dispose 가 어렵다. 그래서 별도의 private
+  // StatefulWidget [_DietDiaryDetailPanel] 으로 분리해 controller 수명을 거기서 관리한다.
+  // ==========================================================================
+
+  // 사용자에게 보여줄 yyyy-MM-dd 문자열 (KST 기준 _todayDateStr 와 같은 포맷).
+  // diary_date / meal_date 모두 이 포맷을 사용한다.
+  String _dateKey(DateTime d) {
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$m-$day';
+  }
+
+  DateTime _monthStart(DateTime d) => DateTime(d.year, d.month, 1);
+  DateTime _monthEnd(DateTime d) => DateTime(d.year, d.month + 1, 0);
+  int _daysInMonth(int year, int month) => DateTime(year, month + 1, 0).day;
+
+  bool _isDiaryMonthInRange(DateTime month) {
+    final ym = month.year * 12 + month.month;
+    final minYm = _diaryMinMonth.year * 12 + _diaryMinMonth.month;
+    final maxYm = _diaryMaxMonth.year * 12 + _diaryMaxMonth.month;
+    return ym >= minYm && ym <= maxYm;
+  }
+
+  DateTime _clampDiaryMonth(DateTime month) {
+    if (month.isBefore(_diaryMinMonth)) return _diaryMinMonth;
+    if (month.year > _diaryMaxMonth.year ||
+        (month.year == _diaryMaxMonth.year &&
+            month.month > _diaryMaxMonth.month)) {
+      return _diaryMaxMonth;
+    }
+    return DateTime(month.year, month.month, 1);
+  }
+
+  // 보이는 월의 meal_logs 를 가져와 [_diaryLogsByDate] 캐시를 갱신한다.
+  // 도장 표시는 "아점/저녁 중 하나라도 있으면" 으로 판단하므로 키만 있으면 충분하다.
+  Future<void> _fetchDiaryMonthLogs(DateTime month) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _diaryLogsByDate = {};
+      return;
+    }
+    final start = _dateKey(_monthStart(month));
+    final end = _dateKey(_monthEnd(month));
+    try {
+      final data = await supabase
+          .from('meal_logs')
+          .select(
+            'id, user_id, user_pet_id, meal_date, meal_slot, result_type, affection_gain, image_path, memo, captured_at, created_at',
+          )
+          .eq('user_id', user.id)
+          .gte('meal_date', start)
+          .lte('meal_date', end);
+
+      final rows = (data as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
+      final byDate = <String, List<Map<String, dynamic>>>{};
+      for (final row in rows) {
+        final key = row['meal_date']?.toString();
+        if (key == null || key.isEmpty) continue;
+        byDate.putIfAbsent(key, () => []).add(row);
+      }
+      _diaryLogsByDate = byDate;
+    } catch (e) {
+      debugPrint('fetch diary month logs failed: $e');
+      _diaryLogsByDate = {};
+    }
+  }
+
+  // Supabase Storage 의 image_path 를 10분짜리 signed URL 로 변환.
+  // image_path 가 비어 있거나 signed URL 생성에 실패하면 null 반환.
+  Future<String?> _signedMealPhotoUrl(String? imagePath) async {
+    if (imagePath == null || imagePath.trim().isEmpty) return null;
+    try {
+      final url = await supabase.storage
+          .from(_kMealPhotoBucket)
+          .createSignedUrl(imagePath, 60 * 10);
+      return url;
+    } catch (e) {
+      debugPrint('signed meal photo url failed: $e');
+      return null;
+    }
+  }
+
+  // 특정 날짜의 체중/식후 감정(노트)을 meal_diary_notes 에서 조회.
+  // row 가 없으면 null.
+  //
+  // ※ 사전 DB 전제: meal_diary_notes 테이블이 존재해야 한다.
+  //   없으면 select 자체가 에러를 던지므로, 이번 메뉴를 본격적으로 사용하기 전에
+  //   Supabase SQL 에서 한 번만 아래 비슷한 SQL 을 실행해두는 것이 필요하다.
+  //     create table if not exists public.meal_diary_notes (
+  //       id uuid primary key default gen_random_uuid(),
+  //       user_id uuid not null references auth.users(id) on delete cascade,
+  //       diary_date date not null,
+  //       weight_kg numeric,
+  //       note_text text,
+  //       created_at timestamptz default now(),
+  //       updated_at timestamptz default now(),
+  //       unique(user_id, diary_date)
+  //     );
+  Future<Map<String, dynamic>?> _fetchMealDiaryNote(String dateKey) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return null;
+    try {
+      final data = await supabase
+          .from('meal_diary_notes')
+          .select('id, user_id, diary_date, weight_kg, note_text')
+          .eq('user_id', user.id)
+          .eq('diary_date', dateKey)
+          .maybeSingle();
+      return data == null ? null : Map<String, dynamic>.from(data);
+    } catch (e) {
+      debugPrint('fetch meal diary note failed: $e');
+      return null;
+    }
+  }
+
+  // meal_diary_notes upsert.
+  // 체중은 빈 문자열이면 null 저장, 숫자 파싱 실패 시 false 반환.
+  // note_text 는 trim 후 빈 문자열이면 null 저장.
+  Future<bool> _saveMealDiaryNote({
+    required DateTime date,
+    required String? weightText,
+    required String noteText,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return false;
+    }
+
+    double? weight;
+    final wRaw = (weightText ?? '').trim();
+    if (wRaw.isNotEmpty) {
+      final parsed = double.tryParse(wRaw.replaceAll(',', '.'));
+      if (parsed == null) {
+        _showSnack('체중은 숫자로 입력해주세요.');
+        return false;
+      }
+      weight = parsed;
+    }
+
+    final dateKey = _dateKey(date);
+    final note = noteText.trim();
+
+    try {
+      await supabase.from('meal_diary_notes').upsert(
+        {
+          'user_id': user.id,
+          'diary_date': dateKey,
+          'weight_kg': weight,
+          'note_text': note.isEmpty ? null : note,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'user_id,diary_date',
+      );
+      return true;
+    } catch (e) {
+      _showSnack('식단일지 저장 실패: $e');
+      return false;
+    }
+  }
+
+  // 식단 사진을 Dialog 위에 크게 띄워서 보여준다.
+  // - InteractiveViewer 로 핀치/드래그 확대 가능
+  // - 바깥 터치 또는 우상단 X 로 닫기
+  Future<void> _showMealPhotoPreview(String imageUrl) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: _rootNavigatorKey.currentContext ?? context,
+      barrierDismissible: true,
+      useRootNavigator: true,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(16),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Text(
+                        '사진을 불러올 수 없어요.',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // 식단일지 BottomSheet 진입점.
+  //
+  // 시트 안에서 mode/visibleMonth/selectedDate 를 들고 있다가, 월이 바뀌거나
+  // 상세에서 돌아올 때 _fetchDiaryMonthLogs 를 호출한다. controller 가 필요한
+  // 상세 화면은 [_DietDiaryDetailPanel] 위젯으로 분리.
+  Future<void> _openDietDiarySheet() async {
+    _dismissFocus();
+
+    var visibleMonth = _clampDiaryMonth(_diaryVisibleMonth);
+    _diaryVisibleMonth = visibleMonth;
+
+    // 첫 진입 시 한 번 미리 로딩.
+    _isLoadingDiary = true;
+    if (mounted) setState(() {});
+    await _fetchDiaryMonthLogs(visibleMonth);
+    _isLoadingDiary = false;
+    if (mounted) setState(() {});
+
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        // 시트 내부 로컬 상태.
+        var mode = 'calendar'; // 'calendar' | 'monthPicker' | 'detail'
+        DateTime? selectedDate;
+        var sheetLoading = false;
+
+        return StatefulBuilder(
+          builder: (innerCtx, setSheetState) {
+            Future<void> reloadMonth(DateTime newMonth) async {
+              final clamped = _clampDiaryMonth(newMonth);
+              setSheetState(() {
+                visibleMonth = clamped;
+                sheetLoading = true;
+              });
+              await _fetchDiaryMonthLogs(clamped);
+              _diaryVisibleMonth = clamped;
+              if (!mounted) return;
+              setSheetState(() {
+                sheetLoading = false;
+              });
+            }
+
+            Widget body;
+            if (mode == 'monthPicker') {
+              body = _buildDietDiaryMonthPicker(
+                visibleYear: visibleMonth.year,
+                selectedMonth: visibleMonth.month,
+                onPickMonth: (year, month) async {
+                  setSheetState(() => mode = 'calendar');
+                  await reloadMonth(DateTime(year, month, 1));
+                },
+                onChangeYear: (newYear) {
+                  setSheetState(() {
+                    visibleMonth = DateTime(newYear, visibleMonth.month, 1);
+                  });
+                },
+                onBack: () => setSheetState(() => mode = 'calendar'),
+              );
+            } else if (mode == 'detail' && selectedDate != null) {
+              final dateKey = _dateKey(selectedDate!);
+              final logs = List<Map<String, dynamic>>.from(
+                _diaryLogsByDate[dateKey] ?? const [],
+              );
+              body = _DietDiaryDetailPanel(
+                key: ValueKey('diary-detail-$dateKey'),
+                date: selectedDate!,
+                logs: logs,
+                signedUrlBuilder: _signedMealPhotoUrl,
+                onPhotoTap: _showMealPhotoPreview,
+                fetchNote: _fetchMealDiaryNote,
+                saveNote: _saveMealDiaryNote,
+                onBack: () {
+                  setSheetState(() {
+                    mode = 'calendar';
+                    selectedDate = null;
+                  });
+                },
+                onSavedSuccess: () {
+                  // 상세에서 저장 성공 후 SnackBar 만 띄우고 머무른다.
+                  _showSnack('식단일지가 저장되었어요.');
+                },
+              );
+            } else {
+              body = _buildDietDiaryCalendar(
+                visibleMonth: visibleMonth,
+                isLoading: sheetLoading,
+                onPrevMonth: () async {
+                  final prev = DateTime(
+                    visibleMonth.year,
+                    visibleMonth.month - 1,
+                    1,
+                  );
+                  if (!_isDiaryMonthInRange(prev)) return;
+                  await reloadMonth(prev);
+                },
+                onNextMonth: () async {
+                  final next = DateTime(
+                    visibleMonth.year,
+                    visibleMonth.month + 1,
+                    1,
+                  );
+                  if (!_isDiaryMonthInRange(next)) return;
+                  await reloadMonth(next);
+                },
+                onTapTitle: () =>
+                    setSheetState(() => mode = 'monthPicker'),
+                onTapDate: (date) {
+                  setSheetState(() {
+                    selectedDate = date;
+                    mode = 'detail';
+                  });
+                },
+              );
+            }
+
+            return SafeArea(
+              top: false,
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 150),
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                  child: body,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    // 시트가 닫힌 뒤 마당 화면에서도 최신 상태가 유지되도록 한 번 setState.
+    if (mounted) setState(() {});
+  }
+
+  // ---------- 식단일지 달력 모드 ----------
+  Widget _buildDietDiaryCalendar({
+    required DateTime visibleMonth,
+    required bool isLoading,
+    required Future<void> Function() onPrevMonth,
+    required Future<void> Function() onNextMonth,
+    required VoidCallback onTapTitle,
+    required ValueChanged<DateTime> onTapDate,
+  }) {
+    final theme = Theme.of(context);
+    final canPrev = _isDiaryMonthInRange(
+      DateTime(visibleMonth.year, visibleMonth.month - 1, 1),
+    );
+    final canNext = _isDiaryMonthInRange(
+      DateTime(visibleMonth.year, visibleMonth.month + 1, 1),
+    );
+
+    final daysInMonth = _daysInMonth(visibleMonth.year, visibleMonth.month);
+    // weekday: Mon=1..Sun=7. 일요일 시작 그리드를 위해 0~6 으로 변환.
+    final firstWeekday = DateTime(
+          visibleMonth.year,
+          visibleMonth.month,
+          1,
+        ).weekday %
+        7;
+
+    final today = _todayDateStr();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const SizedBox(width: 8),
+            Text(
+              '식단일지',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            if (isLoading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            IconButton(
+              onPressed: canPrev ? onPrevMonth : null,
+              icon: const Icon(Icons.chevron_left),
+              tooltip: '이전 달',
+            ),
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onTapTitle,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '${visibleMonth.year}년 ${visibleMonth.month}월',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_drop_down, size: 22),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: canNext ? onNextMonth : null,
+              icon: const Icon(Icons.chevron_right),
+              tooltip: '다음 달',
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // 요일 헤더
+        Row(
+          children: [
+            for (final w in const ['일', '월', '화', '수', '목', '금', '토'])
+              Expanded(
+                child: Center(
+                  child: Text(
+                    w,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: w == '일'
+                          ? Colors.red[600]
+                          : w == '토'
+                              ? Colors.blue[600]
+                              : Colors.grey[700],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // 날짜 그리드: 7열, 필요한 행 수만큼
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            childAspectRatio: 0.85,
+            mainAxisSpacing: 2,
+            crossAxisSpacing: 2,
+          ),
+          itemCount: firstWeekday + daysInMonth,
+          itemBuilder: (ctx, index) {
+            if (index < firstWeekday) {
+              return const SizedBox.shrink();
+            }
+            final day = index - firstWeekday + 1;
+            final date = DateTime(visibleMonth.year, visibleMonth.month, day);
+            final dateKey = _dateKey(date);
+            final hasMeal = (_diaryLogsByDate[dateKey] ?? const []).isNotEmpty;
+            final isToday = dateKey == today;
+            final weekdayCol = index % 7;
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => onTapDate(date),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: isToday
+                      ? Border.all(
+                          color: theme.colorScheme.primary,
+                          width: 1.4,
+                        )
+                      : null,
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '$day',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: weekdayCol == 0
+                            ? Colors.red[700]
+                            : weekdayCol == 6
+                                ? Colors.blue[700]
+                                : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    if (hasMeal)
+                      Icon(
+                        Icons.verified_outlined,
+                        size: 18,
+                        color: theme.colorScheme.primary,
+                      )
+                    else
+                      const SizedBox(height: 18),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  // ---------- 식단일지 월 선택 모드 ----------
+  Widget _buildDietDiaryMonthPicker({
+    required int visibleYear,
+    required int selectedMonth,
+    required void Function(int year, int month) onPickMonth,
+    required ValueChanged<int> onChangeYear,
+    required VoidCallback onBack,
+  }) {
+    final theme = Theme.of(context);
+    final canPrevYear = visibleYear > _diaryMinMonth.year;
+    final canNextYear = visibleYear < _diaryMaxMonth.year;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back),
+              tooltip: '달력으로',
+            ),
+            Text(
+              '월 선택',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            IconButton(
+              onPressed: canPrevYear ? () => onChangeYear(visibleYear - 1) : null,
+              icon: const Icon(Icons.chevron_left),
+              tooltip: '이전 연도',
+            ),
+            Expanded(
+              child: Center(
+                child: Text(
+                  '$visibleYear년',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: canNextYear ? () => onChangeYear(visibleYear + 1) : null,
+              icon: const Icon(Icons.chevron_right),
+              tooltip: '다음 연도',
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            childAspectRatio: 1.6,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+          ),
+          itemCount: 12,
+          itemBuilder: (ctx, idx) {
+            final m = idx + 1;
+            final isSelected =
+                visibleYear == _diaryVisibleMonth.year && m == selectedMonth;
+            // 선택 가능 범위 체크 (예: 2026년이면 1월부터, 2035년이면 12월까지 모두 OK)
+            final candidate = DateTime(visibleYear, m, 1);
+            final enabled = _isDiaryMonthInRange(candidate);
+
+            return Material(
+              color: isSelected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.18)
+                  : theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: enabled ? () => onPickMonth(visibleYear, m) : null,
+                child: Center(
+                  child: Text(
+                    '$m월',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: !enabled
+                          ? Colors.grey
+                          : isSelected
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -5057,4 +5733,335 @@ class _AffectionProgressInfo {
   final double progress;
   final String label;
   final bool isComplete;
+}
+
+// ============================================================================
+// 식단일지 상세 패널 (특정 날짜의 아점/저녁 사진 + 체중/노트 입력)
+// ----------------------------------------------------------------------------
+// 책임:
+//   - 체중/노트 TextEditingController 의 수명 관리 (initState/dispose)
+//   - props 로 받은 fetchNote 로 초기값 로딩, saveNote 로 저장
+//   - 사진 클릭 시 onPhotoTap 으로 미리보기 위임 (signed URL 변환은 props)
+//
+// 비책임:
+//   - HomePage 의 _diaryLogsByDate 자체를 직접 수정하지 않는다 (logs 는 snapshot)
+//   - showDialog 직접 호출은 미리보기 한 곳뿐이고 모두 props 로 위임
+// ============================================================================
+class _DietDiaryDetailPanel extends StatefulWidget {
+  const _DietDiaryDetailPanel({
+    super.key,
+    required this.date,
+    required this.logs,
+    required this.signedUrlBuilder,
+    required this.onPhotoTap,
+    required this.fetchNote,
+    required this.saveNote,
+    required this.onBack,
+    required this.onSavedSuccess,
+  });
+
+  final DateTime date;
+  final List<Map<String, dynamic>> logs;
+  final Future<String?> Function(String? imagePath) signedUrlBuilder;
+  final Future<void> Function(String imageUrl) onPhotoTap;
+  final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
+  final Future<bool> Function({
+    required DateTime date,
+    required String? weightText,
+    required String noteText,
+  }) saveNote;
+  final VoidCallback onBack;
+  final VoidCallback onSavedSuccess;
+
+  @override
+  State<_DietDiaryDetailPanel> createState() => _DietDiaryDetailPanelState();
+}
+
+class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
+  final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _noteController = TextEditingController();
+
+  bool _isLoadingNote = true;
+  bool _isSaving = false;
+  String? _brunchUrl;
+  String? _dinnerUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _weightController.dispose();
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  String _dateKey(DateTime d) {
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$m-$day';
+  }
+
+  Map<String, dynamic>? _logForSlot(String slot) {
+    for (final row in widget.logs) {
+      if (row['meal_slot']?.toString() == slot) return row;
+    }
+    return null;
+  }
+
+  Future<void> _bootstrap() async {
+    final brunch = _logForSlot('brunch');
+    final dinner = _logForSlot('dinner');
+
+    final results = await Future.wait([
+      widget.signedUrlBuilder(brunch?['image_path']?.toString()),
+      widget.signedUrlBuilder(dinner?['image_path']?.toString()),
+      widget.fetchNote(_dateKey(widget.date)),
+    ]);
+
+    if (!mounted) return;
+    final brunchUrl = results[0] as String?;
+    final dinnerUrl = results[1] as String?;
+    final note = results[2] as Map<String, dynamic>?;
+
+    if (note != null) {
+      final w = note['weight_kg'];
+      _weightController.text = w == null ? '' : w.toString();
+      _noteController.text = note['note_text']?.toString() ?? '';
+    }
+
+    setState(() {
+      _brunchUrl = brunchUrl;
+      _dinnerUrl = dinnerUrl;
+      _isLoadingNote = false;
+    });
+  }
+
+  Future<void> _handleSave() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    final ok = await widget.saveNote(
+      date: widget.date,
+      weightText: _weightController.text,
+      noteText: _noteController.text,
+    );
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    if (ok) {
+      widget.onSavedSuccess();
+    }
+  }
+
+  String _displayDate(DateTime d) {
+    final yy = (d.year % 100).toString();
+    return '$yy. ${d.month}. ${d.day}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: viewInsets),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                onPressed: widget.onBack,
+                icon: const Icon(Icons.arrow_back),
+                tooltip: '달력으로',
+              ),
+              Text(
+                '식단일지',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '일자: ${_displayDate(widget.date)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _photoSlot(
+                  context: context,
+                  label: '아점 사진',
+                  url: _brunchUrl,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _photoSlot(
+                  context: context,
+                  label: '저녁 사진',
+                  url: _dinnerUrl,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_isLoadingNote)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          TextField(
+            controller: _weightController,
+            enabled: !_isSaving && !_isLoadingNote,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: '체중 (kg)',
+              prefixIcon: Icon(Icons.monitor_weight_outlined),
+              border: OutlineInputBorder(),
+              isDense: true,
+              hintText: '예: 62.5',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _noteController,
+            enabled: !_isSaving && !_isLoadingNote,
+            minLines: 3,
+            maxLines: 5,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            decoration: const InputDecoration(
+              labelText: '식후 감정 OR 실패 요인',
+              alignLabelWithHint: true,
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.fromLTRB(12, 12, 32, 28),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              onPressed: (_isSaving || _isLoadingNote) ? null : _handleSave,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('저장'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 사진 슬롯 한 개. url 이 있으면 Image.network + 탭하면 큰 미리보기로 위임.
+  // url 이 없으면 placeholder 사각형 + 라벨만 표시.
+  Widget _photoSlot({
+    required BuildContext context,
+    required String label,
+    required String? url,
+  }) {
+    final theme = Theme.of(context);
+    final hasPhoto = url != null && url.isNotEmpty;
+
+    return AspectRatio(
+      aspectRatio: 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: hasPhoto ? () => widget.onPhotoTap(url) : null,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant,
+              width: 1,
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: hasPhoto
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Text(
+                          '$label\n(불러오기 실패)',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 6,
+                      bottom: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.photo_camera_outlined,
+                      size: 28,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }
