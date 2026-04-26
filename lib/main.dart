@@ -252,9 +252,14 @@ class _HomePageState extends State<HomePage> {
   // ----- 식단일지 (diet diary) -----
   //
   // 식단일지 BottomSheet 는 "달력 / 월 선택 / 상세" 3가지 모드로 동작한다.
-  // 시트 내부 StatefulBuilder 에서 mode/visibleMonth/selectedDate 를 직접
-  // 들고 다니고, HomePage 의 아래 상태들은 "마지막으로 본 월"을 기억해서
-  // 시트를 다시 열 때 같은 월로 복귀하기 위한 용도다.
+  // mode/visibleMonth/selectedDate 는 [_DietDiarySheetPanel] State 에서만 관리해
+  // iPhone 키보드 등장 시 BottomSheet builder 가 다시 돌아도 calendar 로
+  // 초기화되지 않게 한다.
+  //
+  // HomePage 쪽 [_diaryVisibleMonth] / [_diaryLogsByDate] 는 "마지막으로 본 월"과
+  // 해당 월 meal_logs 캐시를 기억해, 시트를 닫았다가 다시 열 때 동일 월로
+  // 복귀하기 위한 용도다. 앱 최초 식단일지 진입 시에만 오늘(KST)이 속한 월로
+  // 시작한다 ([_hasOpenedDietDiary] 플래그).
   //
   // 범위: 2026-01 ~ 2035-12 (10년치)
   static final DateTime _diaryMinMonth = DateTime(2026, 1);
@@ -265,6 +270,7 @@ class _HomePageState extends State<HomePage> {
   // key: yyyy-MM-dd, value: 그 날짜의 meal_logs row 들.
   Map<String, List<Map<String, dynamic>>> _diaryLogsByDate = {};
   bool _isLoadingDiary = false;
+  bool _hasOpenedDietDiary = false;
 
   @override
   void initState() {
@@ -1086,6 +1092,17 @@ class _HomePageState extends State<HomePage> {
     return '${d.year}-$m-$day';
   }
 
+  // 식단일지/식단 인증과 동일하게 KST(UTC+9) 기준 "오늘" 날짜.
+  DateTime _todayKstDate() {
+    return DateTime.now().toUtc().add(const Duration(hours: 9));
+  }
+
+  // 오늘이 속한 달(1일 기준)을 2026-01 ~ 2035-12 범위로 보정.
+  DateTime _todayDiaryMonth() {
+    final now = _todayKstDate();
+    return _clampDiaryMonth(DateTime(now.year, now.month, 1));
+  }
+
   Future<void> _adoptSelectedPet() async {
     _dismissFocus();
 
@@ -1252,7 +1269,8 @@ class _HomePageState extends State<HomePage> {
         _randomTicketCount = 0;
         _pokedexEntries = [];
         _isLoadingPokedex = false;
-        _diaryVisibleMonth = _diaryMinMonth;
+        _hasOpenedDietDiary = false;
+        _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _isLoadingDiary = false;
 
@@ -1380,7 +1398,8 @@ class _HomePageState extends State<HomePage> {
         _pokedexEntries = [];
         _isLoadingPokedex = false;
         _residentPets = [];
-        _diaryVisibleMonth = _diaryMinMonth;
+        _hasOpenedDietDiary = false;
+        _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _isLoadingDiary = false;
 
@@ -4363,22 +4382,27 @@ class _HomePageState extends State<HomePage> {
 
   // 식단일지 BottomSheet 진입점.
   //
-  // 시트 안에서 mode/visibleMonth/selectedDate 를 들고 있다가, 월이 바뀌거나
-  // 상세에서 돌아올 때 _fetchDiaryMonthLogs 를 호출한다. controller 가 필요한
-  // 상세 화면은 [_DietDiaryDetailPanel] 위젯으로 분리.
+  // 시트 본문은 [_DietDiarySheetPanel] StatefulWidget 으로 분리해,
+  // iPhone 에서 키보드가 올라와 BottomSheet 가 다시 build 될 때도
+  // calendar/monthPicker/detail 모드가 로컬 변수로 초기화되지 않게 한다.
   Future<void> _openDietDiarySheet() async {
     _dismissFocus();
 
-    var visibleMonth = _clampDiaryMonth(_diaryVisibleMonth);
-    _diaryVisibleMonth = visibleMonth;
+    if (!_hasOpenedDietDiary) {
+      _diaryVisibleMonth = _todayDiaryMonth();
+      _hasOpenedDietDiary = true;
+    }
 
-    // 첫 진입 시 한 번 미리 로딩.
-    _isLoadingDiary = true;
-    if (mounted) setState(() {});
-    await _fetchDiaryMonthLogs(visibleMonth);
-    _isLoadingDiary = false;
-    if (mounted) setState(() {});
+    final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
 
+    _safeSetState(() => _isLoadingDiary = true);
+    await _fetchDiaryMonthLogs(initialMonth);
+    if (mounted) {
+      _safeSetState(() => _isLoadingDiary = false);
+    }
+
+    if (!mounted) return;
+    await _waitForUiSettle();
     if (!mounted) return;
 
     await showModalBottomSheet<void>(
@@ -4388,123 +4412,75 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetCtx) {
-        // 시트 내부 로컬 상태.
-        var mode = 'calendar'; // 'calendar' | 'monthPicker' | 'detail'
-        DateTime? selectedDate;
-        var sheetLoading = false;
-
-        return StatefulBuilder(
-          builder: (innerCtx, setSheetState) {
-            Future<void> reloadMonth(DateTime newMonth) async {
-              final clamped = _clampDiaryMonth(newMonth);
-              setSheetState(() {
-                visibleMonth = clamped;
-                sheetLoading = true;
-              });
-              await _fetchDiaryMonthLogs(clamped);
-              _diaryVisibleMonth = clamped;
-              if (!mounted) return;
-              setSheetState(() {
-                sheetLoading = false;
-              });
-            }
-
-            Widget body;
-            if (mode == 'monthPicker') {
-              body = _buildDietDiaryMonthPicker(
-                visibleYear: visibleMonth.year,
-                selectedMonth: visibleMonth.month,
-                onPickMonth: (year, month) async {
-                  setSheetState(() => mode = 'calendar');
-                  await reloadMonth(DateTime(year, month, 1));
-                },
-                onChangeYear: (newYear) {
-                  setSheetState(() {
-                    visibleMonth = DateTime(newYear, visibleMonth.month, 1);
-                  });
-                },
-                onBack: () => setSheetState(() => mode = 'calendar'),
-              );
-            } else if (mode == 'detail' && selectedDate != null) {
-              final dateKey = _dateKey(selectedDate!);
-              final logs = List<Map<String, dynamic>>.from(
-                _diaryLogsByDate[dateKey] ?? const [],
-              );
-              body = _DietDiaryDetailPanel(
-                key: ValueKey('diary-detail-$dateKey'),
-                date: selectedDate!,
-                logs: logs,
-                signedUrlBuilder: _signedMealPhotoUrl,
-                onPhotoTap: _showMealPhotoPreview,
-                fetchNote: _fetchMealDiaryNote,
-                saveNote: _saveMealDiaryNote,
-                onBack: () {
-                  setSheetState(() {
-                    mode = 'calendar';
-                    selectedDate = null;
-                  });
-                },
-                onSavedSuccess: () {
-                  // 상세에서 저장 성공 후 SnackBar 만 띄우고 머무른다.
-                  _showSnack('식단일지가 저장되었어요.');
-                },
-              );
-            } else {
-              body = _buildDietDiaryCalendar(
-                visibleMonth: visibleMonth,
-                isLoading: sheetLoading,
-                onPrevMonth: () async {
-                  final prev = DateTime(
-                    visibleMonth.year,
-                    visibleMonth.month - 1,
-                    1,
-                  );
-                  if (!_isDiaryMonthInRange(prev)) return;
-                  await reloadMonth(prev);
-                },
-                onNextMonth: () async {
-                  final next = DateTime(
-                    visibleMonth.year,
-                    visibleMonth.month + 1,
-                    1,
-                  );
-                  if (!_isDiaryMonthInRange(next)) return;
-                  await reloadMonth(next);
-                },
-                onTapTitle: () =>
-                    setSheetState(() => mode = 'monthPicker'),
-                onTapDate: (date) {
-                  setSheetState(() {
-                    selectedDate = date;
-                    mode = 'detail';
-                  });
-                },
-              );
-            }
-
-            return SafeArea(
-              top: false,
-              child: AnimatedSize(
-                duration: const Duration(milliseconds: 150),
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                  child: body,
-                ),
-              ),
+      builder: (_) {
+        return _DietDiarySheetPanel(
+          initialMonth: initialMonth,
+          clampMonth: _clampDiaryMonth,
+          isMonthInRange: _isDiaryMonthInRange,
+          fetchMonthLogs: _fetchDiaryMonthLogs,
+          logsByDateProvider: () => _diaryLogsByDate,
+          dateKey: _dateKey,
+          onMonthChanged: (month) {
+            _safeSetState(() => _diaryVisibleMonth = month);
+          },
+          onSavedSuccess: () {
+            _showSnack('식단일지가 저장되었어요.');
+          },
+          signedUrlBuilder: _signedMealPhotoUrl,
+          onPhotoTap: _showMealPhotoPreview,
+          fetchNote: _fetchMealDiaryNote,
+          saveNote: _saveMealDiaryNote,
+          calendarBuilder: (
+            BuildContext sheetCtx,
+            DateTime visibleMonth,
+            bool isLoading,
+            Map<String, List<Map<String, dynamic>>> logsByDate,
+            Future<void> Function() onPrevMonth,
+            Future<void> Function() onNextMonth,
+            VoidCallback onTapTitle,
+            ValueChanged<DateTime> onTapDate,
+          ) {
+            return _buildDietDiaryCalendar(
+              sheetContext: sheetCtx,
+              diaryLogsByDate: logsByDate,
+              visibleMonth: visibleMonth,
+              isLoading: isLoading,
+              onPrevMonth: onPrevMonth,
+              onNextMonth: onNextMonth,
+              onTapTitle: onTapTitle,
+              onTapDate: onTapDate,
+            );
+          },
+          monthPickerBuilder: (
+            BuildContext sheetCtx,
+            int visibleYear,
+            int highlightYear,
+            int highlightMonth,
+            Future<void> Function(int year, int month) onPickMonth,
+            ValueChanged<int> onChangeYear,
+            VoidCallback onBack,
+          ) {
+            return _buildDietDiaryMonthPicker(
+              sheetContext: sheetCtx,
+              visibleYear: visibleYear,
+              highlightYear: highlightYear,
+              highlightMonth: highlightMonth,
+              onPickMonth: onPickMonth,
+              onChangeYear: onChangeYear,
+              onBack: onBack,
             );
           },
         );
       },
     );
 
-    // 시트가 닫힌 뒤 마당 화면에서도 최신 상태가 유지되도록 한 번 setState.
     if (mounted) setState(() {});
   }
 
   // ---------- 식단일지 달력 모드 ----------
   Widget _buildDietDiaryCalendar({
+    required BuildContext sheetContext,
+    required Map<String, List<Map<String, dynamic>>> diaryLogsByDate,
     required DateTime visibleMonth,
     required bool isLoading,
     required Future<void> Function() onPrevMonth,
@@ -4512,7 +4488,7 @@ class _HomePageState extends State<HomePage> {
     required VoidCallback onTapTitle,
     required ValueChanged<DateTime> onTapDate,
   }) {
-    final theme = Theme.of(context);
+    final theme = Theme.of(sheetContext);
     final canPrev = _isDiaryMonthInRange(
       DateTime(visibleMonth.year, visibleMonth.month - 1, 1),
     );
@@ -4632,7 +4608,8 @@ class _HomePageState extends State<HomePage> {
             final day = index - firstWeekday + 1;
             final date = DateTime(visibleMonth.year, visibleMonth.month, day);
             final dateKey = _dateKey(date);
-            final hasMeal = (_diaryLogsByDate[dateKey] ?? const []).isNotEmpty;
+            final hasMeal =
+                (diaryLogsByDate[dateKey] ?? const []).isNotEmpty;
             final isToday = dateKey == today;
             final weekdayCol = index % 7;
 
@@ -4686,13 +4663,15 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- 식단일지 월 선택 모드 ----------
   Widget _buildDietDiaryMonthPicker({
+    required BuildContext sheetContext,
     required int visibleYear,
-    required int selectedMonth,
-    required void Function(int year, int month) onPickMonth,
+    required int highlightYear,
+    required int highlightMonth,
+    required Future<void> Function(int year, int month) onPickMonth,
     required ValueChanged<int> onChangeYear,
     required VoidCallback onBack,
   }) {
-    final theme = Theme.of(context);
+    final theme = Theme.of(sheetContext);
     final canPrevYear = visibleYear > _diaryMinMonth.year;
     final canNextYear = visibleYear < _diaryMaxMonth.year;
 
@@ -4754,7 +4733,7 @@ class _HomePageState extends State<HomePage> {
           itemBuilder: (ctx, idx) {
             final m = idx + 1;
             final isSelected =
-                visibleYear == _diaryVisibleMonth.year && m == selectedMonth;
+                visibleYear == highlightYear && m == highlightMonth;
             // 선택 가능 범위 체크 (예: 2026년이면 1월부터, 2035년이면 12월까지 모두 OK)
             final candidate = DateTime(visibleYear, m, 1);
             final enabled = _isDiaryMonthInRange(candidate);
@@ -4766,7 +4745,11 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(12),
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: enabled ? () => onPickMonth(visibleYear, m) : null,
+                onTap: enabled
+                    ? () {
+                        onPickMonth(visibleYear, m);
+                      }
+                    : null,
                 child: Center(
                   child: Text(
                     '$m월',
@@ -5733,6 +5716,179 @@ class _AffectionProgressInfo {
   final double progress;
   final String label;
   final bool isComplete;
+}
+
+// ============================================================================
+// 식단일지 BottomSheet 본문 (달력 / 월 선택 / 상세 모드)
+// ----------------------------------------------------------------------------
+// mode / visibleMonth / selectedDate 를 이 State 에서만 관리한다.
+// showModalBottomSheet 의 builder 가 키보드 등장으로 재실행되어도
+// StatefulWidget State 객체는 유지되므로 detail 모드가 calendar 로
+// 리셋되지 않는다.
+// ============================================================================
+class _DietDiarySheetPanel extends StatefulWidget {
+  const _DietDiarySheetPanel({
+    required this.initialMonth,
+    required this.clampMonth,
+    required this.isMonthInRange,
+    required this.fetchMonthLogs,
+    required this.logsByDateProvider,
+    required this.dateKey,
+    required this.onMonthChanged,
+    required this.onSavedSuccess,
+    required this.signedUrlBuilder,
+    required this.onPhotoTap,
+    required this.fetchNote,
+    required this.saveNote,
+    required this.calendarBuilder,
+    required this.monthPickerBuilder,
+  });
+
+  final DateTime initialMonth;
+  final DateTime Function(DateTime month) clampMonth;
+  final bool Function(DateTime month) isMonthInRange;
+  final Future<void> Function(DateTime month) fetchMonthLogs;
+  final Map<String, List<Map<String, dynamic>>> Function() logsByDateProvider;
+  final String Function(DateTime date) dateKey;
+  final ValueChanged<DateTime> onMonthChanged;
+  final VoidCallback onSavedSuccess;
+  final Future<String?> Function(String? imagePath) signedUrlBuilder;
+  final Future<void> Function(String imageUrl) onPhotoTap;
+  final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
+  final Future<bool> Function({
+    required DateTime date,
+    required String? weightText,
+    required String noteText,
+  }) saveNote;
+  final Widget Function(
+    BuildContext sheetCtx,
+    DateTime visibleMonth,
+    bool isLoading,
+    Map<String, List<Map<String, dynamic>>> logsByDate,
+    Future<void> Function() onPrevMonth,
+    Future<void> Function() onNextMonth,
+    VoidCallback onTapTitle,
+    ValueChanged<DateTime> onTapDate,
+  ) calendarBuilder;
+  final Widget Function(
+    BuildContext sheetCtx,
+    int visibleYear,
+    int highlightYear,
+    int highlightMonth,
+    Future<void> Function(int year, int month) onPickMonth,
+    ValueChanged<int> onChangeYear,
+    VoidCallback onBack,
+  ) monthPickerBuilder;
+
+  @override
+  State<_DietDiarySheetPanel> createState() => _DietDiarySheetPanelState();
+}
+
+class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
+  late DateTime visibleMonth;
+  String mode = 'calendar'; // 'calendar' | 'monthPicker' | 'detail'
+  DateTime? selectedDate;
+  bool sheetLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    visibleMonth = widget.initialMonth;
+  }
+
+  Future<void> reloadMonth(DateTime newMonth) async {
+    final clamped = widget.clampMonth(newMonth);
+    setState(() {
+      visibleMonth = clamped;
+      sheetLoading = true;
+    });
+    await widget.fetchMonthLogs(clamped);
+    widget.onMonthChanged(clamped);
+    if (!mounted) return;
+    setState(() {
+      sheetLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final logs = widget.logsByDateProvider();
+
+    Widget body;
+    if (mode == 'monthPicker') {
+      body = widget.monthPickerBuilder(
+        context,
+        visibleMonth.year,
+        visibleMonth.year,
+        visibleMonth.month,
+        (year, month) async {
+          setState(() => mode = 'calendar');
+          await reloadMonth(DateTime(year, month, 1));
+        },
+        (newYear) {
+          setState(() {
+            visibleMonth = DateTime(newYear, visibleMonth.month, 1);
+          });
+        },
+        () => setState(() => mode = 'calendar'),
+      );
+    } else if (mode == 'detail' && selectedDate != null) {
+      final dk = widget.dateKey(selectedDate!);
+      final dayLogs = List<Map<String, dynamic>>.from(logs[dk] ?? const []);
+      body = _DietDiaryDetailPanel(
+        key: ValueKey('diary-detail-$dk'),
+        date: selectedDate!,
+        logs: dayLogs,
+        signedUrlBuilder: widget.signedUrlBuilder,
+        onPhotoTap: widget.onPhotoTap,
+        fetchNote: widget.fetchNote,
+        saveNote: widget.saveNote,
+        onBack: () {
+          setState(() {
+            mode = 'calendar';
+            selectedDate = null;
+          });
+        },
+        onSavedSuccess: widget.onSavedSuccess,
+      );
+    } else {
+      body = widget.calendarBuilder(
+        context,
+        visibleMonth,
+        sheetLoading,
+        logs,
+        () async {
+          final prev = DateTime(visibleMonth.year, visibleMonth.month - 1, 1);
+          if (!widget.isMonthInRange(prev)) return;
+          await reloadMonth(prev);
+        },
+        () async {
+          final next = DateTime(visibleMonth.year, visibleMonth.month + 1, 1);
+          if (!widget.isMonthInRange(next)) return;
+          await reloadMonth(next);
+        },
+        () => setState(() => mode = 'monthPicker'),
+        (date) {
+          setState(() {
+            selectedDate = date;
+            mode = 'detail';
+          });
+        },
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 150),
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: body,
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================================
