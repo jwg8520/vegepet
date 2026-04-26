@@ -146,6 +146,17 @@ void main() async {
 
 final supabase = Supabase.instance.client;
 
+// 전역 Navigator / ScaffoldMessenger key.
+//
+// HomePage 의 일시적인 BuildContext 변화(프로필 입력 → 첫 분양 → 마당 화면 전환,
+// BottomSheet/Dialog 트리 dispose 등) 와 SnackBar/Dialog 호출 타이밍이 겹치면
+// `_dependents.isEmpty is not true` assertion 이 발생할 수 있다. 전역 key 를
+// 통해 SnackBar 를 띄워서 화면 전환 타이밍과의 충돌을 줄인다.
+final GlobalKey<NavigatorState> _rootNavigatorKey =
+    GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 class VegePetApp extends StatelessWidget {
   const VegePetApp({super.key});
 
@@ -154,6 +165,8 @@ class VegePetApp extends StatelessWidget {
     return MaterialApp(
       title: 'VegePet',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _rootNavigatorKey,
+      scaffoldMessengerKey: _rootScaffoldMessengerKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
@@ -179,6 +192,10 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _petSpecies = [];
   Map<String, dynamic>? _activePet;
+  // 마당에 함께 거주하는 성숙기 졸업 펫 목록.
+  // user_pets 에서 is_resident=true 이고 graduated_at != null 인 펫들이며,
+  // 현재 activePet 과 별도로 마당 화면 하단에 작게 함께 표시한다.
+  List<Map<String, dynamic>> _residentPets = [];
 
   String? _selectedSpeciesId;
   bool _isAdopting = false;
@@ -224,6 +241,14 @@ class _HomePageState extends State<HomePage> {
   // RPC 호출 + user_pets insert 가 원자적이지 않으므로, UI 레벨에서라도 락을 걸어둔다.
   bool _isUsingRandomTicket = false;
 
+  // 도감(pokedex) 화면 데이터.
+  // 도감 BottomSheet 가 열릴 때 한 번 조회해 들고 있다가, 시트 안에서는 DB
+  // 호출을 추가로 하지 않는다. 모달 안에서 또 다른 async 작업을 일으키면
+  // BottomSheet/Dialog 트리 정리 타이밍이 꼬이면서 `_dependents.isEmpty
+  // is not true` 오류가 다시 발생할 수 있기 때문이다.
+  List<Map<String, dynamic>> _pokedexEntries = [];
+  bool _isLoadingPokedex = false;
+
   @override
   void initState() {
     super.initState();
@@ -259,6 +284,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _saveProfile() async {
+    // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
+    // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
+    _dismissFocus();
+
     final user = supabase.auth.currentUser;
     if (user == null) {
       _showSnack('로그인이 필요해요.');
@@ -284,7 +313,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() => _isSavingProfile = true);
+    _safeSetState(() => _isSavingProfile = true);
     try {
       await supabase.from('profiles').update({
         'nickname': nickname,
@@ -297,10 +326,14 @@ class _HomePageState extends State<HomePage> {
       await _fetchProfile();
 
       if (!mounted) return;
-      setState(() => _isSavingProfile = false);
+      // 프로필 입력 → 첫 펫 분양 화면으로 큰 전환이 일어나는 지점.
+      // build 가 한 frame 자리잡을 때까지 양보해 input subtree 가 안전하게
+      // dispose 되게 한다.
+      _safeSetState(() => _isSavingProfile = false);
+      await _waitForUiSettle();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSavingProfile = false);
+      _safeSetState(() => _isSavingProfile = false);
       _showSnack('프로필 저장 실패: $e');
     }
   }
@@ -320,6 +353,7 @@ class _HomePageState extends State<HomePage> {
         _fetchProfile(),
         _fetchPetSpecies(),
         _fetchActivePet(),
+        _fetchResidentPets(),
         _fetchTodayMealLogs(),
         _fetchRandomTicketCount(),
       ]);
@@ -383,6 +417,40 @@ class _HomePageState extends State<HomePage> {
     _activePet = data == null ? null : Map<String, dynamic>.from(data);
   }
 
+  // 성숙기 졸업 후 마당에 거주 중인 펫 목록 조회.
+  //
+  // finalize_pet_graduation 이후의 펫(`is_resident=true`, `graduated_at !=
+  // null`)들을 모두 가져와서 마당 화면에 함께 표시한다. 새 펫이 분양되어
+  // 기존 성숙기 펫이 `is_active=false` 가 되어도 이 목록에는 계속 포함된다.
+  //
+  // 조회 자체가 실패해도 앱이 죽지 않도록 catch 해서 _residentPets 만 비운다.
+  Future<void> _fetchResidentPets() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _residentPets = [];
+      return;
+    }
+    try {
+      final data = await supabase
+          .from('user_pets')
+          .select(
+            'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, pet_species:pet_species_id(id, code, name_ko, family, sort_order)',
+          )
+          .eq('user_id', user.id)
+          .eq('is_resident', true)
+          .not('graduated_at', 'is', null)
+          .order('graduated_at');
+
+      _residentPets = (data as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e) {
+      debugPrint('fetch resident pets failed: $e');
+      _residentPets = [];
+    }
+  }
+
   Future<void> _fetchTodayMealLogs() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -429,6 +497,239 @@ class _HomePageState extends State<HomePage> {
       debugPrint('fetch random ticket count failed: $e');
       _randomTicketCount = 0;
     }
+  }
+
+  // 도감(pokedex) 등록 펫 조회.
+  //
+  // 이전에는 pokedex_entries / pet_species / source_user_pet 을 PostgREST relation
+  // alias 로 한 번에 join 해서 가져왔지만, 관계명/RLS 차이에 따라 join 자체가
+  // 실패하면 도감이 통째로 비어 보이는 문제가 있었다.
+  //
+  // 그래서 아래 흐름으로 안전하게 가져온다:
+  //   1) pokedex_entries 기본 row(컬럼만) 조회
+  //   2) 거기서 모은 pet_species_id 들을 pet_species 에서 별도 조회
+  //   3) source_user_pet_id 들을 user_pets 에서 별도 조회 (실패해도 도감은 표시)
+  //   4) Flutter 쪽에서 row['pet_species'] / row['source_user_pet'] 에 직접 붙여
+  //      기존 도감 UI 와 호환되는 형태로 합친다.
+  //   5) sort_order(asc) → registered_at(asc) 로 정렬.
+  Future<void> _fetchPokedexEntries() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      debugPrint('pokedex fetch skipped: user is null');
+      _pokedexEntries = [];
+      return;
+    }
+
+    debugPrint('pokedex current user id: ${user.id}');
+
+    // 1) pokedex_entries 기본 row 만 먼저 조회.
+    List<Map<String, dynamic>> entries = [];
+    try {
+      final rawEntries = await supabase
+          .from('pokedex_entries')
+          .select('id, user_id, pet_species_id, source_user_pet_id, registered_at')
+          .eq('user_id', user.id);
+      entries = (rawEntries as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e) {
+      debugPrint('fetch pokedex base entries failed: $e');
+      _pokedexEntries = [];
+      rethrow;
+    }
+
+    debugPrint('pokedex base entries count: ${entries.length}');
+
+    if (entries.isEmpty) {
+      _pokedexEntries = [];
+      return;
+    }
+
+    // 2) pet_species_id 모음 → pet_species 별도 조회.
+    final speciesIds = entries
+        .map((e) {
+          final raw = e['pet_species_id'];
+          return raw is int
+              ? raw
+              : int.tryParse(raw?.toString() ?? '');
+        })
+        .whereType<int>()
+        .toSet()
+        .toList();
+
+    debugPrint('pokedex species ids: $speciesIds');
+
+    final speciesById = <int, Map<String, dynamic>>{};
+    if (speciesIds.isNotEmpty) {
+      try {
+        final speciesRows = await supabase
+            .from('pet_species')
+            .select('id, code, name_ko, family, sort_order')
+            .filter('id', 'in', '(${speciesIds.join(',')})');
+        for (final s in (speciesRows as List).whereType<Map>()) {
+          final raw = s['id'];
+          final id = raw is int
+              ? raw
+              : int.tryParse(raw?.toString() ?? '');
+          if (id != null) {
+            speciesById[id] = Map<String, dynamic>.from(s);
+          }
+        }
+      } catch (e) {
+        debugPrint('fetch pet_species for pokedex failed: $e');
+      }
+    }
+
+    // 3) source_user_pet_id 모음 → user_pets 별도 조회 (실패해도 진행).
+    final sourcePetIds = entries
+        .map((e) => e['source_user_pet_id']?.toString())
+        .whereType<String>()
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+
+    debugPrint('pokedex source pet ids: $sourcePetIds');
+
+    final sourcePetById = <String, Map<String, dynamic>>{};
+    if (sourcePetIds.isNotEmpty) {
+      try {
+        final quoted =
+            sourcePetIds.map((id) => '"$id"').join(',');
+        final sourcePetRows = await supabase
+            .from('user_pets')
+            .select('id, nickname, stage, graduated_at')
+            .filter('id', 'in', '($quoted)');
+        for (final p in (sourcePetRows as List).whereType<Map>()) {
+          final id = p['id']?.toString();
+          if (id != null && id.isNotEmpty) {
+            sourcePetById[id] = Map<String, dynamic>.from(p);
+          }
+        }
+      } catch (e) {
+        debugPrint('fetch source user_pets for pokedex failed: $e');
+      }
+    }
+
+    // 4) 각 row 에 species / source_user_pet 을 직접 붙인다.
+    for (final e in entries) {
+      final rawSpeciesId = e['pet_species_id'];
+      final speciesId = rawSpeciesId is int
+          ? rawSpeciesId
+          : int.tryParse(rawSpeciesId?.toString() ?? '');
+      if (speciesId != null) {
+        e['pet_species'] = speciesById[speciesId];
+      }
+
+      final sourcePetId = e['source_user_pet_id']?.toString();
+      if (sourcePetId != null && sourcePetId.isNotEmpty) {
+        e['source_user_pet'] = sourcePetById[sourcePetId];
+      }
+    }
+
+    // 5) sort_order(asc) → registered_at(asc) 로 정렬.
+    //    pokedex_entries 테이블에는 created_at 이 없고 registered_at 컬럼이
+    //    실제 등록 시각을 담고 있으므로 그 값을 보조 정렬 키로 사용한다.
+    int sortOrderOf(Map<String, dynamic> entry) {
+      final species = entry['pet_species'];
+      if (species is Map) {
+        final v = species['sort_order'];
+        if (v is int) return v;
+        if (v is num) return v.toInt();
+        return int.tryParse(v?.toString() ?? '') ?? 9999;
+      }
+      return 9999;
+    }
+
+    DateTime registeredAtOf(Map<String, dynamic> entry) {
+      final raw = entry['registered_at']?.toString();
+      if (raw == null || raw.isEmpty) {
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+      return DateTime.tryParse(raw) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+    }
+
+    entries.sort((a, b) {
+      final c = sortOrderOf(a).compareTo(sortOrderOf(b));
+      if (c != 0) return c;
+      return registeredAtOf(a).compareTo(registeredAtOf(b));
+    });
+
+    debugPrint('pokedex merged entries count: ${entries.length}');
+    _pokedexEntries = entries;
+  }
+
+  // pet_species.family 문자열을 'cat' / 'dog' / '' 로 정규화한다.
+  // DB 가 'CAT', '고양이', '강아지', '댕댕이' 같은 변형 값으로 들어와 있어도
+  // 도감 화면에서 고양이/강아지 섹션에 표시될 수 있도록 한다.
+  String _normalizePetFamily(String raw) {
+    final v = raw.trim().toLowerCase();
+    if (v.isEmpty) return '';
+    if (v == 'cat' ||
+        v.contains('cat') ||
+        v.contains('고양') ||
+        v.contains('냥')) {
+      return 'cat';
+    }
+    if (v == 'dog' ||
+        v.contains('dog') ||
+        v.contains('강아') ||
+        v.contains('댕')) {
+      return 'dog';
+    }
+    return '';
+  }
+
+  // 도감 entry 에서 family('cat'/'dog'/'')를 안전하게 꺼낸다.
+  // 미지의 값이 들어와 있을 때를 위해 _normalizePetFamily 로 한 번 정리한다.
+  String _pokedexFamilyOf(Map<String, dynamic> entry) {
+    final species = entry['pet_species'];
+    if (species is Map) {
+      return _normalizePetFamily(species['family']?.toString() ?? '');
+    }
+    return '';
+  }
+
+  // 도감 entry 에서 종 이름(name_ko)을 안전하게 꺼낸다.
+  String _pokedexSpeciesNameOf(Map<String, dynamic> entry) {
+    final species = entry['pet_species'];
+    if (species is Map) {
+      final n = species['name_ko']?.toString().trim();
+      if (n != null && n.isNotEmpty) return n;
+    }
+    return '베지펫';
+  }
+
+  // 도감 entry 에서 source_user_pet.nickname 을 안전하게 꺼낸다.
+  // join 자체가 실패했거나 닉네임이 비어 있는 경우 '이름 없음' 으로 표시.
+  String _pokedexNicknameOf(Map<String, dynamic> entry) {
+    final sourcePet = entry['source_user_pet'];
+    if (sourcePet is Map) {
+      final nickname = sourcePet['nickname']?.toString().trim();
+      if (nickname != null && nickname.isNotEmpty) return nickname;
+    }
+    return '이름 없음';
+  }
+
+  // 같은 pet_species_id 가 여러 건 등록되어 있어도 도감 화면에는 종당 1마리만
+  // 노출한다. 정렬은 호출 측에서 끝내고 들어오므로 처음 만난 행을 그대로 채택.
+  List<Map<String, dynamic>> _dedupePokedexEntriesBySpecies(
+    List<Map<String, dynamic>> entries,
+  ) {
+    final seen = <int>{};
+    final result = <Map<String, dynamic>>[];
+    for (final entry in entries) {
+      final raw = entry['pet_species_id'];
+      final speciesId = raw is int
+          ? raw
+          : int.tryParse(raw?.toString() ?? '');
+      if (speciesId == null) continue;
+      if (seen.contains(speciesId)) continue;
+      seen.add(speciesId);
+      result.add(entry);
+    }
+    return result;
   }
 
   // 기존: Flutter에서 직접 meal_logs insert + user_pets.affection update를 수행하던 경로.
@@ -635,6 +936,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await Future.wait([
         _fetchActivePet(),
+        _fetchResidentPets(),
         _fetchRandomTicketCount(),
       ]);
     } catch (e) {
@@ -768,6 +1070,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _adoptSelectedPet() async {
+    _dismissFocus();
+
     final user = supabase.auth.currentUser;
     if (user == null) {
       _showSnack('로그인이 필요해요.');
@@ -785,7 +1089,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() => _isAdopting = true);
+    _safeSetState(() => _isAdopting = true);
 
     try {
       await supabase.from('user_pets').insert({
@@ -802,133 +1106,80 @@ class _HomePageState extends State<HomePage> {
       await _fetchActivePet();
 
       if (!mounted) return;
-      setState(() {
+      _safeSetState(() {
         _selectedSpeciesId = null;
         _isAdopting = false;
       });
 
-      // 분양 완료 직후, 닉네임이 아직 null인 상태에서 바로 마당이 노출되지 않도록
-      // 이름 짓기 다이얼로그를 띄운다.
+      // 첫 분양 화면 → 마당 화면 으로 큰 전환이 발생한 직후에 곧바로
+      // Dialog 를 띄우면 element 트리 정리가 끝나기 전에 새 route 가 push 되어
+      // dispose 타이밍 오류가 날 수 있다. 한 frame 양보 후 띄운다.
+      await _waitForUiSettle();
+      if (!mounted) return;
       await _showNicknameDialog();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isAdopting = false);
+      _safeSetState(() => _isAdopting = false);
       _showSnack('분양 저장에 실패했어요: $e');
     }
   }
 
   // 분양 직후에 뜨는 닉네임 입력 다이얼로그.
   // 허용 문자: 한글/영문 대소문자/숫자, 길이 2~8자, 공백·특수문자 금지.
+  //
+  // Dialog 위젯 자체(_PetNicknameDialog)는 "이름 입력 / 검증 / 문자열 반환" 만
+  // 책임지고, Supabase user_pets.nickname update / _fetchActivePet /
+  // HomePage setState / SnackBar 같은 후처리는 Dialog 가 완전히 닫히고
+  // 한 frame 양보된 뒤 여기에서 수행한다. 이렇게 분리해야 TextField/Focus/
+  // TextEditingController dispose 와 HomePage 상태 갱신이 겹쳐서 발생하던
+  // `_dependents.isEmpty is not true` assertion 오류가 재발하지 않는다.
   Future<void> _showNicknameDialog() async {
     final pet = _activePet;
     if (pet == null || !mounted) return;
 
-    final controller = TextEditingController();
-    final pattern = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
-    String? errorText;
-    bool saving = false;
+    // Dialog 가 닫힌 사이 _activePet 이 재조회로 잠시 비거나 바뀌더라도
+    // 잘못된 row 를 업데이트하지 않도록 petId 를 미리 확보해 둔다.
+    final petId = pet['id']?.toString();
+    if (petId == null || petId.isEmpty) return;
+
+    _dismissFocus();
+
+    final nickname = await showDialog<String>(
+      context: _rootNavigatorKey.currentContext ?? context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (ctx) => const _PetNicknameDialog(),
+    );
+
+    if (!mounted || nickname == null) return;
+
+    // Dialog dispose(특히 TextEditingController dispose)가 끝난 뒤 DB 작업/상태
+    // 갱신이 일어나도록 한 frame 양보.
+    await _waitForUiSettle();
+    if (!mounted) return;
 
     try {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          return StatefulBuilder(
-            builder: (ctx, setDialogState) {
-              Future<void> save() async {
-                final text = controller.text.trim();
-                if (text.isEmpty) {
-                  setDialogState(() => errorText = '이름을 입력해주세요.');
-                  return;
-                }
-                if (text.length < 2 || text.length > 8) {
-                  setDialogState(() => errorText = '이름은 2~8자로 입력해주세요.');
-                  return;
-                }
-                if (!pattern.hasMatch(text)) {
-                  setDialogState(
-                      () => errorText = '특수문자는 사용할 수 없어요.');
-                  return;
-                }
+      await supabase
+          .from('user_pets')
+          .update({'nickname': nickname}).eq('id', petId);
 
-                setDialogState(() {
-                  saving = true;
-                  errorText = null;
-                });
+      await _fetchActivePet();
 
-                try {
-                  await supabase
-                      .from('user_pets')
-                      .update({'nickname': text}).eq('id', pet['id']);
+      if (!mounted) return;
+      _safeSetState(() {});
 
-                  await _fetchActivePet();
+      await _waitForUiSettle();
+      if (!mounted) return;
+      _showSnack('이름이 저장되었어요!');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('이름 저장 실패: $e');
 
-                  if (!mounted) return;
-                  setState(() {});
-
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                  _showSnack('이름이 저장되었어요!');
-                } catch (e) {
-                  if (!ctx.mounted) return;
-                  setDialogState(() {
-                    saving = false;
-                    errorText = '저장 실패: $e';
-                  });
-                }
-              }
-
-              return AlertDialog(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                title: const Text('아기 베지펫이 분양 되었어요🥹 건강하게 키워주세요~!'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('귀여운 이름을 지어주세요!'),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      maxLength: 8,
-                      enabled: !saving,
-                      decoration: InputDecoration(
-                        hintText: '예: 구름이',
-                        border: const OutlineInputBorder(),
-                        errorText: errorText,
-                        helperText: '한글·영문·숫자 2~8자 (공백/특수문자 불가)',
-                        counterText: '',
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) {
-                        if (!saving) save();
-                      },
-                    ),
-                  ],
-                ),
-                actions: [
-                  FilledButton(
-                    onPressed: saving ? null : save,
-                    child: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('저장'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      controller.dispose();
+      // 이름 저장에 실패하면 사용자가 다시 시도할 수 있도록 한 frame 양보 후
+      // 같은 다이얼로그를 재호출한다.
+      await _waitForUiSettle();
+      if (!mounted) return;
+      await _showNicknameDialog();
     }
   }
 
@@ -958,6 +1209,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await Future.wait([
         _fetchActivePet(),
+        _fetchResidentPets(),
         _fetchTodayMealLogs(),
         _fetchRandomTicketCount(),
       ]);
@@ -968,17 +1220,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _signOut() async {
+    _dismissFocus();
     try {
       await supabase.auth.signOut();
       if (!mounted) return;
-      setState(() {
+      _safeSetState(() {
         _profile = null;
         _petSpecies = [];
         _activePet = null;
+        _residentPets = [];
         _selectedSpeciesId = null;
         _todayMealLogs = [];
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
+        _pokedexEntries = [];
+        _isLoadingPokedex = false;
 
         _isUploadingMeal = false;
         _uploadingSlot = null;
@@ -990,6 +1246,8 @@ class _HomePageState extends State<HomePage> {
         _selectedAgeRange = null;
         _selectedDietGoal = null;
       });
+      await _waitForUiSettle();
+      if (!mounted) return;
       await _bootstrap();
     } catch (e) {
       _showSnack('로그아웃 실패: $e');
@@ -1048,6 +1306,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _resetForTesting() async {
+    _dismissFocus();
+
     final user = supabase.auth.currentUser;
     if (user == null) {
       _showSnack('로그인 상태가 아니어서 초기화할 수 없어요.');
@@ -1056,6 +1316,11 @@ class _HomePageState extends State<HomePage> {
 
     final ok = await _confirmResetForTesting();
     if (!ok) return;
+    if (!mounted) return;
+
+    // 확인 Dialog 가 dispose 된 직후에 _bootstrap 으로 큰 화면 전환이 이어지므로
+    // 한 frame 양보해 트리 정리가 끝난 뒤 진행한다.
+    await _waitForUiSettle();
     if (!mounted) return;
 
     try {
@@ -1076,7 +1341,7 @@ class _HomePageState extends State<HomePage> {
       }).eq('id', user.id);
 
       if (!mounted) return;
-      setState(() {
+      _safeSetState(() {
         _lastResultType = null;
         _lastFeedbackText = null;
         _lastStatusMessage = null;
@@ -1092,6 +1357,9 @@ class _HomePageState extends State<HomePage> {
         _isLoggingMeal = false;
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
+        _pokedexEntries = [];
+        _isLoadingPokedex = false;
+        _residentPets = [];
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -1100,6 +1368,8 @@ class _HomePageState extends State<HomePage> {
         _selectedDietGoal = null;
       });
 
+      await _waitForUiSettle();
+      if (!mounted) return;
       await _bootstrap();
 
       if (!mounted) return;
@@ -1279,22 +1549,37 @@ class _HomePageState extends State<HomePage> {
 
   // 가방 BottomSheet.
   //
-  // BottomSheet 내부에서 AlertDialog 를 직접 띄우거나, sheetCtx 를 await 이후에
-  // Navigator 에 사용하면 `_dependents.isEmpty is not true` 위젯 트리 오류가
-  // 발생할 수 있다. 그래서 시트 안에서는 "사용 의사"만 bool 로 pop 해서 반환하고,
-  // 확인 다이얼로그 / 실제 분양 흐름은 시트가 완전히 닫힌 뒤 HomePage 의
-  // context 에서 차례로 실행한다.
+  // 도감 시트와 동일한 패턴:
+  //   - 시트 내부에서 추가 showDialog 를 띄우지 않는다.
+  //   - 아이콘 탭 → 같은 시트 안의 Stack overlay 로 설명창 표시.
+  //   - 분양권 "사용하기" 버튼은 카드 안에 별도 버튼으로 분리해서, 아이콘 탭(설명
+  //     보기) 과 사용 트리거가 충돌하지 않게 한다.
+  //   - "사용하기" 버튼이 눌리면 시트는 bool(true) 만 pop 하고, 확인 다이얼로그/
+  //     실제 분양 흐름은 시트가 완전히 닫힌 뒤 HomePage context 에서 실행한다.
   Future<void> _openBagSheet() async {
     final shouldUseTicket = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
-        return _buildBagSheetContent(
-          onUseTicket: () {
-            Navigator.of(sheetCtx).pop(true);
+        _BagItem? selectedItem;
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return _buildBagSheetContent(
+              selectedItem: selectedItem,
+              onSelectItem: (item) {
+                setSheetState(() => selectedItem = item);
+              },
+              onCloseInfo: () {
+                setSheetState(() => selectedItem = null);
+              },
+              onUseTicket: () {
+                Navigator.of(sheetCtx).pop(true);
+              },
+            );
           },
         );
       },
@@ -1302,8 +1587,8 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted || shouldUseTicket != true) return;
 
-    // 시트 dispose 가 끝난 뒤 다이얼로그를 띄우도록 한 틱 양보.
-    await Future<void>.delayed(Duration.zero);
+    // 시트 dispose 가 끝난 뒤 다이얼로그를 띄우도록 한 frame 양보.
+    await _waitForUiSettle();
     if (!mounted) return;
 
     final confirmed = await _confirmUseRandomTicket();
@@ -1313,87 +1598,638 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildBagSheetContent({
+    required _BagItem? selectedItem,
+    required ValueChanged<_BagItem> onSelectItem,
+    required VoidCallback onCloseInfo,
     required VoidCallback onUseTicket,
   }) {
     final theme = Theme.of(context);
     final hasTicket = _randomTicketCount > 0;
-    final disabled = !hasTicket || _isUsingRandomTicket;
+    final useDisabled = !hasTicket || _isUsingRandomTicket;
+
+    // 분양권은 _randomTicketCount 가 1 이상일 때만 더미 티켓 카드로 노출한다.
+    // 가구/장난감 섹션은 이번 단계에서 보유 데이터가 없으므로 항상 빈 상태.
+    final ticketItems = <_BagItem>[
+      if (hasTicket)
+        _BagItem(
+          category: 'ticket',
+          name: '분양권(랜덤)',
+          description:
+              '성숙기를 달성하면 주는 베지펫 분양권 랜덤 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다! '
+              '(단, 보유중인 펫은 제외)',
+          quantity: _randomTicketCount,
+          icon: Icons.confirmation_number_outlined,
+          usable: !_isUsingRandomTicket,
+        ),
+    ];
 
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Stack(
           children: [
-            Row(
-              children: [
-                const Icon(Icons.backpack_outlined, size: 20),
-                const SizedBox(width: 6),
-                Text(
-                  '가방',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.backpack_outlined, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          '가방',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '보유한 아이템을 확인할 수 있어요.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildBagSection(
+                      title: '분양권',
+                      emptyText: '보유 중인 분양권이 없어요.',
+                      items: ticketItems,
+                      onSelectItem: onSelectItem,
+                      onUseTicket: useDisabled ? null : onUseTicket,
+                      isUsing: _isUsingRandomTicket,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildBagSection(
+                      title: '가구',
+                      emptyText: '보유 중인 가구가 없어요.',
+                      items: const [],
+                      onSelectItem: onSelectItem,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildBagSection(
+                      title: '장난감',
+                      emptyText: '보유 중인 장난감이 없어요.',
+                      items: const [],
+                      onSelectItem: onSelectItem,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (selectedItem != null)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onCloseInfo,
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(24),
+                    child: _buildBagInfoCard(selectedItem),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBagSection({
+    required String title,
+    required String emptyText,
+    required List<_BagItem> items,
+    required ValueChanged<_BagItem> onSelectItem,
+    VoidCallback? onUseTicket,
+    bool isUsing = false,
+  }) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              emptyText,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: items
+                .map(
+                  (it) => _buildBagItemTile(
+                    item: it,
+                    onTap: () => onSelectItem(it),
+                    onUse: it.category == 'ticket' ? onUseTicket : null,
+                    isUsing: isUsing && it.category == 'ticket',
+                  ),
+                )
+                .toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBagItemTile({
+    required _BagItem item,
+    required VoidCallback onTap,
+    VoidCallback? onUse,
+    bool isUsing = false,
+  }) {
+    final theme = Theme.of(context);
+    // 분양권만 "사용하기" 버튼을 카드 하단에 노출한다. 가구/장난감 등은
+    // 아이콘 탭(설명 보기) 만 동작한다.
+    final showUseButton = item.category == 'ticket' && item.usable;
+
+    return SizedBox(
+      width: 156,
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 26,
+                        backgroundColor: theme.colorScheme.primaryContainer
+                            .withValues(alpha: 0.7),
+                        child: Icon(
+                          item.icon,
+                          size: 28,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'x${item.quantity}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (showUseButton) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonal(
+                    onPressed: isUsing ? null : onUse,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    child: isUsing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(
+                            '사용하기',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                  ),
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 가방 BottomSheet 위에 띄우는 설명 카드.
+  //
+  // 요구사항: "이름:", "설명:" 같은 라벨은 노출하지 않고 값만 보여준다.
+  // 카드 자체는 GestureDetector 로 감싸지 않아도 외곽 overlay 의
+  // GestureDetector 가 모든 탭을 받아 onCloseInfo 를 호출한다.
+  Widget _buildBagInfoCard(_BagItem item) {
+    final theme = Theme.of(context);
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 32,
+              backgroundColor:
+                  theme.colorScheme.primaryContainer.withValues(alpha: 0.8),
+              child: Icon(
+                item.icon,
+                size: 36,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
             ),
             const SizedBox(height: 12),
             Text(
-              '분양권',
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(color: Colors.grey[700]),
+              item.name,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 6),
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: BorderSide(
-                  color: theme.colorScheme.outlineVariant,
+            const SizedBox(height: 12),
+            Text(
+              item.description,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '아무 곳이나 터치하면 닫혀요',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 도감 BottomSheet 열기.
+  //
+  // 시트 안에서 추가로 showDialog 를 띄우거나 DB 호출을 일으키면 모달 트리
+  // 정리 타이밍이 다시 꼬일 수 있다. 그래서:
+  //   1) 시트 열기 전에 _fetchPokedexEntries 로 데이터를 미리 받아 두고
+  //   2) 시트 안에서는 로컬 selectedEntry 상태만 다루며
+  //   3) 펫 정보 표시창도 별도 Dialog 가 아니라 같은 시트 안의 Stack overlay 로
+  //      구현한다 (overlay 어디든 탭하면 닫힘).
+  Future<void> _openPokedexSheet() async {
+    _dismissFocus();
+
+    _safeSetState(() => _isLoadingPokedex = true);
+    try {
+      await _fetchPokedexEntries();
+    } catch (e) {
+      if (!mounted) return;
+      _safeSetState(() => _isLoadingPokedex = false);
+      _showSnack('도감 조회 실패: $e');
+      return;
+    }
+
+    if (!mounted) return;
+    _safeSetState(() => _isLoadingPokedex = false);
+
+    debugPrint('pokedex entries loaded in sheet: ${_pokedexEntries.length}');
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        Map<String, dynamic>? selectedEntry;
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return _buildPokedexSheetContent(
+              entries: _pokedexEntries,
+              selectedEntry: selectedEntry,
+              onSelectEntry: (entry) {
+                setSheetState(() => selectedEntry = entry);
+              },
+              onCloseInfo: () {
+                setSheetState(() => selectedEntry = null);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPokedexSheetContent({
+    required List<Map<String, dynamic>> entries,
+    required Map<String, dynamic>? selectedEntry,
+    required ValueChanged<Map<String, dynamic>> onSelectEntry,
+    required VoidCallback onCloseInfo,
+  }) {
+    final theme = Theme.of(context);
+
+    final unique = _dedupePokedexEntriesBySpecies(entries);
+    final cats = unique
+        .where((e) => _pokedexFamilyOf(e) == 'cat')
+        .toList(growable: false);
+    final dogs = unique
+        .where((e) => _pokedexFamilyOf(e) == 'dog')
+        .toList(growable: false);
+    // family 가 'cat'/'dog' 로 정규화되지 않는 row 들도 화면에서 사라지지
+    // 않도록 '기타' 섹션으로 묶어 노출한다.
+    final others = unique
+        .where((e) {
+          final family = _pokedexFamilyOf(e);
+          return family != 'cat' && family != 'dog';
+        })
+        .toList(growable: false);
+
+    // BottomSheet 본문은 Stack 으로 감싸 selectedEntry 가 있을 때 같은 시트
+    // 위에 정보 카드 overlay 를 띄운다. AlertDialog 를 추가로 띄우지 않으므로
+    // 모달 라우트 전환 충돌 가능성이 줄어든다.
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.menu_book_outlined, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          '도감',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '성숙기까지 육성 완료한 베지펫을 확인할 수 있어요.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (unique.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            '아직 도감에 등록된 베지펫이 없어요.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      _buildPokedexSection(
+                        title: '고양이',
+                        emptyText: '등록된 고양이 베지펫이 없어요.',
+                        entries: cats,
+                        onSelectEntry: onSelectEntry,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildPokedexSection(
+                        title: '강아지',
+                        emptyText: '등록된 강아지 베지펫이 없어요.',
+                        entries: dogs,
+                        onSelectEntry: onSelectEntry,
+                      ),
+                      if (others.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        _buildPokedexSection(
+                          title: '기타',
+                          emptyText: '',
+                          entries: others,
+                          onSelectEntry: onSelectEntry,
+                        ),
+                      ],
+                    ],
+                  ],
                 ),
               ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor:
-                      theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
-                  child: Icon(
-                    Icons.card_giftcard_outlined,
-                    color: theme.colorScheme.onPrimaryContainer,
+            ),
+            if (selectedEntry != null)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onCloseInfo,
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(24),
+                    child: _buildPokedexInfoCard(selectedEntry),
                   ),
                 ),
-                title: const Text(
-                  '랜덤 분양권',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                  hasTicket
-                      ? '도감에 없는 베지펫 중 1마리가 랜덤으로 분양돼요\n보유 수량: $_randomTicketCount장'
-                      : '보유 중인 분양권이 없어요',
-                ),
-                trailing: _isUsingRandomTicket
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        hasTicket ? '사용' : '없음',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: hasTicket
-                              ? theme.colorScheme.primary
-                              : Colors.grey,
-                        ),
-                      ),
-                onTap: disabled ? null : onUseTicket,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPokedexSection({
+    required String title,
+    required String emptyText,
+    required List<Map<String, dynamic>> entries,
+    required ValueChanged<Map<String, dynamic>> onSelectEntry,
+  }) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (entries.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              emptyText,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 8),
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: entries
+                .map((entry) => _buildPokedexTile(
+                      entry: entry,
+                      onTap: () => onSelectEntry(entry),
+                    ))
+                .toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPokedexTile({
+    required Map<String, dynamic> entry,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final family = _pokedexFamilyOf(entry);
+    final speciesName = _pokedexSpeciesNameOf(entry);
+    final iconData = family == 'cat'
+        ? Icons.pets
+        : family == 'dog'
+            ? Icons.cruelty_free_outlined
+            : Icons.eco_outlined;
+
+    return SizedBox(
+      width: 76,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor:
+                    theme.colorScheme.secondaryContainer.withValues(alpha: 0.7),
+                child: Icon(
+                  iconData,
+                  size: 28,
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                speciesName,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 도감 BottomSheet 위에 띄우는 정보 카드.
+  // 카드 자체를 GestureDetector 로 감싸지 않아도, overlay 전체를 감싼 외곽
+  // GestureDetector 가 모든 탭을 가로채 onCloseInfo 를 호출한다.
+  Widget _buildPokedexInfoCard(Map<String, dynamic> entry) {
+    final theme = Theme.of(context);
+    final family = _pokedexFamilyOf(entry);
+    final speciesName = _pokedexSpeciesNameOf(entry);
+    final nickname = _pokedexNicknameOf(entry);
+    final iconData = family == 'cat'
+        ? Icons.pets
+        : family == 'dog'
+            ? Icons.cruelty_free_outlined
+            : Icons.eco_outlined;
+
+    return Card(
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 32,
+              backgroundColor:
+                  theme.colorScheme.primaryContainer.withValues(alpha: 0.8),
+              child: Icon(
+                iconData,
+                size: 36,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(height: 12),
             Text(
-              '※ 가구 / 장난감 카테고리는 추후 추가될 예정이에요.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: Colors.grey[600]),
+              '베지펫 정보',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('종류: ',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(speciesName),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('이름: ',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(nickname),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '아무 곳이나 터치하면 닫혀요',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -1562,6 +2398,7 @@ class _HomePageState extends State<HomePage> {
       try {
         await Future.wait([
           _fetchActivePet(),
+          _fetchResidentPets(),
           _fetchRandomTicketCount(),
           _fetchTodayMealLogs(),
         ]);
@@ -1570,26 +2407,56 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (!mounted) return;
-      setState(() {});
+      _safeSetState(() {});
 
       _showSnack('새 베지펫이 분양되었어요!');
 
-      // 6) 첫 분양 때와 동일한 이름 짓기 다이얼로그 재사용.
+      // 6) 새 펫이 마당 화면에 자리잡은 뒤(한 frame 양보) 이름 짓기 다이얼로그 표시.
+      await _waitForUiSettle();
+      if (!mounted) return;
+
       await _showNicknameDialog();
     } finally {
       if (mounted) {
-        setState(() => _isUsingRandomTicket = false);
+        _safeSetState(() => _isUsingRandomTicket = false);
       } else {
         _isUsingRandomTicket = false;
       }
     }
   }
 
+  // ScaffoldMessenger.of(context) 를 직접 사용하면 화면 전환과 setState 가 겹칠 때
+  // dispose 타이밍 오류가 날 수 있다. 전역 scaffoldMessengerKey 를 통해
+  // post frame 에 띄우고, 이전 SnackBar 가 쌓여 있으면 즉시 제거한다.
   void _showSnack(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final messenger = _rootScaffoldMessengerKey.currentState;
+      if (messenger == null) return;
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    });
+  }
+
+  // ----- 화면 전환 안정화용 helper -----
+
+  void _dismissFocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  /// BottomSheet/Dialog dispose 가 끝나고 다음 화면/시트가 안전하게 빌드되도록
+  /// 한 frame 양보한다. async 직후 setState/route 전환과 겹쳐서 트리 정리
+  /// 타이밍 오류가 나는 케이스를 줄이는 용도.
+  Future<void> _waitForUiSettle() async {
+    await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (!mounted) return;
+    setState(fn);
   }
 
   @override
@@ -1611,12 +2478,20 @@ class _HomePageState extends State<HomePage> {
     final profileComplete = _isProfileComplete();
     final hasActivePet = _activePet != null;
 
+    // KeyedSubtree 의 ValueKey 로 단계 전환을 명시한다.
+    // 같은 Column slot 안에서 프로필 입력의 TextField/ChoiceChip subtree 와
+    // 첫 분양/마당 subtree 가 element 재사용 충돌을 일으키지 않도록
+    // 단계가 바뀔 때 element 트리를 통째로 새로 빌드하게 만든다.
+    final String flowKey;
     final List<Widget> mainChildren;
     if (!profileComplete) {
+      flowKey = 'profile';
       mainChildren = _buildProfileFormContent();
     } else if (!hasActivePet) {
+      flowKey = 'adopt';
       mainChildren = _buildAdoptContent();
     } else {
+      flowKey = 'yard';
       mainChildren = _buildYardContent();
     }
 
@@ -1631,7 +2506,13 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ...mainChildren,
+              KeyedSubtree(
+                key: ValueKey('flow:$flowKey'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: mainChildren,
+                ),
+              ),
               const SizedBox(height: 24),
               _buildDebugSection(),
             ],
@@ -1683,6 +2564,14 @@ class _HomePageState extends State<HomePage> {
               bottom: 18,
               child: _buildCenterPetVisual(),
             ),
+            // 성숙기 거주 펫(resident)들을 마당 잔디 영역 위쪽에 작게 함께 표시.
+            // activePet 중앙 비주얼과 겹치지 않도록 잔디 띠 안 하단에 둔다.
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 4,
+              child: _buildResidentPetRow(),
+            ),
             Positioned(
               top: 12,
               left: 12,
@@ -1703,6 +2592,96 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // 마당에 함께 거주하는 성숙기 펫들을 가로로 작게 나열한다.
+  // - activePet 과 같은 id 의 resident 는 중복 표시하지 않는다
+  //   (activePet 이 아직 is_active=true 인 adult 단계에서는 중앙 비주얼로
+  //    이미 보여지고 있기 때문)
+  // - 표시 대상이 없으면 아무것도 그리지 않는다
+  // - 너무 많아져도 화면이 깨지지 않도록 가로 스크롤 + 최대 6마리까지만 표시
+  Widget _buildResidentPetRow() {
+    final activeId = _activePet?['id']?.toString();
+    final residents = _residentPets
+        .where((p) => p['id']?.toString() != activeId)
+        .toList();
+
+    if (residents.isEmpty) return const SizedBox.shrink();
+
+    final visible = residents.length > 6 ? residents.sublist(0, 6) : residents;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final pet in visible) _buildResidentPetChip(pet),
+        ],
+      ),
+    );
+  }
+
+  // 거주 펫 한 마리를 표현하는 작은 칩.
+  // 상호작용 대상이 아니라 "함께 사는 펫" 의 시각적 표현이라 클릭 핸들러는 없다.
+  Widget _buildResidentPetChip(Map<String, dynamic> pet) {
+    final theme = Theme.of(context);
+    final species = pet['pet_species'] is Map
+        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
+        : <String, dynamic>{};
+    final family = species['family']?.toString() ?? '';
+    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final nickname = pet['nickname']?.toString();
+    final displayName =
+        (nickname == null || nickname.isEmpty) ? speciesName : nickname;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.85),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 3,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Icon(
+              family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            constraints: const BoxConstraints(maxWidth: 64),
+            child: Text(
+              displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1786,35 +2765,45 @@ class _HomePageState extends State<HomePage> {
   }
 
   // 좌측 상단 펫정보 아이콘 버튼을 누르면 열리는 펫 상호작용 상태창.
-  void _openPetStatusSheet() {
+  //
+  // BottomSheet 내부에서는 어떤 액션이 선택됐는지만 String 으로 pop 해서 반환하고,
+  // 실제 후속 동작(_openMealSheet / _interactPet)은 시트가 완전히 닫히고
+  // 한 frame 양보된 뒤 HomePage 의 context 에서 실행한다. await 이후 sheetCtx 를
+  // 사용하지 않으므로 dispose 타이밍 오류가 나지 않는다.
+  Future<void> _openPetStatusSheet() async {
     if (_activePet == null) return;
 
-    showModalBottomSheet<void>(
+    final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            Future<void> runInteraction(String action) async {
-              await _interactPet(action);
-              if (sheetCtx.mounted) setSheetState(() {});
-            }
-
-            return _buildPetStatusSheetContent(
-              onMeal: () {
-                Navigator.of(sheetCtx).pop();
-                _openMealSheet();
-              },
-              onPlay: () => runInteraction('play'),
-              onPet: () => runInteraction('pet'),
-            );
-          },
+        return _buildPetStatusSheetContent(
+          onMeal: () => Navigator.of(sheetCtx).pop('meal'),
+          onPlay: () => Navigator.of(sheetCtx).pop('play'),
+          onPet: () => Navigator.of(sheetCtx).pop('pet'),
         );
       },
     );
+
+    if (!mounted || action == null) return;
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    switch (action) {
+      case 'meal':
+        await _openMealSheet();
+        break;
+      case 'play':
+        await _interactPet('play');
+        break;
+      case 'pet':
+        await _interactPet('pet');
+        break;
+    }
   }
 
   Widget _buildPetStatusSheetContent({
@@ -1836,7 +2825,7 @@ class _HomePageState extends State<HomePage> {
         (nickname == null || nickname.isEmpty) ? speciesName : nickname;
     final stage = pet['stage']?.toString() ?? 'baby';
     final stageKo = _stageToKorean(stage);
-    final affection = pet['affection']?.toString() ?? '0';
+    final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
 
     final today = _todayDateStr();
     final playedToday = pet['last_played_on']?.toString() == today;
@@ -1884,6 +2873,8 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 16),
+            // 성장 단계 칩만 단독으로 유지하고, 애정도는 아래 경험치 바 카드로 통합 표현.
+            // 칩 한 개만 가로 전체에 두면 너무 길어 보이므로 왼쪽 정렬 영역을 한정한다.
             Row(
               children: [
                 Expanded(
@@ -1894,15 +2885,11 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: _sheetStatChip(
-                    Icons.favorite_outline,
-                    '애정도',
-                    affection,
-                  ),
-                ),
+                const Expanded(child: SizedBox.shrink()),
               ],
             ),
+            const SizedBox(height: 12),
+            _buildAffectionProgressCard(affectionValue),
             const SizedBox(height: 20),
             Row(
               children: [
@@ -1975,6 +2962,131 @@ class _HomePageState extends State<HomePage> {
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+
+  // 애정도를 게임 경험치 바처럼 표현하는 카드.
+  //
+  // - 상단: LinearProgressIndicator (현재 단계 진행도)
+  // - 중단: "성장기까지 19/40" 같은 다음 단계 라벨 (adult 일 때는 "성숙기 달성 완료")
+  // - 하단: "현재 애정도 49" 작은 보조 텍스트
+  //
+  // 계산 자체는 [_affectionProgressInfo] 가 책임지고, 여기서는 시각화만 한다.
+  Widget _buildAffectionProgressCard(int affection) {
+    final theme = Theme.of(context);
+    final info = _affectionProgressInfo(affection);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: info.progress.clamp(0.0, 1.0),
+              minHeight: 12,
+              backgroundColor: Colors.white,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                info.isComplete
+                    ? Colors.amber
+                    : theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                info.isComplete
+                    ? Icons.emoji_events_outlined
+                    : Icons.favorite_outline,
+                size: 16,
+                color: info.isComplete
+                    ? Colors.amber[800]
+                    : theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  info.label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '현재 애정도 $affection',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 애정도 → 다음 성장 단계까지의 진행도 정보로 변환.
+  //
+  // 성장 단계 기준 (다른 곳에서도 참조하는 _stageFromAffection 과 동일):
+  //   baby:  0  ~ 29   → 다음 "유년기" 까지 (max 30)
+  //   child: 30 ~ 69   → 다음 "성장기" 까지 (max 40)
+  //   grown: 70 ~ 109  → 다음 "성숙기" 까지 (max 40)
+  //   adult: 110 ~     → 더 이상 성장 단계 없음 (육성 완료)
+  _AffectionProgressInfo _affectionProgressInfo(int affection) {
+    if (affection >= 110) {
+      return const _AffectionProgressInfo(
+        current: 40,
+        max: 40,
+        progress: 1,
+        label: '성숙기 달성 완료',
+        isComplete: true,
+      );
+    }
+    if (affection >= 70) {
+      const max = 40;
+      final raw = affection - 70;
+      final current = raw < 0 ? 0 : (raw > max ? max : raw);
+      return _AffectionProgressInfo(
+        current: current,
+        max: max,
+        progress: current / max,
+        label: '성숙기까지 $current/$max',
+        isComplete: false,
+      );
+    }
+    if (affection >= 30) {
+      const max = 40;
+      final raw = affection - 30;
+      final current = raw < 0 ? 0 : (raw > max ? max : raw);
+      return _AffectionProgressInfo(
+        current: current,
+        max: max,
+        progress: current / max,
+        label: '성장기까지 $current/$max',
+        isComplete: false,
+      );
+    }
+    const max = 30;
+    final raw = affection;
+    final current = raw < 0 ? 0 : (raw > max ? max : raw);
+    return _AffectionProgressInfo(
+      current: current,
+      max: max,
+      progress: current / max,
+      label: '유년기까지 $current/$max',
+      isComplete: false,
     );
   }
 
@@ -2345,10 +3457,15 @@ class _HomePageState extends State<HomePage> {
 
   // 펫 상태창 > 먹이주기에서 호출되는 식단 인증 전용 BottomSheet.
   // 아점/저녁 사진 업로드 버튼, 오늘 완료 여부, 최근 AI 판정 결과까지 보여준다.
-  void _openMealSheet() {
+  //
+  // BottomSheet 내부에서는 어떤 slot 을 선택했는지만 String 으로 pop 해서 반환하고,
+  // 실제 카메라 촬영 / 업로드 / AI 판정 등 긴 async 작업은 시트가 완전히 닫힌 뒤
+  // HomePage 의 context 에서 실행한다. StatefulBuilder/setSheetState 와 await 가
+  // 겹쳐서 dispose 타이밍 오류가 나는 경로를 차단한다.
+  Future<void> _openMealSheet() async {
     if (_activePet == null) return;
 
-    showModalBottomSheet<void>(
+    final slot = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       isDismissible: !_isUploadingMeal,
@@ -2357,22 +3474,24 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            Future<void> runUpload(String slot) async {
-              await _uploadMealPhotoAndEvaluate(slot);
-              if (sheetCtx.mounted) setSheetState(() {});
-            }
-
-            return _buildMealSheetContent(onUpload: runUpload);
+        return _buildMealSheetContent(
+          onUpload: (slot) {
+            Navigator.of(sheetCtx).pop(slot);
           },
         );
       },
     );
+
+    if (!mounted || slot == null) return;
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    await _uploadMealPhotoAndEvaluate(slot);
   }
 
   Widget _buildMealSheetContent({
-    required Future<void> Function(String slot) onUpload,
+    required void Function(String slot) onUpload,
   }) {
     final theme = Theme.of(context);
     final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
@@ -2600,12 +3719,12 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted || selectedLabel == null) return;
 
-    // 다음 frame 까지 한 틱 양보해서 BottomSheet 트리가 dispose 된 뒤
+    // 다음 frame 까지 한 frame 양보해서 BottomSheet 트리가 dispose 된 뒤
     // 다음 화면/시트가 열리도록 한다.
-    await Future<void>.delayed(Duration.zero);
+    await _waitForUiSettle();
     if (!mounted) return;
 
-    _onMenuTap(selectedLabel);
+    await _onMenuTap(selectedLabel);
   }
 
   Widget _buildMenuSheetContent({required ValueChanged<String> onTap}) {
@@ -2693,14 +3812,305 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _onMenuTap(String label) {
+  Future<void> _onMenuTap(String label) async {
     if (label == '설정') {
       _showSnack('나중에 이메일 연동 메뉴가 여기에 들어올 예정입니다.');
     } else if (label == '가방') {
-      _openBagSheet();
+      await _openBagSheet();
+    } else if (label == '도감') {
+      await _openPokedexSheet();
+    } else if (label == '프로필') {
+      await _openProfileSheet();
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
+  }
+
+  // 게임 메뉴 > "프로필" 진입 시 열리는 BottomSheet.
+  //
+  // 초기 프로필 입력 화면(_buildProfileFormContent)과는 별개로,
+  // 마당 화면 위에 가벼운 프로필 카드 형태로 떠서 nickname/gender/diet_goal/resolution
+  // 을 다시 확인/수정할 수 있게 해준다. (resolution = "다짐" 라벨로 노출)
+  //
+  // 안정화 포인트 (다른 모달들과 동일한 정책):
+  //   - controller 는 여기 _openProfileSheet 스코프에서 만들고, finally 에서 dispose
+  //   - sheetCtx 는 await 이후로는 사용하지 않는다 (저장/검증 후처리는 HomePage 의
+  //     context 에서 수행). 시트 안에서 또 다른 showDialog 를 띄우지 않는다.
+  //   - 저장 중 isSaving 로컬 락으로 연타/중복 update 방지
+  //
+  // 다짐(resolution) 컬럼 관련:
+  //   - profiles.resolution (text) 컬럼이 있어야 한다.
+  //   - 컬럼이 없으면 update 시 PostgREST 에서 에러가 나므로,
+  //     필요시 Supabase SQL 에서 아래를 한 번 실행해야 한다.
+  //       alter table public.profiles add column if not exists resolution text;
+  Future<void> _openProfileSheet() async {
+    _dismissFocus();
+
+    final user = supabase.auth.currentUser;
+    final currentProfile = _profile;
+    if (user == null || currentProfile == null) {
+      _showSnack('프로필 정보를 불러올 수 없어요.');
+      return;
+    }
+
+    final nicknameController = TextEditingController(
+      text: currentProfile['nickname']?.toString() ?? '',
+    );
+    final resolutionController = TextEditingController(
+      text: currentProfile['resolution']?.toString() ?? '',
+    );
+
+    // 드롭다운 초기값. profiles 에 들어 있는 값이 옵션 리스트에 없을 수도 있으므로
+    // 그때는 null 로 보정해서 DropdownButtonFormField 가 assertion error 를 내지 않게 한다.
+    final initialGenderRaw = currentProfile['gender']?.toString();
+    final initialDietGoalRaw = currentProfile['diet_goal']?.toString();
+    String? selectedGender =
+        _genderOptions.contains(initialGenderRaw) ? initialGenderRaw : null;
+    String? selectedDietGoal = _dietGoalOptions.contains(initialDietGoalRaw)
+        ? initialDietGoalRaw
+        : null;
+
+    bool isSaving = false;
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (sheetCtx) {
+          return StatefulBuilder(
+            builder: (innerCtx, setSheetState) {
+              final theme = Theme.of(innerCtx);
+              final viewInsets = MediaQuery.of(innerCtx).viewInsets.bottom;
+
+              Future<void> handleSave() async {
+                if (isSaving) return;
+
+                final nickname = nicknameController.text.trim();
+                final resolutionText = resolutionController.text.trim();
+
+                if (nickname.isEmpty) {
+                  _showSnack('이름을 입력해주세요.');
+                  return;
+                }
+                if (selectedGender == null) {
+                  _showSnack('성별을 선택해주세요.');
+                  return;
+                }
+                if (selectedDietGoal == null) {
+                  _showSnack('식단 목적을 선택해주세요.');
+                  return;
+                }
+
+                setSheetState(() => isSaving = true);
+
+                try {
+                  await supabase.from('profiles').update({
+                    'nickname': nickname,
+                    'gender': selectedGender,
+                    'diet_goal': selectedDietGoal,
+                    'resolution':
+                        resolutionText.isEmpty ? null : resolutionText,
+                    'updated_at': DateTime.now().toIso8601String(),
+                  }).eq('id', user.id);
+
+                  await _fetchProfile();
+
+                  if (!mounted) return;
+                  // 시트 컨텍스트를 await 이후에 직접 사용하지 않고, sheetCtx 로
+                  // 닫기만 수행한다. dispose 타이밍 안정화를 위해 한 frame 양보 후 SnackBar.
+                  if (Navigator.of(sheetCtx).canPop()) {
+                    Navigator.of(sheetCtx).pop();
+                  }
+                  _safeSetState(() {});
+                  await _waitForUiSettle();
+                  if (!mounted) return;
+                  _showSnack('프로필이 저장되었어요!');
+                } catch (e) {
+                  if (!mounted) return;
+                  setSheetState(() => isSaving = false);
+                  _showSnack('프로필 저장 실패: $e');
+                }
+              }
+
+              return SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(20, 4, 20, 24 + viewInsets),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Text(
+                          '프로필',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Center(
+                        child: _buildProfileDummyAvatar(selectedGender),
+                      ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: nicknameController,
+                        enabled: !isSaving,
+                        maxLength: 16,
+                        decoration: const InputDecoration(
+                          labelText: '이름',
+                          prefixIcon: Icon(Icons.edit_outlined),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          counterText: '',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedGender,
+                        decoration: const InputDecoration(
+                          labelText: '성별',
+                          prefixIcon: Icon(Icons.arrow_drop_down),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: _genderOptions
+                            .map(
+                              (v) => DropdownMenuItem<String>(
+                                value: v,
+                                child: Text(v),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: isSaving
+                            ? null
+                            : (v) {
+                                setSheetState(() => selectedGender = v);
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedDietGoal,
+                        decoration: const InputDecoration(
+                          labelText: '식단 목적',
+                          prefixIcon: Icon(Icons.arrow_drop_down),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: _dietGoalOptions
+                            .map(
+                              (v) => DropdownMenuItem<String>(
+                                value: v,
+                                child: Text(v),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: isSaving
+                            ? null
+                            : (v) {
+                                setSheetState(() => selectedDietGoal = v);
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      // 다짐(resolution): 멀티라인 TextField + Stack 으로 우측 하단 연필 아이콘.
+                      // suffixIcon 은 멀티라인에서 우측 중앙에 떠서 의도와 어긋나므로
+                      // Stack 으로 직접 우측 하단에 고정한다.
+                      Stack(
+                        children: [
+                          TextField(
+                            controller: resolutionController,
+                            enabled: !isSaving,
+                            minLines: 4,
+                            maxLines: 6,
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.newline,
+                            decoration: const InputDecoration(
+                              labelText: '다짐',
+                              alignLabelWithHint: true,
+                              border: OutlineInputBorder(),
+                              // 우측 하단 연필 아이콘과 본문이 겹치지 않도록
+                              // 오른쪽/아래쪽 padding 을 약간 더 준다.
+                              contentPadding: EdgeInsets.fromLTRB(
+                                12,
+                                12,
+                                32,
+                                28,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 10,
+                            bottom: 10,
+                            child: Icon(
+                              Icons.edit_outlined,
+                              size: 18,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        height: 48,
+                        child: FilledButton(
+                          onPressed: isSaving ? null : handleSave,
+                          child: isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('저장'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      // BottomSheet 가 닫힌 뒤 controller 정리.
+      // 시트 내부에서 dispose 하면 setSheetState 도중 controller 가 사라져
+      // 키보드 정리/포커스 해제와 충돌할 수 있어 외부 finally 에서만 정리한다.
+      nicknameController.dispose();
+      resolutionController.dispose();
+    }
+  }
+
+  // 프로필 창 상단의 동그란 더미 프로필 아이콘.
+  // 실제 사진 업로드 기능은 MVP 범위 밖이고, 성별에 따라 이모지 같은 기본 아이콘만 보여준다.
+  Widget _buildProfileDummyAvatar(String? gender) {
+    final theme = Theme.of(context);
+    final isFemale = gender == '여자';
+    final isMale = gender == '남자';
+
+    final IconData icon;
+    if (isFemale) {
+      icon = Icons.face_3_outlined;
+    } else if (isMale) {
+      icon = Icons.face_outlined;
+    } else {
+      icon = Icons.person_outline;
+    }
+
+    return CircleAvatar(
+      radius: 44,
+      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      child: Icon(
+        icon,
+        size: 54,
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    );
   }
 
   // ignore: unused_element
@@ -3049,6 +4459,13 @@ class _HomePageState extends State<HomePage> {
               title: 'user_items',
               children: [
                 _kv('random_adoption_ticket', '$_randomTicketCount장'),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _debugBlock(
+              title: 'pokedex',
+              children: [
+                _kv('loaded entries', '${_pokedexEntries.length}개'),
               ],
             ),
             const SizedBox(height: 16),
@@ -3502,4 +4919,142 @@ class _ErrorView extends StatelessWidget {
       ),
     );
   }
+}
+
+// 이름 입력 전용 Dialog.
+//
+// 책임:
+//   - TextEditingController / 검증 / 에러 메시지 상태 소유 및 관리
+//   - 저장 버튼/엔터 입력 시 검증 통과한 nickname 문자열을 Navigator.pop 으로 반환
+//
+// 비책임 (절대 하지 말 것):
+//   - Supabase 호출
+//   - HomePage 의 _fetchActivePet / _safeSetState / _showSnack 호출
+//
+// 이 분리 덕분에 Dialog dispose(TextField/Focus/TextEditingController)와
+// HomePage 의 DB 재조회/상태 갱신/SnackBar 가 같은 프레임에 겹치지 않는다.
+// 가방 BottomSheet 안에서 카드/오버레이로 표시할 아이템 정보를 담는 작은 모델.
+//
+// 가방 UX 는 현재 BottomSheet 내부에서만 다뤄지므로 외부 노출이 필요 없어
+// private 클래스로 둔다. category 는 'ticket' | 'furniture' | 'toy' 중 하나.
+class _BagItem {
+  final String category;
+  final String name;
+  final String description;
+  final int quantity;
+  final IconData icon;
+  // 사용하기 버튼 노출 여부. 분양권만 true 가 들어오고, 가구/장난감 등은 false.
+  final bool usable;
+
+  const _BagItem({
+    required this.category,
+    required this.name,
+    required this.description,
+    required this.quantity,
+    required this.icon,
+    this.usable = false,
+  });
+}
+
+class _PetNicknameDialog extends StatefulWidget {
+  const _PetNicknameDialog();
+
+  @override
+  State<_PetNicknameDialog> createState() => _PetNicknameDialogState();
+}
+
+class _PetNicknameDialogState extends State<_PetNicknameDialog> {
+  final TextEditingController _controller = TextEditingController();
+  final RegExp _pattern = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+
+    if (text.isEmpty) {
+      setState(() => _errorText = '이름을 입력해주세요.');
+      return;
+    }
+    if (text.length < 2 || text.length > 8) {
+      setState(() => _errorText = '이름은 2~8자로 입력해주세요.');
+      return;
+    }
+    if (!_pattern.hasMatch(text)) {
+      setState(() => _errorText = '특수문자는 사용할 수 없어요.');
+      return;
+    }
+
+    // pop 직전 포커스 정리: TextField 가 살아 있는 채로 pop 되어
+    // 트리 dispose 와 focus 정리 타이밍이 겹치는 것을 방지한다.
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: const Text('아기 베지펫이 분양 되었어요🥹 건강하게 키워주세요~!'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('귀여운 이름을 지어주세요!'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            // autofocus 는 일부러 false. Dialog open 직후 focus 요청과
+            // 화면 전환 frame 이 겹쳐 dispose 타이밍 오류가 났던 케이스를 회피.
+            autofocus: false,
+            maxLength: 8,
+            decoration: InputDecoration(
+              hintText: '예: 구름이',
+              border: const OutlineInputBorder(),
+              errorText: _errorText,
+              helperText: '한글·영문·숫자 2~8자 (공백/특수문자 불가)',
+              counterText: '',
+              isDense: true,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('저장'),
+        ),
+      ],
+    );
+  }
+}
+
+// 펫 정보 BottomSheet 안의 애정도 경험치 바에서 사용하는 표시 정보.
+//
+// 다음 성장 단계까지의 진행도(progress: 0.0~1.0), 그 단계까지 남은 수치
+// 표시용 라벨, 그리고 성숙기(adult) 도달 여부 플래그(isComplete) 를 함께 들고 다닌다.
+//
+// MVP 단계라 main.dart 한 파일 안에서만 쓰이므로 private 으로 둔다.
+class _AffectionProgressInfo {
+  const _AffectionProgressInfo({
+    required this.current,
+    required this.max,
+    required this.progress,
+    required this.label,
+    required this.isComplete,
+  });
+
+  final int current;
+  final int max;
+  final double progress;
+  final String label;
+  final bool isComplete;
 }
