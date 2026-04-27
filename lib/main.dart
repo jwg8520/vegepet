@@ -485,6 +485,11 @@ class _HomePageState extends State<HomePage> {
         await _loadPushSettings();
         if (_mealReminderPushEnabled) {
           await _scheduleMealReminderNotifications(
+            notificationTitle: '베지펫 식사 시간',
+            notificationMessages: const [
+              '베지펫이 배가 고플 시간이에요!',
+              '베지펫에게 건강한 음식을 줄 시간이에요!',
+            ],
             revertToggleWhenDenied: false,
           );
         }
@@ -717,6 +722,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _scheduleMealReminderNotifications({
+    required String notificationTitle,
+    required List<String> notificationMessages,
+    String? permissionDeniedMessage,
     bool revertToggleWhenDenied = true,
   }) async {
     await _cancelMealReminderNotifications();
@@ -731,18 +739,19 @@ class _HomePageState extends State<HomePage> {
         } else {
           _mealReminderPushEnabled = false;
         }
-        _showSnack(_l10n.notificationPermissionDenied);
+        if (permissionDeniedMessage != null &&
+            permissionDeniedMessage.isNotEmpty) {
+          _showSnack(permissionDeniedMessage);
+        }
       } else {
         debugPrint('meal reminder schedule skipped: notification permission denied');
       }
       return;
     }
-
-    final l10n = _l10n;
-    final messages = [
-      l10n.mealNotificationMessage1,
-      l10n.mealNotificationMessage2,
-    ];
+    if (notificationMessages.isEmpty) {
+      debugPrint('meal reminder schedule skipped: no notification message');
+      return;
+    }
     const mealSlots = <(int, int)>[(12, 0), (18, 0)];
     final now = tz.TZDateTime.now(tz.local);
 
@@ -783,10 +792,11 @@ class _HomePageState extends State<HomePage> {
           continue;
         }
         final id = _kMealReminderNotificationIdBase + dayIndex * 10 + slotIndex;
-        final message = messages[Random().nextInt(messages.length)];
+        final message =
+            notificationMessages[Random().nextInt(notificationMessages.length)];
         await _notifications.zonedSchedule(
           id,
-          l10n.mealNotificationTitle,
+          notificationTitle,
           message,
           scheduledAt,
           details,
@@ -796,7 +806,14 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _toggleMealReminderPush(bool enabled) async {
+  Future<bool> _toggleMealReminderPush(
+    bool enabled, {
+    required String notificationTitle,
+    required List<String> notificationMessages,
+    required String permissionDeniedMessage,
+    required String enabledMessage,
+    required String disabledMessage,
+  }) async {
     await _initNotificationsIfNeeded();
     if (enabled) {
       final hasPermission = await _requestNotificationPermissionIfNeeded();
@@ -807,8 +824,8 @@ class _HomePageState extends State<HomePage> {
         } else {
           _mealReminderPushEnabled = false;
         }
-        _showSnack(_l10n.notificationPermissionDenied);
-        return;
+        _showSnack(permissionDeniedMessage);
+        return false;
       }
 
       await _saveMealReminderPushEnabled(true);
@@ -817,9 +834,13 @@ class _HomePageState extends State<HomePage> {
       } else {
         _mealReminderPushEnabled = true;
       }
-      await _scheduleMealReminderNotifications();
-      _showSnack(_l10n.mealReminderEnabled);
-      return;
+      await _scheduleMealReminderNotifications(
+        notificationTitle: notificationTitle,
+        notificationMessages: notificationMessages,
+        permissionDeniedMessage: permissionDeniedMessage,
+      );
+      _showSnack(enabledMessage);
+      return true;
     }
 
     await _saveMealReminderPushEnabled(false);
@@ -829,10 +850,15 @@ class _HomePageState extends State<HomePage> {
       _mealReminderPushEnabled = false;
     }
     await _cancelMealReminderNotifications();
-    _showSnack(_l10n.mealReminderDisabled);
+    _showSnack(disabledMessage);
+    return true;
   }
 
-  Future<void> _toggleNoticeEventPush(bool enabled) async {
+  Future<bool> _toggleNoticeEventPush(
+    bool enabled, {
+    required String enabledMessage,
+    required String disabledMessage,
+  }) async {
     // TODO(vegepet): 추후 FCM/Supabase Edge Function 연동 시 이 토글 값을 수신 동의 상태로 사용
     await _saveNoticeEventPushEnabled(enabled);
     if (mounted) {
@@ -840,7 +866,8 @@ class _HomePageState extends State<HomePage> {
     } else {
       _noticeEventPushEnabled = enabled;
     }
-    _showSnack(enabled ? _l10n.noticeEventEnabled : _l10n.noticeEventDisabled);
+    _showSnack(enabled ? enabledMessage : disabledMessage);
+    return true;
   }
 
   Future<void> _syncAuthEmailToProfileIfNeeded() async {
@@ -4714,14 +4741,63 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
+        var localNoticeEnabled = _noticeEventPushEnabled;
+        var localMealEnabled = _mealReminderPushEnabled;
+        var noticeBusy = false;
+        var mealBusy = false;
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            final l10n = AppLocalizations.of(ctx);
+            final mealTitle = l10n.mealNotificationTitle;
+            final mealMessages = <String>[
+              l10n.mealNotificationMessage1,
+              l10n.mealNotificationMessage2,
+            ];
             return _buildSettingsSheetContent(
               sheetCtx,
               onProfileUpdated: () async {
                 await _fetchProfile();
                 if (mounted) _safeSetState(() {});
                 if (mounted) setSheetState(() {});
+              },
+              noticePushEnabled: localNoticeEnabled,
+              mealPushEnabled: localMealEnabled,
+              noticePushBusy: noticeBusy,
+              mealPushBusy: mealBusy,
+              onNoticePushChanged: (enabled) async {
+                setSheetState(() {
+                  localNoticeEnabled = enabled;
+                  noticeBusy = true;
+                });
+                final ok = await _toggleNoticeEventPush(
+                  enabled,
+                  enabledMessage: l10n.noticeEventEnabled,
+                  disabledMessage: l10n.noticeEventDisabled,
+                );
+                if (!mounted || !ctx.mounted) return;
+                setSheetState(() {
+                  localNoticeEnabled = ok ? _noticeEventPushEnabled : !enabled;
+                  noticeBusy = false;
+                });
+              },
+              onMealPushChanged: (enabled) async {
+                setSheetState(() {
+                  localMealEnabled = enabled;
+                  mealBusy = true;
+                });
+                final ok = await _toggleMealReminderPush(
+                  enabled,
+                  notificationTitle: mealTitle,
+                  notificationMessages: mealMessages,
+                  permissionDeniedMessage: l10n.notificationPermissionDenied,
+                  enabledMessage: l10n.mealReminderEnabled,
+                  disabledMessage: l10n.mealReminderDisabled,
+                );
+                if (!mounted || !ctx.mounted) return;
+                setSheetState(() {
+                  localMealEnabled = ok ? _mealReminderPushEnabled : !enabled;
+                  mealBusy = false;
+                });
               },
             );
           },
@@ -4799,6 +4875,12 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSettingsSheetContent(
     BuildContext sheetCtx, {
     required Future<void> Function() onProfileUpdated,
+    required bool noticePushEnabled,
+    required bool mealPushEnabled,
+    required bool noticePushBusy,
+    required bool mealPushBusy,
+    required ValueChanged<bool>? onNoticePushChanged,
+    required ValueChanged<bool>? onMealPushChanged,
   }) {
     final l10n = AppLocalizations.of(sheetCtx);
     final localeScope = _LocaleControllerScope.of(sheetCtx);
@@ -5032,8 +5114,8 @@ class _HomePageState extends State<HomePage> {
                   .withValues(alpha: 0.85),
               title: Text(l10n.pushNoticeEvent),
               subtitle: Text(l10n.pushNoticeEventDescription),
-              value: _noticeEventPushEnabled,
-              onChanged: (v) => _toggleNoticeEventPush(v),
+              value: noticePushEnabled,
+              onChanged: noticePushBusy ? null : onNoticePushChanged,
             ),
             const SizedBox(height: 8),
             SwitchListTile(
@@ -5045,8 +5127,8 @@ class _HomePageState extends State<HomePage> {
                   .withValues(alpha: 0.85),
               title: Text(l10n.pushMealReminder),
               subtitle: Text(l10n.pushMealReminderDescription),
-              value: _mealReminderPushEnabled,
-              onChanged: (v) => _toggleMealReminderPush(v),
+              value: mealPushEnabled,
+              onChanged: mealPushBusy ? null : onMealPushChanged,
             ),
 
             const SizedBox(height: 8),
