@@ -1,9 +1,17 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:vegepet/l10n/app_localizations.dart';
 
 const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
 const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
@@ -156,23 +164,94 @@ final GlobalKey<NavigatorState> _rootNavigatorKey =
     GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
+const String _kLocalePrefKey = 'vegepet_locale_code';
 
-class VegePetApp extends StatelessWidget {
+class VegePetApp extends StatefulWidget {
   const VegePetApp({super.key});
 
   @override
+  State<VegePetApp> createState() => _VegePetAppState();
+}
+
+class _VegePetAppState extends State<VegePetApp> {
+  Locale _locale = const Locale('ko');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedLocale();
+  }
+
+  Future<void> _loadSavedLocale() async {
+    final prefs = await SharedPreferences.getInstance();
+    final code = prefs.getString(_kLocalePrefKey) ?? 'ko';
+    if (!mounted) return;
+    setState(() {
+      _locale = Locale(code == 'en' ? 'en' : 'ko');
+    });
+  }
+
+  Future<void> _setLocale(Locale locale) async {
+    final code = locale.languageCode == 'en' ? 'en' : 'ko';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLocalePrefKey, code);
+    if (!mounted) return;
+    setState(() {
+      _locale = Locale(code);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'VegePet',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: _rootNavigatorKey,
-      scaffoldMessengerKey: _rootScaffoldMessengerKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
-        useMaterial3: true,
+    return _LocaleControllerScope(
+      locale: _locale,
+      setLocale: _setLocale,
+      child: MaterialApp(
+        title: 'VegePet',
+        debugShowCheckedModeBanner: false,
+        navigatorKey: _rootNavigatorKey,
+        scaffoldMessengerKey: _rootScaffoldMessengerKey,
+        locale: _locale,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('ko'),
+          Locale('en'),
+        ],
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+          useMaterial3: true,
+        ),
+        home: const HomePage(),
       ),
-      home: const HomePage(),
     );
+  }
+}
+
+class _LocaleControllerScope extends InheritedWidget {
+  const _LocaleControllerScope({
+    required this.locale,
+    required this.setLocale,
+    required super.child,
+  });
+
+  final Locale locale;
+  final Future<void> Function(Locale locale) setLocale;
+
+  static _LocaleControllerScope of(BuildContext context) {
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<_LocaleControllerScope>();
+    assert(scope != null, 'LocaleControllerScope not found');
+    return scope!;
+  }
+
+  @override
+  bool updateShouldNotify(_LocaleControllerScope oldWidget) {
+    return locale != oldWidget.locale;
   }
 }
 
@@ -274,6 +353,22 @@ class _HomePageState extends State<HomePage> {
   bool _isToyMenuOpen = false;
   bool _isToyDropHovering = false;
   bool _isCompletingToyPlay = false;
+  Timer? _emailOtpCooldownTimer;
+  int _emailOtpCooldownSeconds = 0;
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+  bool _noticeEventPushEnabled = false;
+  bool _mealReminderPushEnabled = false;
+  bool _isNotificationInitialized = false;
+
+  static const String _kNoticeEventPushPrefKey =
+      'vegepet_notice_event_push_enabled';
+  static const String _kMealReminderPushPrefKey =
+      'vegepet_meal_reminder_push_enabled';
+  static const int _kMealReminderNotificationIdBase = 120000;
+  static const int _kMealReminderDaysToSchedule = 14;
+
+  AppLocalizations get _l10n => AppLocalizations.of(context);
 
   @override
   void initState() {
@@ -283,6 +378,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _emailOtpCooldownTimer?.cancel();
     _nicknameController.dispose();
     super.dispose();
   }
@@ -383,6 +479,18 @@ class _HomePageState extends State<HomePage> {
         _fetchTodayMealLogs(),
         _fetchRandomTicketCount(),
       ]);
+      await _syncAuthEmailToProfileIfNeeded();
+      try {
+        await _initNotificationsIfNeeded();
+        await _loadPushSettings();
+        if (_mealReminderPushEnabled) {
+          await _scheduleMealReminderNotifications(
+            revertToggleWhenDenied: false,
+          );
+        }
+      } catch (e) {
+        debugPrint('notification bootstrap failed: $e');
+      }
 
       _syncProfileFormFromFetched();
 
@@ -413,6 +521,419 @@ class _HomePageState extends State<HomePage> {
         .maybeSingle();
 
     _profile = data == null ? null : Map<String, dynamic>.from(data);
+  }
+
+  bool _isEmailLinkedProfile() {
+    final p = _profile;
+    if (p == null) return false;
+    final accountType = p['account_type']?.toString();
+    final email = p['email']?.toString().trim() ?? '';
+    return accountType == 'email' && email.isNotEmpty;
+  }
+
+  String? _currentAuthEmail() {
+    return supabase.auth.currentUser?.email;
+  }
+
+  /// 프로필 또는 Auth 세션 기준으로 이미 이메일 연동된 상태인지(UI 가드용).
+  bool _hasEffectiveEmailLink() {
+    final authEmail = _currentAuthEmail()?.trim();
+    if (authEmail != null && authEmail.isNotEmpty) return true;
+    return _isEmailLinkedProfile();
+  }
+
+  String _resolvedDisplayEmailLine([AppLocalizations? l10n]) {
+    final auth = _currentAuthEmail()?.trim();
+    if (auth != null && auth.isNotEmpty) return '연결된 이메일: $auth';
+    final pe = _profile?['email']?.toString().trim() ?? '';
+    if (pe.isNotEmpty) return '연결된 이메일: $pe';
+    return l10n?.noLinkedEmail ?? '연동된 이메일 없음';
+  }
+
+  bool _looksLikeEmail(String raw) =>
+      raw.contains('@') && raw.contains('.');
+
+  String _formatAuthError(Object e) {
+    if (e is AuthException) return e.message;
+    return e.toString();
+  }
+
+  bool _isEmailAlreadyUsedError(Object e) {
+    final message = _formatAuthError(e).toLowerCase();
+
+    return message.contains('already') ||
+        message.contains('exists') ||
+        message.contains('registered') ||
+        message.contains('duplicate') ||
+        message.contains('unique') ||
+        message.contains('already been registered') ||
+        message.contains('email address is already') ||
+        message.contains('user already registered') ||
+        message.contains('email already') ||
+        message.contains('already exists');
+  }
+
+  Future<void> _showEmailAlreadyUsedDialog() async {
+    final ctx = _rootNavigatorKey.currentContext ?? context;
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: ctx,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('이메일 연동 불가'),
+          content: const Text(
+            '이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _startEmailOtpCooldown() {
+    _emailOtpCooldownTimer?.cancel();
+
+    _safeSetState(() {
+      _emailOtpCooldownSeconds = 60;
+    });
+
+    _emailOtpCooldownTimer =
+        Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_emailOtpCooldownSeconds <= 1) {
+        timer.cancel();
+        _emailOtpCooldownTimer = null;
+        _safeSetState(() {
+          _emailOtpCooldownSeconds = 0;
+        });
+        return;
+      }
+
+      _safeSetState(() {
+        _emailOtpCooldownSeconds -= 1;
+      });
+    });
+  }
+
+  bool _isEmailOtpCooldownActive() {
+    return _emailOtpCooldownSeconds > 0;
+  }
+
+  String _emailOtpCooldownLabel({
+    required String normalLabel,
+  }) {
+    if (_emailOtpCooldownSeconds <= 0) return normalLabel;
+    return '$_emailOtpCooldownSeconds초 후 다시 시도';
+  }
+
+  Future<void> _initNotificationsIfNeeded() async {
+    if (_isNotificationInitialized) return;
+
+    tz.initializeTimeZones();
+    try {
+      final timezone = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(timezone));
+    } catch (e) {
+      debugPrint('timezone init failed: $e');
+      tz.setLocalLocation(tz.getLocation('Asia/Seoul'));
+    }
+
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const darwinSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: darwinSettings,
+    );
+    await _notifications.initialize(initSettings);
+    _isNotificationInitialized = true;
+  }
+
+  Future<bool> _requestNotificationPermissionIfNeeded() async {
+    var granted = true;
+
+    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      final enabled = await androidPlugin.areNotificationsEnabled();
+      if (enabled != true) {
+        final requested = await androidPlugin.requestNotificationsPermission();
+        if (requested != true) granted = false;
+      }
+    }
+
+    final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    if (iosPlugin != null) {
+      final requested = await iosPlugin.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      if (requested != true) granted = false;
+    }
+
+    return granted;
+  }
+
+  Future<void> _loadPushSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _noticeEventPushEnabled = prefs.getBool(_kNoticeEventPushPrefKey) ?? false;
+    _mealReminderPushEnabled = prefs.getBool(_kMealReminderPushPrefKey) ?? false;
+  }
+
+  Future<void> _saveNoticeEventPushEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kNoticeEventPushPrefKey, enabled);
+  }
+
+  Future<void> _saveMealReminderPushEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kMealReminderPushPrefKey, enabled);
+  }
+
+  Future<void> _cancelMealReminderNotifications() async {
+    for (var dayIndex = 0; dayIndex < _kMealReminderDaysToSchedule; dayIndex++) {
+      for (var slotIndex = 0; slotIndex < 2; slotIndex++) {
+        final id = _kMealReminderNotificationIdBase + dayIndex * 10 + slotIndex;
+        await _notifications.cancel(id);
+      }
+    }
+  }
+
+  Future<void> _scheduleMealReminderNotifications({
+    bool revertToggleWhenDenied = true,
+  }) async {
+    await _cancelMealReminderNotifications();
+    final hasPermission = await _requestNotificationPermissionIfNeeded();
+    if (!hasPermission) {
+      if (revertToggleWhenDenied) {
+        await _saveMealReminderPushEnabled(false);
+        if (mounted) {
+          _safeSetState(() {
+            _mealReminderPushEnabled = false;
+          });
+        } else {
+          _mealReminderPushEnabled = false;
+        }
+        _showSnack(_l10n.notificationPermissionDenied);
+      } else {
+        debugPrint('meal reminder schedule skipped: notification permission denied');
+      }
+      return;
+    }
+
+    final l10n = _l10n;
+    final messages = [
+      l10n.mealNotificationMessage1,
+      l10n.mealNotificationMessage2,
+    ];
+    const mealSlots = <(int, int)>[(12, 0), (18, 0)];
+    final now = tz.TZDateTime.now(tz.local);
+
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'vegepet_meal_reminders',
+        'VegePet Meal Reminders',
+        channelDescription: 'Daily scheduled reminders for VegePet meals.',
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentSound: true,
+        presentBadge: false,
+      ),
+    );
+
+    for (var dayIndex = 0; dayIndex < _kMealReminderDaysToSchedule; dayIndex++) {
+      final dayBase = tz.TZDateTime(
+        tz.local,
+        now.year,
+        now.month,
+        now.day,
+      ).add(Duration(days: dayIndex));
+
+      for (var slotIndex = 0; slotIndex < mealSlots.length; slotIndex++) {
+        final slot = mealSlots[slotIndex];
+        var scheduledAt = tz.TZDateTime(
+          tz.local,
+          dayBase.year,
+          dayBase.month,
+          dayBase.day,
+          slot.$1,
+          slot.$2,
+        );
+        if (!scheduledAt.isAfter(now)) {
+          continue;
+        }
+        final id = _kMealReminderNotificationIdBase + dayIndex * 10 + slotIndex;
+        final message = messages[Random().nextInt(messages.length)];
+        await _notifications.zonedSchedule(
+          id,
+          l10n.mealNotificationTitle,
+          message,
+          scheduledAt,
+          details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleMealReminderPush(bool enabled) async {
+    await _initNotificationsIfNeeded();
+    if (enabled) {
+      final hasPermission = await _requestNotificationPermissionIfNeeded();
+      if (!hasPermission) {
+        await _saveMealReminderPushEnabled(false);
+        if (mounted) {
+          _safeSetState(() => _mealReminderPushEnabled = false);
+        } else {
+          _mealReminderPushEnabled = false;
+        }
+        _showSnack(_l10n.notificationPermissionDenied);
+        return;
+      }
+
+      await _saveMealReminderPushEnabled(true);
+      if (mounted) {
+        _safeSetState(() => _mealReminderPushEnabled = true);
+      } else {
+        _mealReminderPushEnabled = true;
+      }
+      await _scheduleMealReminderNotifications();
+      _showSnack(_l10n.mealReminderEnabled);
+      return;
+    }
+
+    await _saveMealReminderPushEnabled(false);
+    if (mounted) {
+      _safeSetState(() => _mealReminderPushEnabled = false);
+    } else {
+      _mealReminderPushEnabled = false;
+    }
+    await _cancelMealReminderNotifications();
+    _showSnack(_l10n.mealReminderDisabled);
+  }
+
+  Future<void> _toggleNoticeEventPush(bool enabled) async {
+    // TODO(vegepet): 추후 FCM/Supabase Edge Function 연동 시 이 토글 값을 수신 동의 상태로 사용
+    await _saveNoticeEventPushEnabled(enabled);
+    if (mounted) {
+      _safeSetState(() => _noticeEventPushEnabled = enabled);
+    } else {
+      _noticeEventPushEnabled = enabled;
+    }
+    _showSnack(enabled ? _l10n.noticeEventEnabled : _l10n.noticeEventDisabled);
+  }
+
+  Future<void> _syncAuthEmailToProfileIfNeeded() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    final authEmail = user.email?.trim();
+    if (authEmail == null || authEmail.isEmpty) return;
+
+    final profileEmail = _profile?['email']?.toString().trim() ?? '';
+    final accountType = _profile?['account_type']?.toString();
+
+    if (profileEmail == authEmail && accountType == 'email') return;
+
+    try {
+      await supabase.from('profiles').update({
+        'email': authEmail,
+        'account_type': 'email',
+        'linked_at':
+            _profile?['linked_at'] ?? DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user.id);
+
+      await _fetchProfile();
+    } catch (e) {
+      debugPrint('sync auth email to profile failed: $e');
+    }
+  }
+
+  Future<bool> _sendEmailLinkOtp(String email) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return false;
+    }
+    final trimmed = email.trim();
+    if (trimmed.isEmpty || !_looksLikeEmail(trimmed)) {
+      _showSnack('올바른 이메일 형식으로 입력해주세요.');
+      return false;
+    }
+    try {
+      await supabase.auth.updateUser(
+        UserAttributes(email: trimmed),
+      );
+      _showSnack('인증 코드가 이메일로 발송되었어요.');
+      return true;
+    } catch (e) {
+      if (_isEmailAlreadyUsedError(e)) {
+        await _showEmailAlreadyUsedDialog();
+        return false;
+      }
+      _showSnack('인증 코드 발송에 실패했어요: ${_formatAuthError(e)}');
+      return false;
+    }
+  }
+
+  Future<bool> _verifyEmailLinkOtp({
+    required String email,
+    required String token,
+  }) async {
+    final trimmedEmail = email.trim();
+    final trimmedToken = token.trim();
+    if (trimmedEmail.isEmpty || trimmedToken.isEmpty) {
+      _showSnack('이메일과 인증 코드를 입력해주세요.');
+      return false;
+    }
+    try {
+      await supabase.auth.verifyOTP(
+        email: trimmedEmail,
+        token: trimmedToken,
+        type: OtpType.emailChange,
+      );
+    } catch (e) {
+      if (_isEmailAlreadyUsedError(e)) {
+        await _showEmailAlreadyUsedDialog();
+        return false;
+      }
+      _showSnack('인증 코드 확인에 실패했어요: ${_formatAuthError(e)}');
+      return false;
+    }
+
+    try {
+      await _syncAuthEmailToProfileIfNeeded();
+      await _fetchProfile();
+      if (mounted) {
+        _safeSetState(() {});
+      }
+      return true;
+    } catch (e) {
+      _showSnack('이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.');
+      debugPrint('verify email otp profile sync failed: $e');
+      return true;
+    }
   }
 
   Future<void> _fetchPetSpecies() async {
@@ -1271,6 +1792,9 @@ class _HomePageState extends State<HomePage> {
       await supabase.auth.signOut();
       if (!mounted) return;
       _safeSetState(() {
+        _emailOtpCooldownTimer?.cancel();
+        _emailOtpCooldownTimer = null;
+        _emailOtpCooldownSeconds = 0;
         _profile = null;
         _petSpecies = [];
         _activePet = null;
@@ -1396,6 +1920,9 @@ class _HomePageState extends State<HomePage> {
 
       if (!mounted) return;
       _safeSetState(() {
+        _emailOtpCooldownTimer?.cancel();
+        _emailOtpCooldownTimer = null;
+        _emailOtpCooldownSeconds = 0;
         _lastResultType = null;
         _lastFeedbackText = null;
         _lastStatusMessage = null;
@@ -4155,7 +4682,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _onMenuTap(String label) async {
     if (label == '설정') {
-      _showSnack('나중에 이메일 연동 메뉴가 여기에 들어올 예정입니다.');
+      await _openSettingsSheet();
     } else if (label == '가방') {
       await _openBagSheet();
     } else if (label == '도감') {
@@ -4168,6 +4695,809 @@ class _HomePageState extends State<HomePage> {
       _showSnack('상점은 2차 오픈 예정이에요.');
     } else {
       _showSnack('나중에 구현 예정: $label');
+    }
+  }
+
+  Future<void> _openSettingsSheet() async {
+    _dismissFocus();
+    await _fetchProfile();
+    await _syncAuthEmailToProfileIfNeeded();
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return _buildSettingsSheetContent(
+              sheetCtx,
+              onProfileUpdated: () async {
+                await _fetchProfile();
+                if (mounted) _safeSetState(() {});
+                if (mounted) setSheetState(() {});
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openLanguageSelectorSheet(BuildContext sheetCtx) async {
+    final l10n = AppLocalizations.of(sheetCtx);
+    final scope = _LocaleControllerScope.of(sheetCtx);
+    final currentCode = scope.locale.languageCode == 'en' ? 'en' : 'ko';
+
+    final selectedCode = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        Widget item({
+          required String code,
+          required String label,
+        }) {
+          final selected = currentCode == code;
+          return ListTile(
+            title: Text(label),
+            trailing: selected
+                ? Icon(
+                    Icons.check,
+                    color: Theme.of(ctx).colorScheme.primary,
+                  )
+                : null,
+            onTap: () => Navigator.of(ctx).pop(code),
+          );
+        }
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.selectLanguage,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  l10n.languageDescription,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                item(code: 'ko', label: l10n.languageKorean),
+                item(code: 'en', label: l10n.languageEnglish),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedCode == null) return;
+    final targetCode = selectedCode == 'en' ? 'en' : 'ko';
+    await scope.setLocale(Locale(targetCode));
+    if (!mounted) return;
+    _showSnack(_l10n.languageChanged);
+  }
+
+  Widget _buildSettingsSheetContent(
+    BuildContext sheetCtx, {
+    required Future<void> Function() onProfileUpdated,
+  }) {
+    final l10n = AppLocalizations.of(sheetCtx);
+    final localeScope = _LocaleControllerScope.of(sheetCtx);
+    final theme = Theme.of(sheetCtx);
+    final linked = _hasEffectiveEmailLink();
+
+    final accountTypeLabel =
+        linked ? l10n.emailLinkedAccount : l10n.guestAccount;
+
+    final emailLine = linked
+        ? _resolvedDisplayEmailLine(l10n)
+        : l10n.noLinkedEmail;
+    final currentLanguageLabel = localeScope.locale.languageCode == 'en'
+        ? l10n.languageEnglish
+        : l10n.languageKorean;
+
+    Widget sectionTitle(String title, IconData icon) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8, top: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: theme.colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget roundedTile({
+      required Widget child,
+      VoidCallback? onTap,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHighest
+              .withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: child,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 8,
+          bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 20,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              l10n.settings,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+
+            // ----- 계정 -----
+            sectionTitle(l10n.account, Icons.person_outline),
+
+            roundedTile(
+              onTap: null,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    accountTypeLabel,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    emailLine,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            if (linked)
+              roundedTile(
+                onTap: () {
+                  _showSnack('이미 이메일 계정으로 연동되어 있어요.');
+                },
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        l10n.emailLinkCompleted,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              roundedTile(
+                onTap: () async {
+                  await _openEmailOtpLinkSheet(
+                    onLinked: onProfileUpdated,
+                  );
+                },
+                child: Row(
+                  children: [
+                    Icon(Icons.link, color: theme.colorScheme.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        l10n.emailAccountLink,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ],
+                ),
+              ),
+
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.paymentHistory} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Icon(Icons.receipt_long_outlined,
+                      color: theme.colorScheme.onSurface),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      l10n.paymentHistory,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+
+            roundedTile(
+              onTap: () async {
+                final ok = await _confirmWithdrawAccount();
+                if (ok && mounted) {
+                  await _withdrawAccount();
+                }
+              },
+              child: Row(
+                children: [
+                  Icon(Icons.logout, color: theme.colorScheme.error),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      l10n.withdrawAccount,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right,
+                      color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ----- 언어 -----
+            sectionTitle(l10n.language, Icons.language_outlined),
+            roundedTile(
+              onTap: () async => _openLanguageSelectorSheet(sheetCtx),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      currentLanguageLabel,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.expand_more, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ----- 푸쉬 알림 -----
+            sectionTitle(l10n.pushNotifications, Icons.notifications_outlined),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              tileColor: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.85),
+              title: Text(l10n.pushNoticeEvent),
+              subtitle: Text(l10n.pushNoticeEventDescription),
+              value: _noticeEventPushEnabled,
+              onChanged: (v) => _toggleNoticeEventPush(v),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              tileColor: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.85),
+              title: Text(l10n.pushMealReminder),
+              subtitle: Text(l10n.pushMealReminderDescription),
+              value: _mealReminderPushEnabled,
+              onChanged: (v) => _toggleMealReminderPush(v),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ----- 고객지원 -----
+            sectionTitle(l10n.customerSupport, Icons.support_agent_outlined),
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '고객센터',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '이용약관',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '개인정보 보호정책',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '운영정책',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+            roundedTile(
+              onTap: () {
+                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
+              },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '보호자 가이드',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openEmailOtpLinkSheet({
+    required Future<void> Function() onLinked,
+  }) async {
+    if (_hasEffectiveEmailLink()) {
+      _showSnack('이미 이메일 계정으로 연동되어 있어요.');
+      return;
+    }
+
+    _dismissFocus();
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    final emailCtrl = TextEditingController();
+    final otpCtrl = TextEditingController();
+    Timer? sheetCooldownUiTimer;
+
+    var otpSent = false;
+    var isSending = false;
+    var isVerifying = false;
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (modalCtx) {
+          final inset = MediaQuery.of(modalCtx).viewInsets.bottom;
+          final theme = Theme.of(modalCtx);
+
+          return StatefulBuilder(
+            builder: (ctx, setModal) {
+              sheetCooldownUiTimer ??=
+                  Timer.periodic(const Duration(seconds: 1), (_) {
+                if (!modalCtx.mounted) return;
+                setModal(() {});
+              });
+
+              Future<void> sendOtp() async {
+                final isCooldown = _isEmailOtpCooldownActive();
+                if (isSending || isVerifying || isCooldown) return;
+                final raw = emailCtrl.text.trim();
+                if (raw.isEmpty) {
+                  _showSnack('이메일을 입력해주세요.');
+                  return;
+                }
+                if (!_looksLikeEmail(raw)) {
+                  _showSnack('올바른 이메일 형식으로 입력해주세요.');
+                  return;
+                }
+
+                setModal(() => isSending = true);
+                _startEmailOtpCooldown();
+                final ok = await _sendEmailLinkOtp(raw);
+                if (!modalCtx.mounted) return;
+                setModal(() {
+                  isSending = false;
+                  if (ok) otpSent = true;
+                });
+              }
+
+              Future<void> verify() async {
+                if (isVerifying) return;
+                final em = emailCtrl.text.trim();
+                final code = otpCtrl.text.trim();
+                if (em.isEmpty) {
+                  _showSnack('이메일을 입력해주세요.');
+                  return;
+                }
+                if (code.isEmpty) {
+                  _showSnack('인증 코드를 입력해주세요.');
+                  return;
+                }
+
+                setModal(() => isVerifying = true);
+                final ok = await _verifyEmailLinkOtp(email: em, token: code);
+                if (!modalCtx.mounted) return;
+                setModal(() => isVerifying = false);
+
+                if (ok) {
+                  await _fetchProfile();
+                  await _syncAuthEmailToProfileIfNeeded();
+                  if (mounted) {
+                    _safeSetState(() {});
+                  }
+                  await onLinked();
+                  if (modalCtx.mounted) {
+                    Navigator.of(modalCtx).pop();
+                  }
+                  _showSnack('이메일 계정 연동이 완료되었어요.');
+                }
+              }
+
+              final busy = isSending || isVerifying;
+              final isCooldown = _isEmailOtpCooldownActive();
+
+              return Padding(
+                padding: EdgeInsets.only(bottom: inset),
+                child: SafeArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '이메일 계정 연동',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '이메일을 연동하면 기기를 바꾸거나 앱을 다시 설치해도 베지펫 데이터를 이어갈 수 있어요.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: emailCtrl,
+                          enabled: !busy,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.email],
+                          decoration: const InputDecoration(
+                            labelText: '이메일',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: (busy || otpSent || isCooldown)
+                              ? null
+                              : sendOtp,
+                          child: Text(
+                            isCooldown
+                                ? _emailOtpCooldownLabel(normalLabel: '인증 코드 받기')
+                                : isSending
+                                    ? '발송 중...'
+                                    : '인증 코드 받기',
+                          ),
+                        ),
+                        if (otpSent) ...[
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: otpCtrl,
+                            enabled: !busy,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: '인증 코드',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: (busy || isCooldown) ? null : sendOtp,
+                            child: Text(
+                              isCooldown
+                                  ? _emailOtpCooldownLabel(
+                                      normalLabel: '인증 코드 다시 받기',
+                                    )
+                                  : isSending
+                                      ? '발송 중...'
+                                      : '인증 코드 다시 받기',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          FilledButton(
+                            onPressed: busy ? null : verify,
+                            child: const Text('인증 완료'),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed:
+                              busy ? null : () => Navigator.of(modalCtx).pop(),
+                          child: const Text('취소'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      sheetCooldownUiTimer?.cancel();
+      emailCtrl.dispose();
+      otpCtrl.dispose();
+    }
+  }
+
+  Future<bool> _confirmWithdrawAccount() async {
+    final ctx = _rootNavigatorKey.currentContext ?? context;
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('회원 탈퇴'),
+          content: const Text(
+            '회원 탈퇴를 진행하면 현재 계정의 펫, 식단 기록, 도감 기록, 보유 분양권, 프로필 정보가 모두 초기화됩니다.\n'
+            '이 작업은 되돌릴 수 없어요.\n'
+            '정말 탈퇴할까요?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error,
+                foregroundColor: Theme.of(ctx).colorScheme.onError,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('탈퇴하기'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
+  /// 회원 탈퇴: 사용자 데이터 삭제 후 익명 세션으로 재시작.
+  /// auth.users 행 완전 삭제는 클라이언트 권한으로 불가할 수 있음 →
+  /// TODO(vegepet): 추후 Edge Function / Admin API로 사용자 계정 정리.
+  Future<void> _deleteCurrentAuthUserByEdgeFunction() async {
+    try {
+      final response = await supabase.functions.invoke(
+        'delete-auth-user',
+        method: HttpMethod.post,
+      );
+
+      final data = response.data;
+      if (data is Map && data['ok'] == false) {
+        debugPrint('delete auth user failed: ${data['error']}');
+      }
+    } catch (e) {
+      debugPrint('delete auth user edge function failed: $e');
+    }
+  }
+
+  Future<void> _withdrawAccount() async {
+    _dismissFocus();
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+    }
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인 상태가 아니어서 탈퇴를 진행할 수 없어요.');
+      return;
+    }
+
+    final uid = user.id;
+
+    try {
+      await supabase.from('meal_logs').delete().eq('user_id', uid);
+      try {
+        await supabase.from('meal_diary_notes').delete().eq('user_id', uid);
+      } catch (e) {
+        debugPrint('meal_diary_notes delete skipped: $e');
+      }
+      await supabase.from('pokedex_entries').delete().eq('user_id', uid);
+      await supabase.from('user_items').delete().eq('user_id', uid);
+      await supabase.from('user_pets').delete().eq('user_id', uid);
+
+      await supabase.from('profiles').update({
+        'nickname': null,
+        'gender': null,
+        'age_range': null,
+        'diet_goal': null,
+        // profiles 만 guest 로 초기화해도 auth.users 이메일은 남을 수 있다.
+        // 같은 이메일 재사용까지 보장하려면 Edge Function 삭제가 성공해야 한다.
+        'email': null,
+        'account_type': 'guest',
+        'linked_at': null,
+        'gold_balance': 1000,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', uid);
+
+      await _deleteCurrentAuthUserByEdgeFunction();
+      await supabase.auth.signOut();
+
+      if (!mounted) return;
+      _safeSetState(() {
+        _emailOtpCooldownTimer?.cancel();
+        _emailOtpCooldownTimer = null;
+        _emailOtpCooldownSeconds = 0;
+        _profile = null;
+        _petSpecies = [];
+        _activePet = null;
+        _residentPets = [];
+        _selectedSpeciesId = null;
+        _todayMealLogs = [];
+        _firstMealPopupShownThisSession = false;
+        _randomTicketCount = 0;
+        _pokedexEntries = [];
+        _isLoadingPokedex = false;
+        _hasOpenedDietDiary = false;
+        _diaryVisibleMonth = _todayDiaryMonth();
+        _diaryLogsByDate = {};
+        _isLoadingDiary = false;
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+        _isInteracting = false;
+        _isUsingRandomTicket = false;
+        _isToyMenuOpen = false;
+        _isToyDropHovering = false;
+        _isCompletingToyPlay = false;
+        _nicknameController.clear();
+        _selectedGender = null;
+        _selectedAgeRange = null;
+        _selectedDietGoal = null;
+
+        _lastResultType = null;
+        _lastFeedbackText = null;
+        _lastStatusMessage = null;
+        _lastAffectionGain = null;
+        _lastImagePath = null;
+        _isAdopting = false;
+        _isSavingProfile = false;
+        _isLoggingMeal = false;
+      });
+
+      await _waitForUiSettle();
+      if (!mounted) return;
+      await _bootstrap();
+
+      if (!mounted) return;
+      _showSnack('회원 탈퇴가 완료되었어요.');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('회원 탈퇴 처리 중 오류가 발생했어요: $e');
     }
   }
 
