@@ -255,6 +255,16 @@ class _LocaleControllerScope extends InheritedWidget {
   }
 }
 
+class _MealNotificationTexts {
+  const _MealNotificationTexts({
+    required this.title,
+    required this.messages,
+  });
+
+  final String title;
+  final List<String> messages;
+}
+
 enum _ViewStatus { loading, error, ready }
 
 class HomePage extends StatefulWidget {
@@ -367,8 +377,6 @@ class _HomePageState extends State<HomePage> {
       'vegepet_meal_reminder_push_enabled';
   static const int _kMealReminderNotificationIdBase = 120000;
   static const int _kMealReminderDaysToSchedule = 14;
-
-  AppLocalizations get _l10n => AppLocalizations.of(context);
 
   @override
   void initState() {
@@ -484,12 +492,12 @@ class _HomePageState extends State<HomePage> {
         await _initNotificationsIfNeeded();
         await _loadPushSettings();
         if (_mealReminderPushEnabled) {
+          final localeCode = await _loadSavedLocaleCodeForNotifications();
+          final notificationTexts =
+              _mealNotificationTextsForLocaleCode(localeCode);
           await _scheduleMealReminderNotifications(
-            notificationTitle: '베지펫 식사 시간',
-            notificationMessages: const [
-              '베지펫이 배가 고플 시간이에요!',
-              '베지펫에게 건강한 음식을 줄 시간이에요!',
-            ],
+            notificationTitle: notificationTexts.title,
+            notificationMessages: notificationTexts.messages,
             revertToggleWhenDenied: false,
           );
         }
@@ -641,6 +649,34 @@ class _HomePageState extends State<HomePage> {
   }) {
     if (_emailOtpCooldownSeconds <= 0) return normalLabel;
     return '$_emailOtpCooldownSeconds초 후 다시 시도';
+  }
+
+  _MealNotificationTexts _mealNotificationTextsForLocaleCode(String localeCode) {
+    final code = localeCode == 'en' ? 'en' : 'ko';
+
+    if (code == 'en') {
+      return const _MealNotificationTexts(
+        title: 'VegePet Meal Time',
+        messages: [
+          'VegePet may be getting hungry!',
+          'It’s time to give VegePet a healthy meal!',
+        ],
+      );
+    }
+
+    return const _MealNotificationTexts(
+      title: '베지펫 식사 시간',
+      messages: [
+        '베지펫이 배가 고플 시간이에요!',
+        '베지펫에게 건강한 음식을 줄 시간이에요!',
+      ],
+    );
+  }
+
+  Future<String> _loadSavedLocaleCodeForNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final code = prefs.getString(_kLocalePrefKey) ?? 'ko';
+    return code == 'en' ? 'en' : 'ko';
   }
 
   Future<void> _initNotificationsIfNeeded() async {
@@ -4867,9 +4903,24 @@ class _HomePageState extends State<HomePage> {
 
     if (selectedCode == null) return;
     final targetCode = selectedCode == 'en' ? 'en' : 'ko';
+    final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
+    final changedMessage =
+        targetCode == 'en' ? 'Language has been changed.' : '언어가 변경되었어요.';
     await scope.setLocale(Locale(targetCode));
     if (!mounted) return;
-    _showSnack(_l10n.languageChanged);
+    _showSnack(changedMessage);
+
+    if (_mealReminderPushEnabled) {
+      try {
+        await _scheduleMealReminderNotifications(
+          notificationTitle: notificationTexts.title,
+          notificationMessages: notificationTexts.messages,
+          revertToggleWhenDenied: false,
+        );
+      } catch (e) {
+        debugPrint('meal reminder reschedule on locale change failed: $e');
+      }
+    }
   }
 
   Widget _buildSettingsSheetContent(
