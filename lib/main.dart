@@ -271,6 +271,9 @@ class _HomePageState extends State<HomePage> {
   Map<String, List<Map<String, dynamic>>> _diaryLogsByDate = {};
   bool _isLoadingDiary = false;
   bool _hasOpenedDietDiary = false;
+  bool _isToyMenuOpen = false;
+  bool _isToyDropHovering = false;
+  bool _isCompletingToyPlay = false;
 
   @override
   void initState() {
@@ -708,6 +711,15 @@ class _HomePageState extends State<HomePage> {
   // 미지의 값이 들어와 있을 때를 위해 _normalizePetFamily 로 한 번 정리한다.
   String _pokedexFamilyOf(Map<String, dynamic> entry) {
     final species = entry['pet_species'];
+    if (species is Map) {
+      return _normalizePetFamily(species['family']?.toString() ?? '');
+    }
+    return '';
+  }
+
+  // 현재 활성 펫의 family('dog'/'cat'/'')를 안전하게 꺼낸다.
+  String _activePetFamily() {
+    final species = _activePet?['pet_species'];
     if (species is Map) {
       return _normalizePetFamily(species['family']?.toString() ?? '');
     }
@@ -1278,6 +1290,9 @@ class _HomePageState extends State<HomePage> {
         _uploadingSlot = null;
         _isInteracting = false;
         _isUsingRandomTicket = false;
+        _isToyMenuOpen = false;
+        _isToyDropHovering = false;
+        _isCompletingToyPlay = false;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -1375,6 +1390,7 @@ class _HomePageState extends State<HomePage> {
         'gender': null,
         'age_range': null,
         'diet_goal': null,
+        'gold_balance': 1000,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
 
@@ -1402,6 +1418,9 @@ class _HomePageState extends State<HomePage> {
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _isLoadingDiary = false;
+        _isToyMenuOpen = false;
+        _isToyDropHovering = false;
+        _isCompletingToyPlay = false;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -1599,6 +1618,11 @@ class _HomePageState extends State<HomePage> {
   //   - "사용하기" 버튼이 눌리면 시트는 bool(true) 만 pop 하고, 확인 다이얼로그/
   //     실제 분양 흐름은 시트가 완전히 닫힌 뒤 HomePage context 에서 실행한다.
   Future<void> _openBagSheet() async {
+    await _fetchRandomTicketCount();
+    if (!mounted) return;
+    await _waitForUiSettle();
+    if (!mounted) return;
+
     final shouldUseTicket = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
@@ -1650,7 +1674,7 @@ class _HomePageState extends State<HomePage> {
     final useDisabled = !hasTicket || _isUsingRandomTicket;
 
     // 분양권은 _randomTicketCount 가 1 이상일 때만 더미 티켓 카드로 노출한다.
-    // 가구/장난감 섹션은 이번 단계에서 보유 데이터가 없으므로 항상 빈 상태.
+    // MVP에서는 상점/가구 시스템을 제외하고, 장난감 2종은 기본 지급 아이템으로 고정 표시한다.
     final ticketItems = <_BagItem>[
       if (hasTicket)
         _BagItem(
@@ -1664,6 +1688,7 @@ class _HomePageState extends State<HomePage> {
           usable: !_isUsingRandomTicket,
         ),
     ];
+    final toyItems = _defaultToyBagItems();
 
     return SafeArea(
       top: false,
@@ -1710,16 +1735,9 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 16),
                     _buildBagSection(
-                      title: '가구',
-                      emptyText: '보유 중인 가구가 없어요.',
-                      items: const [],
-                      onSelectItem: onSelectItem,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildBagSection(
                       title: '장난감',
                       emptyText: '보유 중인 장난감이 없어요.',
-                      items: const [],
+                      items: toyItems,
                       onSelectItem: onSelectItem,
                     ),
                   ],
@@ -1937,6 +1955,29 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  List<_BagItem> _defaultToyBagItems() {
+    return const [
+      _BagItem(
+        category: 'toy',
+        name: '뼈다귀 인형',
+        description: '강아지 베지펫이 좋아할 것 같은 기본 장난감입니다. 추후 놀이 기능과 연결될 예정입니다.',
+        quantity: 1,
+        icon: Icons.cruelty_free_outlined,
+        usable: false,
+        targetPetFamily: 'dog',
+      ),
+      _BagItem(
+        category: 'toy',
+        name: '실뭉치',
+        description: '고양이 베지펫이 좋아할 것 같은 기본 장난감입니다. 추후 놀이 기능과 연결될 예정입니다.',
+        quantity: 1,
+        icon: Icons.sports_baseball_outlined,
+        usable: false,
+        targetPetFamily: 'cat',
+      ),
+    ];
   }
 
   // 도감 BottomSheet 열기.
@@ -2632,6 +2673,18 @@ class _HomePageState extends State<HomePage> {
                 onTap: _openMenuSheet,
               ),
             ),
+            if (_isToyMenuOpen)
+              Positioned.fill(
+                child: _buildToyDropTargetOverlay(),
+              ),
+            if (_isToyMenuOpen)
+              Positioned(
+                left: 12,
+                top: 36,
+                bottom: 16,
+                width: 92,
+                child: _buildToyMenuWindow(),
+              ),
           ],
         ),
       ),
@@ -2721,6 +2774,185 @@ class _HomePageState extends State<HomePage> {
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToyDropTargetOverlay() {
+    final theme = Theme.of(context);
+
+    return DragTarget<_BagItem>(
+      onWillAcceptWithDetails: (details) {
+        final item = details.data;
+        return item.category == 'toy' &&
+            item.targetPetFamily == _activePetFamily() &&
+            !_isCompletingToyPlay;
+      },
+      onMove: (_) {
+        if (!_isToyDropHovering) {
+          _safeSetState(() => _isToyDropHovering = true);
+        }
+      },
+      onLeave: (_) {
+        if (_isToyDropHovering) {
+          _safeSetState(() => _isToyDropHovering = false);
+        }
+      },
+      onAcceptWithDetails: (details) {
+        _completeToyMenuDrop(details.data);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final hovering = _isToyDropHovering || candidateData.isNotEmpty;
+        return Container(
+          color: Colors.black.withValues(alpha: hovering ? 0.14 : 0.04),
+          alignment: Alignment.topCenter,
+          padding: const EdgeInsets.only(top: 12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: hovering
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outlineVariant,
+                width: hovering ? 2 : 1,
+              ),
+            ),
+            child: Text(
+              hovering ? '여기에 놓으면 베지펫이 놀아요!' : '장난감을 마당에 놓아주세요',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildToyMenuWindow() {
+    final theme = Theme.of(context);
+    final activeFamily = _activePetFamily();
+    final toys = _defaultToyBagItems();
+
+    return Material(
+      elevation: 8,
+      color: Colors.white.withValues(alpha: 0.82),
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Column(
+          children: [
+            const Text(
+              '장난감',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            for (final toy in toys) ...[
+              _buildToyMenuDraggableItem(
+                toy,
+                toy.targetPetFamily == activeFamily,
+              ),
+              const SizedBox(height: 10),
+            ],
+            const Spacer(),
+            Icon(
+              Icons.keyboard_double_arrow_right,
+              size: 22,
+              color: theme.colorScheme.primary,
+            ),
+            const Text(
+              'DRAG\nAND DROP',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: _cancelToyMenu,
+              borderRadius: BorderRadius.circular(10),
+              child: const Padding(
+                padding: EdgeInsets.all(2),
+                child: Icon(Icons.close, size: 18),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToyMenuDraggableItem(_BagItem toy, bool canUse) {
+    final child = _buildToyMenuIconVisual(toy, canUse);
+
+    if (!canUse) {
+      return Opacity(
+        opacity: 0.35,
+        child: IgnorePointer(child: child),
+      );
+    }
+
+    return LongPressDraggable<_BagItem>(
+      data: toy,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: Material(
+        color: Colors.transparent,
+        child: _buildToyDragFeedback(toy),
+      ),
+      childWhenDragging: Opacity(opacity: 0.35, child: child),
+      child: child,
+    );
+  }
+
+  Widget _buildToyMenuIconVisual(_BagItem toy, bool canUse) {
+    final theme = Theme.of(context);
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: canUse
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outlineVariant,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        toy.icon,
+        size: 28,
+        color: canUse
+            ? theme.colorScheme.primary
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  Widget _buildToyDragFeedback(_BagItem toy) {
+    return Container(
+      width: 110,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(toy.icon, size: 22, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              toy.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
         ],
@@ -2840,12 +3072,79 @@ class _HomePageState extends State<HomePage> {
         await _openMealSheet();
         break;
       case 'play':
-        await _interactPet('play');
+        await _openToyPlaySheet();
         break;
       case 'pet':
         await _interactPet('pet');
         break;
     }
+  }
+
+  Future<void> _openToyPlaySheet() async {
+    if (_activePet == null) {
+      _showSnack('먼저 펫을 분양받아주세요.');
+      return;
+    }
+
+    final today = _todayDateStr();
+    if (_activePet!['last_played_on']?.toString() == today) {
+      _showSnack('오늘은 이미 놀아줬어요.');
+      return;
+    }
+
+    final family = _activePetFamily();
+    if (family != 'dog' && family != 'cat') {
+      _showSnack('펫 정보를 확인할 수 없어요.');
+      return;
+    }
+
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    _safeSetState(() {
+      _isToyMenuOpen = true;
+      _isToyDropHovering = false;
+    });
+    _showSnack('장난감을 길게 눌러 마당에 놓아주세요.');
+  }
+
+  Future<void> _completeToyMenuDrop(_BagItem toy) async {
+    if (_isCompletingToyPlay) return;
+
+    final family = _activePetFamily();
+    if (toy.targetPetFamily != family) {
+      _showSnack('이 장난감은 이 베지펫에게 사용할 수 없어요.');
+      return;
+    }
+
+    final today = _todayDateStr();
+    if (_activePet?['last_played_on']?.toString() == today) {
+      _cancelToyMenu();
+      _showSnack('오늘은 이미 놀아줬어요.');
+      return;
+    }
+
+    _safeSetState(() {
+      _isCompletingToyPlay = true;
+      _isToyMenuOpen = false;
+      _isToyDropHovering = false;
+    });
+
+    try {
+      await _interactPet('play');
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isCompletingToyPlay = false);
+      }
+    }
+  }
+
+  void _cancelToyMenu() {
+    _safeSetState(() {
+      _isToyMenuOpen = false;
+      _isToyDropHovering = false;
+      _isCompletingToyPlay = false;
+    });
   }
 
   Widget _buildPetStatusSheetContent({
@@ -3865,6 +4164,8 @@ class _HomePageState extends State<HomePage> {
       await _openProfileSheet();
     } else if (label == '식단일지') {
       await _openDietDiarySheet();
+    } else if (label == '상점') {
+      _showSnack('상점은 2차 오픈 예정이에요.');
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
@@ -5604,6 +5905,8 @@ class _BagItem {
   final IconData icon;
   // 사용하기 버튼 노출 여부. 분양권만 true 가 들어오고, 가구/장난감 등은 false.
   final bool usable;
+  // toy 아이템의 종족 제한. 'dog' | 'cat' | null
+  final String? targetPetFamily;
 
   const _BagItem({
     required this.category,
@@ -5612,6 +5915,7 @@ class _BagItem {
     required this.quantity,
     required this.icon,
     this.usable = false,
+    this.targetPetFamily,
   });
 }
 
