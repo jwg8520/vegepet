@@ -122,6 +122,12 @@ abstract class AppLocalizations {
   /// **'언어'**
   String get language;
 
+  /// No description provided for @languageSettingsTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'Language'**
+  String get languageSettingsTitle;
+
   /// No description provided for @pushNotifications.
   ///
   /// In ko, this message translates to:
@@ -295,6 +301,300 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'베지펫 식사 시간'**
   String get mealNotificationTitle;
+
+  /// No description provided for @sound.
+  ///
+  /// In ko, this message translates to:
+  /// **'사운드'**
+  String get sound;
+
+  /// No description provided for @backgroundMusic.
+  ///
+  /// In ko, this message translates to:
+  /// **'배경음악'**
+  String get backgroundMusic;
+
+  /// No description provided for @backgroundMusicDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'마당에서 흐르는 배경음악을 켜거나 꺼요.'**
+  String get backgroundMusicDescription;
+
+  /// No description provided for @soundEffects.
+  ///
+  /// In ko, this message translates to:
+  /// **'효과음'**
+  String get soundEffects;
+
+  /// No description provided for @soundEffectsDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'버튼과 상호작용 효과음을 켜거나 꺼요.'**
+  String get soundEffectsDescription;
+
+  /// No description provided for @backgroundMusicEnabled.
+  ///
+  /// In ko, this message translates to:
+  /// **'배경음악이 켜졌어요.'**
+  String get backgroundMusicEnabled;
+
+  /// No description provided for @backgroundMusicDisabled.
+  ///
+  /// In ko, this message translates to:
+  /// **'배경음악이 꺼졌어요.'**
+  String get backgroundMusicDisabled;
+
+  /// No description provided for @soundEffectsEnabled.
+  ///
+  /// In ko, this message translates to:
+  /// **'효과음이 켜졌어요.'**
+  String get soundEffectsEnabled;
+
+  /// No description provided for @soundEffectsDisabled.
+  ///
+  /// In ko, this message translates to:
+  /// **'효과음이 꺼졌어요.'**
+  String get soundEffectsDisabled;
+
+  /// No description provided for @supportCenter.
+  ///
+  /// In ko, this message translates to:
+  /// **'고객센터'**
+  String get supportCenter;
+
+  /// No description provided for @contactAndFeedback.
+  ///
+  /// In ko, this message translates to:
+  /// **'문의 및 건의'**
+  String get contactAndFeedback;
+
+  /// No description provided for @supportEmail.
+  ///
+  /// In ko, this message translates to:
+  /// **'문의 및 건의 : acoustic.jwg@gmail.com'**
+  String get supportEmail;
+
+  /// No description provided for @copyEmail.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 복사'**
+  String get copyEmail;
+
+  /// No description provided for @emailCopied.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 주소가 복사되었어요.'**
+  String get emailCopied;
+
+  /// No description provided for @termsOfService.
+  ///
+  /// In ko, this message translates to:
+  /// **'이용약관'**
+  String get termsOfService;
+
+  /// No description provided for @privacyPolicy.
+  ///
+  /// In ko, this message translates to:
+  /// **'개인정보 보호정책'**
+  String get privacyPolicy;
+
+  /// No description provided for @operationPolicy.
+  ///
+  /// In ko, this message translates to:
+  /// **'운영정책'**
+  String get operationPolicy;
+
+  /// No description provided for @guardianGuide.
+  ///
+  /// In ko, this message translates to:
+  /// **'보호자용 가이드'**
+  String get guardianGuide;
+
+  /// No description provided for @accountDataDeletionGuide.
+  ///
+  /// In ko, this message translates to:
+  /// **'계정 및 데이터 삭제 안내'**
+  String get accountDataDeletionGuide;
+
+  /// No description provided for @legalNoticeDraft.
+  ///
+  /// In ko, this message translates to:
+  /// **'본 문서는 베지펫 앱 내 안내용 초안이며, 실제 출시 전 법무/개인정보 전문가 검토가 필요합니다.'**
+  String get legalNoticeDraft;
+
+  /// No description provided for @lastUpdated.
+  ///
+  /// In ko, this message translates to:
+  /// **'최종 업데이트'**
+  String get lastUpdated;
+
+  /// No description provided for @effectiveDate.
+  ///
+  /// In ko, this message translates to:
+  /// **'시행일'**
+  String get effectiveDate;
+
+  /// No description provided for @close.
+  ///
+  /// In ko, this message translates to:
+  /// **'닫기'**
+  String get close;
+
+  /// No description provided for @petInfoTooltip.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫 정보'**
+  String get petInfoTooltip;
+
+  /// No description provided for @petInfoTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫 정보'**
+  String get petInfoTitle;
+
+  /// No description provided for @petInfoNameLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름'**
+  String get petInfoNameLabel;
+
+  /// No description provided for @petInfoSpeciesLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'종류'**
+  String get petInfoSpeciesLabel;
+
+  /// No description provided for @petInfoStageLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'단계'**
+  String get petInfoStageLabel;
+
+  /// No description provided for @petInfoFeedAction.
+  ///
+  /// In ko, this message translates to:
+  /// **'먹이(식단사진) 주기'**
+  String get petInfoFeedAction;
+
+  /// No description provided for @petInfoPlayAction.
+  ///
+  /// In ko, this message translates to:
+  /// **'놀아주기'**
+  String get petInfoPlayAction;
+
+  /// No description provided for @petInfoPetAction.
+  ///
+  /// In ko, this message translates to:
+  /// **'쓰다듬기'**
+  String get petInfoPetAction;
+
+  /// No description provided for @petInfoMealTimeGuide.
+  ///
+  /// In ko, this message translates to:
+  /// **'아점 : 06시~14시 / 저녁 : 17시~22시'**
+  String get petInfoMealTimeGuide;
+
+  /// No description provided for @petInfoStatusDone.
+  ///
+  /// In ko, this message translates to:
+  /// **'완료'**
+  String get petInfoStatusDone;
+
+  /// No description provided for @petInfoStatusAvailable.
+  ///
+  /// In ko, this message translates to:
+  /// **'가능'**
+  String get petInfoStatusAvailable;
+
+  /// No description provided for @petInfoCurrentAffection.
+  ///
+  /// In ko, this message translates to:
+  /// **'현재 애정도'**
+  String get petInfoCurrentAffection;
+
+  /// No description provided for @petInfoStageComplete.
+  ///
+  /// In ko, this message translates to:
+  /// **'성숙기 달성 완료'**
+  String get petInfoStageComplete;
+
+  /// No description provided for @petInfoUntilAdult.
+  ///
+  /// In ko, this message translates to:
+  /// **'성숙기까지'**
+  String get petInfoUntilAdult;
+
+  /// No description provided for @petInfoUntilGrown.
+  ///
+  /// In ko, this message translates to:
+  /// **'성장기까지'**
+  String get petInfoUntilGrown;
+
+  /// No description provided for @petInfoUntilChild.
+  ///
+  /// In ko, this message translates to:
+  /// **'유년기까지'**
+  String get petInfoUntilChild;
+
+  /// No description provided for @gameMenuTooltip.
+  ///
+  /// In ko, this message translates to:
+  /// **'게임 메뉴'**
+  String get gameMenuTooltip;
+
+  /// No description provided for @profileSetupTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필을 입력해주세요!'**
+  String get profileSetupTitle;
+
+  /// No description provided for @nickname.
+  ///
+  /// In ko, this message translates to:
+  /// **'닉네임'**
+  String get nickname;
+
+  /// No description provided for @gender.
+  ///
+  /// In ko, this message translates to:
+  /// **'성별'**
+  String get gender;
+
+  /// No description provided for @ageRange.
+  ///
+  /// In ko, this message translates to:
+  /// **'나이대'**
+  String get ageRange;
+
+  /// No description provided for @dietGoal.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단목적'**
+  String get dietGoal;
+
+  /// No description provided for @start.
+  ///
+  /// In ko, this message translates to:
+  /// **'시작하기'**
+  String get start;
+
+  /// No description provided for @inYardLoading.
+  ///
+  /// In ko, this message translates to:
+  /// **'불러오는 중...'**
+  String get inYardLoading;
+
+  /// No description provided for @inYardErrorTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'앱 준비 중 문제가 발생했어요'**
+  String get inYardErrorTitle;
+
+  /// No description provided for @retry.
+  ///
+  /// In ko, this message translates to:
+  /// **'다시 시도'**
+  String get retry;
 }
 
 class _AppLocalizationsDelegate

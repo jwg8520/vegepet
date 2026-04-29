@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -143,6 +146,10 @@ String _buildAiStatusMessage(String? resultType, String? feedbackText) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
 
   await Supabase.initialize(
     url: _supabaseUrl,
@@ -265,6 +272,28 @@ class _MealNotificationTexts {
   final List<String> messages;
 }
 
+enum _SupportDocType { terms, privacy, operation, guardian, dataDeletion }
+
+class _SupportDocumentSection {
+  const _SupportDocumentSection({
+    required this.title,
+    required this.body,
+  });
+
+  final String title;
+  final String body;
+}
+
+class _SupportDocument {
+  const _SupportDocument({
+    required this.title,
+    required this.sections,
+  });
+
+  final String title;
+  final List<_SupportDocumentSection> sections;
+}
+
 enum _ViewStatus { loading, error, ready }
 
 class HomePage extends StatefulWidget {
@@ -275,6 +304,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static const double _kGameCanvasWidth = 844;
+  static const double _kGameCanvasHeight = 390;
+
   _ViewStatus _status = _ViewStatus.loading;
   String? _errorMessage;
 
@@ -307,6 +339,14 @@ class _HomePageState extends State<HomePage> {
   String? _selectedGender;
   String? _selectedAgeRange;
   String? _selectedDietGoal;
+  OverlayEntry? _profileSelectOverlayEntry;
+  ScrollController? _profileSelectScrollController;
+  String? _openProfileSelectKey;
+  final Map<String, LayerLink> _profileSelectLinks = <String, LayerLink>{};
+  bool _profileSelectOverlayVisible = false;
+  bool _isClosingProfileSelectOverlay = false;
+  bool _isProfileSetupPanelVisible = false;
+  bool _isProfileSetupClosing = false;
   bool _isSavingProfile = false;
 
   static const List<String> _genderOptions = ['여자', '남자'];
@@ -363,6 +403,7 @@ class _HomePageState extends State<HomePage> {
   bool _isToyMenuOpen = false;
   bool _isToyDropHovering = false;
   bool _isCompletingToyPlay = false;
+  bool _isPetInfoBannerOpen = false;
   Timer? _emailOtpCooldownTimer;
   int _emailOtpCooldownSeconds = 0;
   final FlutterLocalNotificationsPlugin _notifications =
@@ -370,13 +411,34 @@ class _HomePageState extends State<HomePage> {
   bool _noticeEventPushEnabled = false;
   bool _mealReminderPushEnabled = false;
   bool _isNotificationInitialized = false;
+  bool _isSchedulingMealReminders = false;
+  bool _backgroundMusicEnabled = true;
+  bool _soundEffectsEnabled = true;
+  bool _isSoundInitialized = false;
+  bool _bgmAssetUnavailable = false;
+  bool _sfxAssetUnavailable = false;
+  final AudioPlayer _bgmPlayer = AudioPlayer();
+  final AudioPlayer _sfxPlayer = AudioPlayer();
 
   static const String _kNoticeEventPushPrefKey =
       'vegepet_notice_event_push_enabled';
   static const String _kMealReminderPushPrefKey =
       'vegepet_meal_reminder_push_enabled';
+  static const String _kBackgroundMusicPrefKey =
+      'vegepet_background_music_enabled';
+  static const String _kSoundEffectsPrefKey = 'vegepet_sound_effects_enabled';
   static const int _kMealReminderNotificationIdBase = 120000;
   static const int _kMealReminderDaysToSchedule = 14;
+  static const List<(IconData, String)> _menuSheetItems = [
+    (Icons.person_outline, '프로필'),
+    (Icons.event_note_outlined, '식단일지'),
+    (Icons.backpack_outlined, '가방'),
+    (Icons.storefront_outlined, '상점'),
+    (Icons.menu_book_outlined, '도감'),
+    (Icons.auto_stories_outlined, '스토리'),
+    (Icons.help_outline, '도움말'),
+    (Icons.settings_outlined, '설정'),
+  ];
 
   @override
   void initState() {
@@ -386,7 +448,11 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _profileSelectScrollController?.dispose();
+    _closeProfileSelectOverlay(notify: false, animated: false);
     _emailOtpCooldownTimer?.cancel();
+    _bgmPlayer.dispose();
+    _sfxPlayer.dispose();
     _nicknameController.dispose();
     super.dispose();
   }
@@ -417,6 +483,7 @@ class _HomePageState extends State<HomePage> {
     // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
     _dismissFocus();
+    await _closeProfileSelectOverlay(animated: true);
 
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -453,19 +520,277 @@ class _HomePageState extends State<HomePage> {
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
 
-      await _fetchProfile();
-
       if (!mounted) return;
-      // 프로필 입력 → 첫 펫 분양 화면으로 큰 전환이 일어나는 지점.
-      // build 가 한 frame 자리잡을 때까지 양보해 input subtree 가 안전하게
-      // dispose 되게 한다.
-      _safeSetState(() => _isSavingProfile = false);
+      _safeSetState(() {
+        _isProfileSetupClosing = true;
+        _isProfileSetupPanelVisible = false;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 230));
+      if (!mounted) return;
+
+      await _fetchProfile();
+      if (!mounted) return;
+      _safeSetState(() {
+        _isSavingProfile = false;
+        _isProfileSetupClosing = false;
+        _isProfileSetupPanelVisible = true;
+      });
       await _waitForUiSettle();
     } catch (e) {
       if (!mounted) return;
-      _safeSetState(() => _isSavingProfile = false);
+      _safeSetState(() {
+        _isSavingProfile = false;
+        _isProfileSetupClosing = false;
+        _isProfileSetupPanelVisible = true;
+      });
       _showSnack('프로필 저장 실패: $e');
     }
+  }
+
+  Future<void> _closeProfileSelectOverlay({
+    bool notify = true,
+    bool animated = true,
+  }) async {
+    final entry = _profileSelectOverlayEntry;
+    if (entry == null) return;
+    if (_isClosingProfileSelectOverlay) return;
+
+    if (animated) {
+      _isClosingProfileSelectOverlay = true;
+      _profileSelectOverlayVisible = false;
+      entry.markNeedsBuild();
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+    }
+
+    if (_profileSelectOverlayEntry == entry) {
+      entry.remove();
+      _profileSelectOverlayEntry = null;
+    }
+    _profileSelectScrollController?.dispose();
+    _profileSelectScrollController = null;
+
+    _profileSelectOverlayVisible = false;
+    _isClosingProfileSelectOverlay = false;
+    _openProfileSelectKey = null;
+    if (notify && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _openProfileSelectOverlay({
+    required String selectKey,
+    required LayerLink link,
+    required List<String> options,
+    required String? selectedValue,
+    required ValueChanged<String> onChanged,
+  }) {
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _openProfileSelectKey = selectKey;
+    _profileSelectOverlayVisible = false;
+
+    final overlay = Overlay.of(context, rootOverlay: true);
+    _profileSelectScrollController?.dispose();
+    _profileSelectScrollController = ScrollController();
+    final menuHeight = (options.length > 3 ? 3 : options.length) * 30.0;
+    _profileSelectOverlayEntry = OverlayEntry(
+      builder: (context) {
+        return Positioned.fill(
+          child: Stack(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  unawaited(_closeProfileSelectOverlay());
+                },
+                child: const SizedBox.expand(),
+              ),
+              CompositedTransformFollower(
+                link: link,
+                showWhenUnlinked: false,
+                offset: const Offset(0, 30),
+                child: Material(
+                  color: Colors.transparent,
+                  child: IgnorePointer(
+                    ignoring: !_profileSelectOverlayVisible,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 160),
+                      curve: Curves.easeOutCubic,
+                      opacity: _profileSelectOverlayVisible ? 1 : 0,
+                      child: AnimatedScale(
+                        duration: const Duration(milliseconds: 160),
+                        curve: Curves.easeOutCubic,
+                        scale: _profileSelectOverlayVisible ? 1 : 0.96,
+                        alignment: Alignment.topCenter,
+                        child: AnimatedSlide(
+                          duration: const Duration(milliseconds: 160),
+                          curve: Curves.easeOutCubic,
+                          offset: _profileSelectOverlayVisible
+                              ? Offset.zero
+                              : const Offset(0, -0.04),
+                          child: SizedBox(
+                            width: 200,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFEAEAEA)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.12),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: SizedBox(
+                                  height: menuHeight,
+                                  child: _buildProfileSelectOptionsList(
+                                    options: options,
+                                    selectedValue: selectedValue,
+                                    onChanged: onChanged,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    overlay.insert(_profileSelectOverlayEntry!);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_profileSelectOverlayEntry == null) return;
+      _profileSelectOverlayVisible = true;
+      _profileSelectOverlayEntry?.markNeedsBuild();
+    });
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Widget _buildCompactProfileSelect({
+    required String selectKey,
+    required String? value,
+    required List<String> options,
+    required ValueChanged<String> onChanged,
+    required bool enabled,
+  }) {
+    final link = _profileSelectLinks.putIfAbsent(selectKey, LayerLink.new);
+    final isOpen = _openProfileSelectKey == selectKey;
+    return CompositedTransformTarget(
+      link: link,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: !enabled
+            ? null
+            : () {
+                _dismissFocus();
+                if (isOpen) {
+                  unawaited(_closeProfileSelectOverlay());
+                  return;
+                }
+                _openProfileSelectOverlay(
+                  selectKey: selectKey,
+                  link: link,
+                  options: options,
+                  selectedValue: value,
+                  onChanged: onChanged,
+                );
+              },
+        child: Container(
+          width: 200,
+          height: 26,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value ?? '',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF3A3A3A),
+                  ),
+                ),
+              ),
+              Icon(
+                isOpen
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: const Color(0xFF757575),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileSelectOptionsList({
+    required List<String> options,
+    required String? selectedValue,
+    required ValueChanged<String> onChanged,
+  }) {
+    return ListView.builder(
+      controller: _profileSelectScrollController,
+      padding: EdgeInsets.zero,
+      itemExtent: 30,
+      itemCount: options.length,
+      itemBuilder: (context, index) {
+        final option = options[index];
+        final isSelected = option == selectedValue;
+        final isFirst = index == 0;
+        final isLast = index == options.length - 1;
+        return InkWell(
+          splashColor: const Color(0xFFF4F8FF).withValues(alpha: 0.45),
+          highlightColor: const Color(0xFFF4F8FF).withValues(alpha: 0.35),
+          hoverColor: const Color(0xFFF4F8FF).withValues(alpha: 0.25),
+          onTap: () {
+            onChanged(option);
+            unawaited(_closeProfileSelectOverlay());
+          },
+          child: Container(
+            height: 30,
+            width: double.infinity,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFFEFF6FF) : Colors.transparent,
+              borderRadius: BorderRadius.vertical(
+                top: isFirst ? const Radius.circular(12) : Radius.zero,
+                bottom: isLast ? const Radius.circular(12) : Radius.zero,
+              ),
+            ),
+            child: Text(
+              option,
+              textAlign: TextAlign.left,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF3A3A3A),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _bootstrap() async {
@@ -488,28 +813,19 @@ class _HomePageState extends State<HomePage> {
         _fetchRandomTicketCount(),
       ]);
       await _syncAuthEmailToProfileIfNeeded();
-      try {
-        await _initNotificationsIfNeeded();
-        await _loadPushSettings();
-        if (_mealReminderPushEnabled) {
-          final localeCode = await _loadSavedLocaleCodeForNotifications();
-          final notificationTexts =
-              _mealNotificationTextsForLocaleCode(localeCode);
-          await _scheduleMealReminderNotifications(
-            notificationTitle: notificationTexts.title,
-            notificationMessages: notificationTexts.messages,
-            revertToggleWhenDenied: false,
-          );
-        }
-      } catch (e) {
-        debugPrint('notification bootstrap failed: $e');
-      }
 
       _syncProfileFormFromFetched();
 
       if (!mounted) return;
       setState(() {
+        final profileComplete = _isProfileComplete();
         _status = _ViewStatus.ready;
+        _isProfileSetupClosing = false;
+        _isProfileSetupPanelVisible = profileComplete ? true : false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_bootstrapOptionalServices());
       });
     } catch (e) {
       if (!mounted) return;
@@ -517,6 +833,38 @@ class _HomePageState extends State<HomePage> {
         _status = _ViewStatus.error;
         _errorMessage = e.toString();
       });
+    }
+  }
+
+  Future<void> _bootstrapOptionalServices() async {
+    try {
+      await _initNotificationsIfNeeded();
+      await _loadPushSettings();
+      if (_mealReminderPushEnabled) {
+        final localeCode = await _loadSavedLocaleCodeForNotifications();
+        final texts = _mealNotificationTextsForLocaleCode(localeCode);
+        await _scheduleMealReminderNotifications(
+          notificationTitle: texts.title,
+          notificationMessages: texts.messages,
+          revertToggleWhenDenied: false,
+        );
+      }
+    } catch (e) {
+      debugPrint('notification bootstrap failed: $e');
+    }
+
+    try {
+      await _loadSoundSettings();
+      await _initSoundIfNeeded();
+      if (_backgroundMusicEnabled) {
+        await _startBackgroundMusicIfEnabled();
+      }
+    } catch (e) {
+      debugPrint('sound bootstrap failed: $e');
+    }
+
+    if (mounted) {
+      _safeSetState(() {});
     }
   }
 
@@ -738,6 +1086,58 @@ class _HomePageState extends State<HomePage> {
     _mealReminderPushEnabled = prefs.getBool(_kMealReminderPushPrefKey) ?? false;
   }
 
+  Future<void> _loadSoundSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _backgroundMusicEnabled = prefs.getBool(_kBackgroundMusicPrefKey) ?? true;
+    _soundEffectsEnabled = prefs.getBool(_kSoundEffectsPrefKey) ?? true;
+  }
+
+  Future<void> _resetSettingsToDefaultsForTesting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setString(_kLocalePrefKey, 'ko');
+      await prefs.setBool(_kNoticeEventPushPrefKey, false);
+      await prefs.setBool(_kMealReminderPushPrefKey, false);
+      await prefs.setBool(_kBackgroundMusicPrefKey, true);
+      await prefs.setBool(_kSoundEffectsPrefKey, true);
+
+      await _cancelMealReminderNotifications();
+      await _stopBackgroundMusic();
+
+      if (mounted) {
+        _safeSetState(() {
+          _noticeEventPushEnabled = false;
+          _mealReminderPushEnabled = false;
+          _backgroundMusicEnabled = true;
+          _soundEffectsEnabled = true;
+        });
+      } else {
+        _noticeEventPushEnabled = false;
+        _mealReminderPushEnabled = false;
+        _backgroundMusicEnabled = true;
+        _soundEffectsEnabled = true;
+      }
+
+      if (mounted) {
+        try {
+          final localeScope = _LocaleControllerScope.of(context);
+          await localeScope.setLocale(const Locale('ko'));
+        } catch (e) {
+          debugPrint('set locale to ko after reset failed: $e');
+        }
+      }
+
+      try {
+        await _startBackgroundMusicIfEnabled();
+      } catch (e) {
+        debugPrint('restart bgm after reset failed: $e');
+      }
+    } catch (e) {
+      debugPrint('reset settings to defaults failed: $e');
+    }
+  }
+
   Future<void> _saveNoticeEventPushEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kNoticeEventPushPrefKey, enabled);
@@ -746,6 +1146,121 @@ class _HomePageState extends State<HomePage> {
   Future<void> _saveMealReminderPushEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kMealReminderPushPrefKey, enabled);
+  }
+
+  Future<void> _initSoundIfNeeded() async {
+    if (_isSoundInitialized) return;
+
+    try {
+      await _bgmPlayer.setReleaseMode(ReleaseMode.loop);
+      await _bgmPlayer.setVolume(0.45);
+
+      await _sfxPlayer.setReleaseMode(ReleaseMode.stop);
+      await _sfxPlayer.setVolume(0.8);
+
+      _isSoundInitialized = true;
+    } catch (e) {
+      debugPrint('sound init failed: $e');
+    }
+  }
+
+  Future<void> _startBackgroundMusicIfEnabled() async {
+    if (!_backgroundMusicEnabled) return;
+    if (_bgmAssetUnavailable) return;
+
+    try {
+      await _initSoundIfNeeded();
+      // TODO(vegepet): 실제 BGM 파일 준비 후 assets/audio/bgm_yard.mp3를
+      // pubspec.yaml assets에 등록하고 재생 연결.
+      // TODO(vegepet): 실음원 연결 시 _bgmAssetUnavailable 처리 재검토.
+      await _bgmPlayer.play(AssetSource('audio/bgm_yard.mp3'));
+    } catch (e) {
+      _bgmAssetUnavailable = true;
+      debugPrint('start bgm skipped/failed: $e');
+    }
+  }
+
+  Future<void> _stopBackgroundMusic() async {
+    try {
+      await _bgmPlayer.stop();
+    } catch (e) {
+      debugPrint('stop bgm failed: $e');
+    }
+  }
+
+  Future<void> _playSoundEffect(String assetPath) async {
+    if (!_soundEffectsEnabled) return;
+    if (_sfxAssetUnavailable) return;
+
+    try {
+      await _initSoundIfNeeded();
+      // TODO(vegepet): 실제 효과음 파일 준비 후 assets/audio/sfx_tap.mp3 등을
+      // pubspec.yaml assets에 등록하고 연결.
+      // TODO(vegepet): 효과음 파일 확장 시 _sfxAssetUnavailable 처리 세분화 검토.
+      await _sfxPlayer.stop();
+      await _sfxPlayer.play(AssetSource(assetPath));
+    } catch (e) {
+      _sfxAssetUnavailable = true;
+      debugPrint('play sfx skipped/failed: $e');
+    }
+  }
+
+  // ignore: unused_element
+  Future<void> _playTapSound() async {
+    await _playSoundEffect('audio/sfx_tap.mp3');
+  }
+
+  // ignore: unused_element
+  Future<void> _playSuccessSound() async {
+    await _playSoundEffect('audio/sfx_success.mp3');
+  }
+
+  Future<bool> _toggleBackgroundMusic(
+    bool enabled, {
+    required String enabledMessage,
+    required String disabledMessage,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kBackgroundMusicPrefKey, enabled);
+
+    if (mounted) {
+      _safeSetState(() => _backgroundMusicEnabled = enabled);
+    } else {
+      _backgroundMusicEnabled = enabled;
+    }
+
+    if (enabled) {
+      await _startBackgroundMusicIfEnabled();
+      _showSnack(enabledMessage);
+    } else {
+      await _stopBackgroundMusic();
+      _showSnack(disabledMessage);
+    }
+
+    return true;
+  }
+
+  Future<bool> _toggleSoundEffects(
+    bool enabled, {
+    required String enabledMessage,
+    required String disabledMessage,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kSoundEffectsPrefKey, enabled);
+
+    if (mounted) {
+      _safeSetState(() => _soundEffectsEnabled = enabled);
+    } else {
+      _soundEffectsEnabled = enabled;
+    }
+
+    if (enabled) {
+      _showSnack(enabledMessage);
+    } else {
+      _showSnack(disabledMessage);
+    }
+
+    return true;
   }
 
   Future<void> _cancelMealReminderNotifications() async {
@@ -763,82 +1278,88 @@ class _HomePageState extends State<HomePage> {
     String? permissionDeniedMessage,
     bool revertToggleWhenDenied = true,
   }) async {
-    await _cancelMealReminderNotifications();
-    final hasPermission = await _requestNotificationPermissionIfNeeded();
-    if (!hasPermission) {
-      if (revertToggleWhenDenied) {
-        await _saveMealReminderPushEnabled(false);
-        if (mounted) {
-          _safeSetState(() {
+    if (_isSchedulingMealReminders) return;
+    _isSchedulingMealReminders = true;
+    try {
+      await _cancelMealReminderNotifications();
+      final hasPermission = await _requestNotificationPermissionIfNeeded();
+      if (!hasPermission) {
+        if (revertToggleWhenDenied) {
+          await _saveMealReminderPushEnabled(false);
+          if (mounted) {
+            _safeSetState(() {
+              _mealReminderPushEnabled = false;
+            });
+          } else {
             _mealReminderPushEnabled = false;
-          });
+          }
+          if (permissionDeniedMessage != null &&
+              permissionDeniedMessage.isNotEmpty) {
+            _showSnack(permissionDeniedMessage);
+          }
         } else {
-          _mealReminderPushEnabled = false;
+          debugPrint('meal reminder schedule skipped: notification permission denied');
         }
-        if (permissionDeniedMessage != null &&
-            permissionDeniedMessage.isNotEmpty) {
-          _showSnack(permissionDeniedMessage);
-        }
-      } else {
-        debugPrint('meal reminder schedule skipped: notification permission denied');
+        return;
       }
-      return;
-    }
-    if (notificationMessages.isEmpty) {
-      debugPrint('meal reminder schedule skipped: no notification message');
-      return;
-    }
-    const mealSlots = <(int, int)>[(12, 0), (18, 0)];
-    final now = tz.TZDateTime.now(tz.local);
+      if (notificationMessages.isEmpty) {
+        debugPrint('meal reminder schedule skipped: no notification message');
+        return;
+      }
+      const mealSlots = <(int, int)>[(12, 0), (18, 0)];
+      final now = tz.TZDateTime.now(tz.local);
 
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'vegepet_meal_reminders',
-        'VegePet Meal Reminders',
-        channelDescription: 'Daily scheduled reminders for VegePet meals.',
-        importance: Importance.high,
-        priority: Priority.high,
-      ),
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentSound: true,
-        presentBadge: false,
-      ),
-    );
+      const details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          'vegepet_meal_reminders',
+          'VegePet Meal Reminders',
+          channelDescription: 'Daily scheduled reminders for VegePet meals.',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+          presentBadge: false,
+        ),
+      );
 
-    for (var dayIndex = 0; dayIndex < _kMealReminderDaysToSchedule; dayIndex++) {
-      final dayBase = tz.TZDateTime(
-        tz.local,
-        now.year,
-        now.month,
-        now.day,
-      ).add(Duration(days: dayIndex));
-
-      for (var slotIndex = 0; slotIndex < mealSlots.length; slotIndex++) {
-        final slot = mealSlots[slotIndex];
-        var scheduledAt = tz.TZDateTime(
+      for (var dayIndex = 0;
+          dayIndex < _kMealReminderDaysToSchedule;
+          dayIndex++) {
+        final dayBase = tz.TZDateTime(
           tz.local,
-          dayBase.year,
-          dayBase.month,
-          dayBase.day,
-          slot.$1,
-          slot.$2,
-        );
-        if (!scheduledAt.isAfter(now)) {
-          continue;
+          now.year,
+          now.month,
+          now.day,
+        ).add(Duration(days: dayIndex));
+
+        for (var slotIndex = 0; slotIndex < mealSlots.length; slotIndex++) {
+          final slot = mealSlots[slotIndex];
+          final scheduledAt = tz.TZDateTime(
+            tz.local,
+            dayBase.year,
+            dayBase.month,
+            dayBase.day,
+            slot.$1,
+            slot.$2,
+          );
+          if (!scheduledAt.isAfter(now)) continue;
+          final id = _kMealReminderNotificationIdBase + dayIndex * 10 + slotIndex;
+          final message =
+              notificationMessages[Random().nextInt(notificationMessages.length)];
+          await _notifications.zonedSchedule(
+            id,
+            notificationTitle,
+            message,
+            scheduledAt,
+            details,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          );
         }
-        final id = _kMealReminderNotificationIdBase + dayIndex * 10 + slotIndex;
-        final message =
-            notificationMessages[Random().nextInt(notificationMessages.length)];
-        await _notifications.zonedSchedule(
-          id,
-          notificationTitle,
-          message,
-          scheduledAt,
-          details,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        );
       }
+    } finally {
+      _isSchedulingMealReminders = false;
     }
   }
 
@@ -1885,6 +2406,8 @@ class _HomePageState extends State<HomePage> {
         _selectedGender = null;
         _selectedAgeRange = null;
         _selectedDietGoal = null;
+        _isProfileSetupPanelVisible = true;
+        _isProfileSetupClosing = false;
       });
       await _waitForUiSettle();
       if (!mounted) return;
@@ -2017,8 +2540,11 @@ class _HomePageState extends State<HomePage> {
         _selectedGender = null;
         _selectedAgeRange = null;
         _selectedDietGoal = null;
+        _isProfileSetupPanelVisible = true;
+        _isProfileSetupClosing = false;
       });
 
+      await _resetSettingsToDefaultsForTesting();
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -3134,149 +3660,683 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    switch (_status) {
-      case _ViewStatus.loading:
-        return const _LoadingView();
-      case _ViewStatus.error:
-        return _ErrorView(
-          message: _errorMessage,
-          onRetry: _bootstrap,
-        );
-      case _ViewStatus.ready:
-        return _buildReadyScaffold();
-    }
-  }
-
-  Widget _buildReadyScaffold() {
-    final profileComplete = _isProfileComplete();
-    final hasActivePet = _activePet != null;
-
-    // KeyedSubtree 의 ValueKey 로 단계 전환을 명시한다.
-    // 같은 Column slot 안에서 프로필 입력의 TextField/ChoiceChip subtree 와
-    // 첫 분양/마당 subtree 가 element 재사용 충돌을 일으키지 않도록
-    // 단계가 바뀔 때 element 트리를 통째로 새로 빌드하게 만든다.
-    final String flowKey;
-    final List<Widget> mainChildren;
-    if (!profileComplete) {
-      flowKey = 'profile';
-      mainChildren = _buildProfileFormContent();
-    } else if (!hasActivePet) {
-      flowKey = 'adopt';
-      mainChildren = _buildAdoptContent();
-    } else {
-      flowKey = 'yard';
-      mainChildren = _buildYardContent();
-    }
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('VegePet'),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              KeyedSubtree(
-                key: ValueKey('flow:$flowKey'),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: mainChildren,
-                ),
-              ),
-              const SizedBox(height: 24),
-              _buildDebugSection(),
-            ],
+      body: ColoredBox(
+        color: const Color(0xFFEFF5EF),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: _kGameCanvasWidth,
+              height: _kGameCanvasHeight,
+              child: _buildGameCanvas(),
+            ),
           ),
         ),
       ),
     );
   }
 
-  // ---------- 마당 (active pet 있음) ----------
-
-  List<Widget> _buildYardContent() {
-    return [
-      _buildYardHeader(),
-      const SizedBox(height: 16),
-      _buildYardActions(),
-    ];
+  Widget _buildGameCanvas() {
+    final profileComplete = _isProfileComplete();
+    final hasActivePet = _activePet != null;
+    final showProfileSetup = _status == _ViewStatus.ready && !profileComplete;
+    final shouldMountProfileSetup = showProfileSetup || _isProfileSetupClosing;
+    if (!showProfileSetup && _openProfileSelectKey != null) {
+      unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    }
+    if (showProfileSetup &&
+        !_isProfileSetupClosing &&
+        !_isProfileSetupPanelVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final canShow = _status == _ViewStatus.ready && !_isProfileComplete();
+        if (!canShow || _isProfileSetupClosing) return;
+        setState(() {
+          _isProfileSetupPanelVisible = true;
+        });
+      });
+    }
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _buildYardBaseLayer(),
+        _buildYardPetLayer(),
+        _buildTopHudLayer(),
+        if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
+        if (_status == _ViewStatus.error)
+          _buildInYardErrorOverlay(
+            message: _errorMessage,
+            onRetry: _bootstrap,
+          ),
+        if (shouldMountProfileSetup)
+          _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
+        if (_status == _ViewStatus.ready && profileComplete && !hasActivePet)
+          _buildInYardAdoptionPanel(),
+        _buildInYardDebugPanel(),
+      ],
+    );
   }
 
-  // 가로형 마당 느낌의 홈 헤더.
-  // 상단에는 좌측 펫정보 아이콘 버튼 1개 / 우측 게임 메뉴 아이콘 버튼 1개만 보인다.
-  // 각각 눌러야 패널이 열리도록 BottomSheet로 전환했다.
-  Widget _buildYardHeader() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: SizedBox(
-        height: 320,
-        child: Stack(
-          children: [
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFFDAF3DD), Color(0xFF8ECB94)],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+  Widget _buildYardBaseLayer() {
+    return Positioned.fill(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFFDAF3DD), Color(0xFFA9DEB0)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYardPetLayer() {
+    if (_activePet == null) return const SizedBox.shrink();
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 56,
+            child: _buildCenterPetVisual(),
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: _buildResidentPetRow(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopHudLayer() {
+    final l10n = AppLocalizations.of(context);
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_isPetInfoBannerOpen,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                opacity: _isPetInfoBannerOpen ? 1 : 0,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _closePetInfoBanner,
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.12),
+                  ),
                 ),
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 80,
-              child: Container(color: const Color(0xFF62A86B)),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 18,
-              child: _buildCenterPetVisual(),
-            ),
-            // 성숙기 거주 펫(resident)들을 마당 잔디 영역 위쪽에 작게 함께 표시.
-            // activePet 중앙 비주얼과 겹치지 않도록 잔디 띠 안 하단에 둔다.
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 4,
-              child: _buildResidentPetRow(),
-            ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: _cornerIconButton(
-                icon: Icons.pets,
-                tooltip: '펫 정보',
-                onTap: _openPetStatusSheet,
+          ),
+          _buildPetInfoSlideBanner(),
+          Positioned(
+            top: 16,
+            left: 16,
+            child: IgnorePointer(
+              ignoring: _isPetInfoBannerOpen,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                opacity: _isPetInfoBannerOpen ? 0 : 1,
+                child: _cornerIconButton(
+                  icon: Icons.pets,
+                  tooltip: l10n.petInfoTooltip,
+                  iconSize: 26,
+                  padding: 11,
+                  onTap: _togglePetInfoBanner,
+                ),
               ),
             ),
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: _cornerIconButton(
+              icon: Icons.apps_rounded,
+              tooltip: l10n.gameMenuTooltip,
+              iconSize: 26,
+              padding: 11,
+              onTap: _openMenuSheet,
+            ),
+          ),
+          if (_isToyMenuOpen)
+            Positioned.fill(
+              child: _buildToyDropTargetOverlay(),
+            ),
+          if (_isToyMenuOpen)
             Positioned(
-              top: 12,
-              right: 12,
-              child: _cornerIconButton(
-                icon: Icons.apps_rounded,
-                tooltip: '메뉴',
-                onTap: _openMenuSheet,
+              left: 16,
+              top: 48,
+              bottom: 16,
+              width: 92,
+              child: _buildToyMenuWindow(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInYardLoadingOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildCenteredOverlayCard(
+      width: 280,
+      height: 140,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 14),
+          Text(l10n.inYardLoading),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInYardErrorOverlay({
+    required String? message,
+    required VoidCallback onRetry,
+  }) {
+    final l10n = AppLocalizations.of(context);
+    return _buildCenteredOverlayCard(
+      width: 380,
+      height: 220,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 44, color: Colors.redAccent),
+          const SizedBox(height: 10),
+          Text(
+            l10n.inYardErrorTitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: Text(l10n.retry),
+          ),
+          if (message != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInYardProfileSetupPanel({required bool visible}) {
+    return Positioned(
+      left: 270,
+      top: 83,
+      width: 304,
+      height: 224,
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          opacity: visible ? 1 : 0,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            scale: visible ? 1 : 0.98,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.09),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: _buildProfileFormContent(),
+                  ),
+                ),
               ),
             ),
-            if (_isToyMenuOpen)
-              Positioned.fill(
-                child: _buildToyDropTargetOverlay(),
-              ),
-            if (_isToyMenuOpen)
-              Positioned(
-                left: 12,
-                top: 36,
-                bottom: 16,
-                width: 92,
-                child: _buildToyMenuWindow(),
-              ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInYardAdoptionPanel() {
+    final children = _buildAdoptContent();
+    return _buildOverlayPanel(
+      width: 520,
+      height: 300,
+      left: 162,
+      top: 45,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInYardDebugPanel() {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 10,
+      child: IgnorePointer(
+        ignoring: _status != _ViewStatus.ready,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: _status == _ViewStatus.ready ? 1 : 0,
+          child: SizedBox(
+            height: 58,
+            child: SingleChildScrollView(
+              child: _buildDebugSection(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOverlayPanel({
+    required double width,
+    required double height,
+    required Widget child,
+    double? left,
+    double? top,
+  }) {
+    return Positioned(
+      left: left,
+      top: top,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
           ],
         ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildCenteredOverlayCard({
+    required double width,
+    required double height,
+    required Widget child,
+  }) {
+    return Center(
+      child: _buildOverlayPanel(
+        width: width,
+        height: height,
+        left: (_kGameCanvasWidth - width) / 2,
+        top: (_kGameCanvasHeight - height) / 2,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  void _togglePetInfoBanner() {
+    if (_activePet == null || _isInteracting) return;
+    _safeSetState(() {
+      _isPetInfoBannerOpen = !_isPetInfoBannerOpen;
+    });
+  }
+
+  void _closePetInfoBanner() {
+    if (!_isPetInfoBannerOpen) return;
+    _safeSetState(() {
+      _isPetInfoBannerOpen = false;
+    });
+  }
+
+  Future<void> _onPetInfoBannerAction(String action) async {
+    _closePetInfoBanner();
+    await _waitForUiSettle();
+    if (!mounted) return;
+
+    switch (action) {
+      case 'meal':
+        await _openMealSheet();
+        break;
+      case 'play':
+        await _openToyPlaySheet();
+        break;
+      case 'pet':
+        await _interactPet('pet');
+        break;
+    }
+  }
+
+  Widget _buildPetInfoSlideBanner() {
+    final isOpen = _isPetInfoBannerOpen && _activePet != null;
+    const topInset = 10.0;
+    const bottomInset = 12.0;
+    const sideInset = 10.0;
+
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        final panelWidth = (constraints.maxWidth * 0.36).clamp(240.0, 360.0);
+        final closedLeft = -panelWidth - 24;
+        return AnimatedPositioned(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          top: topInset,
+          bottom: bottomInset,
+          left: isOpen ? sideInset : closedLeft,
+          width: panelWidth,
+          child: IgnorePointer(
+            ignoring: !isOpen,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              opacity: isOpen ? 1 : 0,
+              child: _buildPetInfoBannerContent(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPetInfoBannerContent() {
+    final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+    final pet = _activePet;
+    if (pet == null) return const SizedBox.shrink();
+
+    final species = pet['pet_species'] is Map
+        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
+        : <String, dynamic>{};
+    final family = species['family']?.toString() ?? '';
+    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final nickname = pet['nickname']?.toString();
+    final displayName =
+        (nickname == null || nickname.isEmpty) ? speciesName : nickname;
+    final stage = pet['stage']?.toString() ?? 'baby';
+    final stageKo = _stageToKorean(stage);
+    final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
+    final today = _todayDateStr();
+    final playedToday = pet['last_played_on']?.toString() == today;
+    final pettedToday = pet['last_petted_on']?.toString() == today;
+
+    return Material(
+      color: Colors.transparent,
+      child: SafeArea(
+        bottom: false,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.84),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.chevron_left_rounded,
+                        size: 18,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: Text(
+                          l10n.petInfoTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: _closePetInfoBanner,
+                        borderRadius: BorderRadius.circular(99),
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.close_rounded, size: 18),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.08),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  family == 'cat'
+                                      ? Icons.pets
+                                      : Icons.cruelty_free_outlined,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _petInfoMetaChip(
+                                      label: l10n.petInfoNameLabel,
+                                      value: displayName,
+                                    ),
+                                    const SizedBox(height: 5),
+                                    _petInfoMetaChip(
+                                      label: l10n.petInfoSpeciesLabel,
+                                      value: speciesName,
+                                    ),
+                                    const SizedBox(height: 5),
+                                    _petInfoMetaChip(
+                                      label: l10n.petInfoStageLabel,
+                                      value: stageKo,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _buildAffectionProgressCard(affectionValue),
+                          const SizedBox(height: 8),
+                          _bannerActionButton(
+                            label: l10n.petInfoFeedAction,
+                            icon: Icons.restaurant_rounded,
+                            onTap: _isInteracting
+                                ? null
+                                : () => _onPetInfoBannerAction('meal'),
+                          ),
+                          const SizedBox(height: 7),
+                          _bannerActionButton(
+                            label: l10n.petInfoPlayAction,
+                            icon: Icons.toys_outlined,
+                            onTap: (_isInteracting || playedToday)
+                                ? null
+                                : () => _onPetInfoBannerAction('play'),
+                          ),
+                          const SizedBox(height: 7),
+                          _bannerActionButton(
+                            label: l10n.petInfoPetAction,
+                            icon: Icons.back_hand_outlined,
+                            onTap: (_isInteracting || pettedToday)
+                                ? null
+                                : () => _onPetInfoBannerAction('pet'),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            l10n.petInfoMealTimeGuide,
+                            textAlign: TextAlign.center,
+                            softWrap: true,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 10.5,
+                              height: 1.3,
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              _interactionStatusChip(
+                                l10n.petInfoPlayAction,
+                                playedToday,
+                              ),
+                              _interactionStatusChip(
+                                l10n.petInfoPetAction,
+                                pettedToday,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _petInfoMetaChip({
+    required String label,
+    required String value,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '$label  $value',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.onSurface,
+        ),
+      ),
+    );
+  }
+
+  Widget _bannerActionButton({
+    required String label,
+    required IconData icon,
+    String? subtitle,
+    VoidCallback? onTap,
+  }) {
+    return _SoftActionButton(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+                if (subtitle != null && subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, size: 18),
+        ],
       ),
     );
   }
@@ -3554,6 +4614,8 @@ class _HomePageState extends State<HomePage> {
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
+    double iconSize = 22,
+    double padding = 10,
   }) {
     final theme = Theme.of(context);
     return Material(
@@ -3564,10 +4626,10 @@ class _HomePageState extends State<HomePage> {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: EdgeInsets.all(padding),
           child: Tooltip(
             message: tooltip,
-            child: Icon(icon, size: 22, color: theme.colorScheme.primary),
+            child: Icon(icon, size: iconSize, color: theme.colorScheme.primary),
           ),
         ),
       ),
@@ -3634,6 +4696,7 @@ class _HomePageState extends State<HomePage> {
   // 실제 후속 동작(_openMealSheet / _interactPet)은 시트가 완전히 닫히고
   // 한 frame 양보된 뒤 HomePage 의 context 에서 실행한다. await 이후 sheetCtx 를
   // 사용하지 않으므로 dispose 타이밍 오류가 나지 않는다.
+  // ignore: unused_element
   Future<void> _openPetStatusSheet() async {
     if (_activePet == null) return;
 
@@ -3692,6 +4755,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
 
     _safeSetState(() {
+      _isPetInfoBannerOpen = false;
       _isToyMenuOpen = true;
       _isToyDropHovering = false;
     });
@@ -3878,6 +4942,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _interactionStatusChip(String label, bool doneToday) {
+    final l10n = AppLocalizations.of(context);
     final color = doneToday ? Colors.orange : Colors.green;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -3886,7 +4951,7 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        '$label: ${doneToday ? '완료' : '가능'}',
+        '$label: ${doneToday ? l10n.petInfoStatusDone : l10n.petInfoStatusAvailable}',
         style: TextStyle(
           fontSize: 11,
           color: color,
@@ -3905,7 +4970,8 @@ class _HomePageState extends State<HomePage> {
   // 계산 자체는 [_affectionProgressInfo] 가 책임지고, 여기서는 시각화만 한다.
   Widget _buildAffectionProgressCard(int affection) {
     final theme = Theme.of(context);
-    final info = _affectionProgressInfo(affection);
+    final l10n = AppLocalizations.of(context);
+    final info = _affectionProgressInfo(affection, l10n);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -3957,7 +5023,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 2),
           Text(
-            '현재 애정도 $affection',
+            '${l10n.petInfoCurrentAffection} $affection',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -3975,13 +5041,16 @@ class _HomePageState extends State<HomePage> {
   //   child: 30 ~ 69   → 다음 "성장기" 까지 (max 40)
   //   grown: 70 ~ 109  → 다음 "성숙기" 까지 (max 40)
   //   adult: 110 ~     → 더 이상 성장 단계 없음 (육성 완료)
-  _AffectionProgressInfo _affectionProgressInfo(int affection) {
+  _AffectionProgressInfo _affectionProgressInfo(
+    int affection,
+    AppLocalizations l10n,
+  ) {
     if (affection >= 110) {
-      return const _AffectionProgressInfo(
+      return _AffectionProgressInfo(
         current: 40,
         max: 40,
         progress: 1,
-        label: '성숙기 달성 완료',
+        label: l10n.petInfoStageComplete,
         isComplete: true,
       );
     }
@@ -3993,7 +5062,7 @@ class _HomePageState extends State<HomePage> {
         current: current,
         max: max,
         progress: current / max,
-        label: '성숙기까지 $current/$max',
+        label: '${l10n.petInfoUntilAdult} $current/$max',
         isComplete: false,
       );
     }
@@ -4005,7 +5074,7 @@ class _HomePageState extends State<HomePage> {
         current: current,
         max: max,
         progress: current / max,
-        label: '성장기까지 $current/$max',
+        label: '${l10n.petInfoUntilGrown} $current/$max',
         isComplete: false,
       );
     }
@@ -4016,7 +5085,7 @@ class _HomePageState extends State<HomePage> {
       current: current,
       max: max,
       progress: current / max,
-      label: '유년기까지 $current/$max',
+      label: '${l10n.petInfoUntilChild} $current/$max',
       isComplete: false,
     );
   }
@@ -4633,6 +5702,7 @@ class _HomePageState extends State<HomePage> {
   // 그래서 sheetCtx 에서는 라벨만 pop 으로 반환하고, 후속 동작(_onMenuTap)은
   // BottomSheet 가 완전히 닫힌 뒤 HomePage 의 context 에서 실행한다.
   Future<void> _openMenuSheet() async {
+    _closePetInfoBanner();
     final selectedLabel = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -4659,16 +5729,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildMenuSheetContent({required ValueChanged<String> onTap}) {
-    final items = <(IconData, String)>[
-      (Icons.person_outline, '프로필'),
-      (Icons.event_note_outlined, '식단일지'),
-      (Icons.backpack_outlined, '가방'),
-      (Icons.storefront_outlined, '상점'),
-      (Icons.menu_book_outlined, '도감'),
-      (Icons.auto_stories_outlined, '스토리'),
-      (Icons.help_outline, '도움말'),
-      (Icons.settings_outlined, '설정'),
-    ];
+    final items = _menuSheetItems;
 
     return SafeArea(
       top: false,
@@ -4755,7 +5816,7 @@ class _HomePageState extends State<HomePage> {
     } else if (label == '식단일지') {
       await _openDietDiarySheet();
     } else if (label == '상점') {
-      _showSnack('상점은 2차 오픈 예정이에요.');
+      _showSnack('오픈 준비중');
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
@@ -4765,6 +5826,9 @@ class _HomePageState extends State<HomePage> {
     _dismissFocus();
     await _fetchProfile();
     await _syncAuthEmailToProfileIfNeeded();
+
+    await _loadPushSettings();
+    await _loadSoundSettings();
 
     await _waitForUiSettle();
     if (!mounted) return;
@@ -4779,8 +5843,12 @@ class _HomePageState extends State<HomePage> {
       builder: (sheetCtx) {
         var localNoticeEnabled = _noticeEventPushEnabled;
         var localMealEnabled = _mealReminderPushEnabled;
+        var localBgmEnabled = _backgroundMusicEnabled;
+        var localSfxEnabled = _soundEffectsEnabled;
         var noticeBusy = false;
         var mealBusy = false;
+        var bgmBusy = false;
+        var sfxBusy = false;
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final l10n = AppLocalizations.of(ctx);
@@ -4793,13 +5861,16 @@ class _HomePageState extends State<HomePage> {
               sheetCtx,
               onProfileUpdated: () async {
                 await _fetchProfile();
-                if (mounted) _safeSetState(() {});
                 if (mounted) setSheetState(() {});
               },
               noticePushEnabled: localNoticeEnabled,
               mealPushEnabled: localMealEnabled,
+              backgroundMusicEnabled: localBgmEnabled,
+              soundEffectsEnabled: localSfxEnabled,
               noticePushBusy: noticeBusy,
               mealPushBusy: mealBusy,
+              backgroundMusicBusy: bgmBusy,
+              soundEffectsBusy: sfxBusy,
               onNoticePushChanged: (enabled) async {
                 setSheetState(() {
                   localNoticeEnabled = enabled;
@@ -4833,6 +5904,38 @@ class _HomePageState extends State<HomePage> {
                 setSheetState(() {
                   localMealEnabled = ok ? _mealReminderPushEnabled : !enabled;
                   mealBusy = false;
+                });
+              },
+              onBackgroundMusicChanged: (enabled) async {
+                setSheetState(() {
+                  localBgmEnabled = enabled;
+                  bgmBusy = true;
+                });
+                final ok = await _toggleBackgroundMusic(
+                  enabled,
+                  enabledMessage: l10n.backgroundMusicEnabled,
+                  disabledMessage: l10n.backgroundMusicDisabled,
+                );
+                if (!mounted || !ctx.mounted) return;
+                setSheetState(() {
+                  localBgmEnabled = ok ? _backgroundMusicEnabled : !enabled;
+                  bgmBusy = false;
+                });
+              },
+              onSoundEffectsChanged: (enabled) async {
+                setSheetState(() {
+                  localSfxEnabled = enabled;
+                  sfxBusy = true;
+                });
+                final ok = await _toggleSoundEffects(
+                  enabled,
+                  enabledMessage: l10n.soundEffectsEnabled,
+                  disabledMessage: l10n.soundEffectsDisabled,
+                );
+                if (!mounted || !ctx.mounted) return;
+                setSheetState(() {
+                  localSfxEnabled = ok ? _soundEffectsEnabled : !enabled;
+                  sfxBusy = false;
                 });
               },
             );
@@ -4923,15 +6026,503 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _openSupportCenterSheet(BuildContext sheetCtx) async {
+    final l10n = AppLocalizations.of(sheetCtx);
+    final localeCode = _LocaleControllerScope.of(sheetCtx).locale.languageCode;
+    final isEn = localeCode == 'en';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.supportCenter,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isEn
+                      ? 'If you have questions, bug reports, or feedback about VegePet, please contact us at the email below.'
+                      : '베지펫 이용 중 문의, 오류 신고, 건의사항이 있다면 아래 이메일로 연락해주세요.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    height: 1.45,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color:
+                        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    l10n.supportEmail,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      const ClipboardData(text: 'acoustic.jwg@gmail.com'),
+                    );
+                    _showSnack(l10n.emailCopied);
+                  },
+                  icon: const Icon(Icons.copy_rounded),
+                  label: Text(l10n.copyEmail),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text(l10n.close),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  _SupportDocument _buildSupportDocument(
+    _SupportDocType type,
+    String localeCode,
+    AppLocalizations l10n,
+  ) {
+    final isEn = localeCode == 'en';
+
+    switch (type) {
+      case _SupportDocType.terms:
+        return _SupportDocument(
+          title: l10n.termsOfService,
+          sections: [
+            _SupportDocumentSection(
+              title: isEn ? '1. Purpose' : '1. 목적',
+              body: isEn
+                  ? 'This document explains the basic rules and terms for using VegePet.'
+                  : '베지펫 서비스 이용 조건과 기본 규칙을 안내합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '2. Service Scope' : '2. 서비스 내용',
+              body: isEn
+                  ? 'VegePet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be MVP-limited or added later.'
+                  : '식단 사진 인증, AI 기반 식단 평가, 펫 육성, 도감/가방/식단일지/설정 기능을 제공합니다. 일부 기능은 MVP 단계 또는 추후 업데이트 대상일 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '3. Account & Email Linking' : '3. 계정 및 이메일 연동',
+              body: isEn
+                  ? 'Users can start as a guest and optionally link an email account via OTP. Users are responsible for entering their own valid email address.'
+                  : '게스트 체험 계정으로 시작할 수 있으며 OTP로 이메일 연동이 가능합니다. 사용자는 본인 이메일을 정확히 입력해야 합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '4. User Responsibilities' : '4. 사용자 책임',
+              body: isEn
+                  ? 'Users must not enter false information, use another person’s email, or attempt abnormal/system-abusive access.'
+                  : '허위 정보 입력, 타인 이메일 사용, 비정상 접근 및 시스템 악용을 금지합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '5. Health Notice' : '5. 식단 평가와 건강 관련 고지',
+              body: isEn
+                  ? 'AI meal feedback is for reference only and is not medical diagnosis or treatment. Consult professionals for health conditions or dietary restrictions.'
+                  : 'AI 식단 평가는 참고용이며 의료/진단/치료 목적이 아닙니다. 건강 상태나 식단 제한이 있으면 전문가 상담이 필요합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '6. Game Items/Data' : '6. 아이템/분양권/게임 데이터',
+              body: isEn
+                  ? 'In-app items and tickets are for gameplay only, not cash-equivalent assets. Shop/payment features may be limited in MVP.'
+                  : '아이템과 분양권은 게임 내 기능이며 현금성 자산이 아닙니다. 상점/결제 기능은 MVP 단계에서 제한되거나 2차 오픈 예정일 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '7. Service Changes' : '7. 서비스 변경 및 중단',
+              body: isEn
+                  ? 'Features may be changed, improved, or suspended for operations, maintenance, and updates.'
+                  : '기능 개선, 오류 수정, 운영상 필요에 따라 서비스 내용이 변경되거나 중단될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '8. Restriction of Use' : '8. 이용 제한',
+              body: isEn
+                  ? 'VegePet may restrict service use for abuse, policy violations, or infringement of others’ rights.'
+                  : '비정상 이용, 시스템 악용, 타인 권리 침해 시 서비스 이용이 제한될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '9. Limitation of Liability' : '9. 책임 제한',
+              body: isEn
+                  ? 'Some features may be limited by network/device environments. VegePet does not guarantee health outcomes.'
+                  : '네트워크/기기 환경에 따라 일부 기능이 제한될 수 있으며, 앱은 건강 결과를 보장하지 않습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '10. Contact' : '10. 문의',
+              body: 'acoustic.jwg@gmail.com',
+            ),
+          ],
+        );
+      case _SupportDocType.privacy:
+        return _SupportDocument(
+          title: l10n.privacyPolicy,
+          sections: [
+            _SupportDocumentSection(
+              title: isEn ? '1. Data We Collect' : '1. 수집하는 정보',
+              body: isEn
+                  ? 'Account info (anonymous user id, linked email), profile info (nickname, gender, age range, diet goal), pet/game data, meal photos/logs, settings and technical logs may be collected.'
+                  : '계정 정보(익명 사용자 ID, 이메일 연동 시 이메일), 프로필 정보, 펫/게임 데이터, 식단 사진/기록, 설정 정보, 기술 로그 등이 수집될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '2. Collection Methods' : '2. 수집 방법',
+              body: isEn
+                  ? 'Data is collected via user input, meal photo uploads, and automatic records generated during app use through Supabase services.'
+                  : '사용자 직접 입력, 식단 사진 업로드, 앱 이용 과정에서 자동 생성되는 기록을 통해 수집하며 Supabase 서비스를 통해 저장됩니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '3. Purposes of Use' : '3. 이용 목적',
+              body: isEn
+                  ? 'Data is used for account identification, data continuity, meal evaluation, gameplay features, notifications, support responses, and service improvement.'
+                  : '계정 식별, 데이터 유지, 식단 인증/평가, 게임 기능 제공, 알림 제공, 고객 문의 대응, 오류 수정 및 서비스 개선에 사용됩니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '4. Third-party Processing' : '4. 제3자 처리/외부 서비스',
+              body: isEn
+                  ? 'VegePet may use Supabase (auth/database/storage/functions), OpenAI (meal analysis), and platform services from Apple/Google. Remote push providers may be added later.'
+                  : 'Supabase(인증/DB/스토리지/함수), OpenAI(식단 분석), Apple/Google 플랫폼 기능을 사용하며, 원격 푸시는 추후 FCM 등 외부 서비스를 사용할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '5. Meal Photo Caution' : '5. 식단 사진 및 민감 정보 주의',
+              body: isEn
+                  ? 'Users should avoid including personal identifiers in meal photos and avoid entering sensitive health details in notes.'
+                  : '식단 사진에 개인 식별 정보가 노출되지 않도록 촬영하고, 민감한 건강 정보를 기록에 입력하지 않도록 권장합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '6. Retention' : '6. 보관 기간',
+              body: isEn
+                  ? 'Data is deleted upon account deletion request unless legal retention requirements apply. Backup/log records may be retained for a limited period.'
+                  : '회원 탈퇴 또는 삭제 요청 시 데이터를 삭제하며, 법령상 보관 의무가 있는 경우 예외가 있을 수 있습니다. 백업/로그는 일정 기간 보관될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '7. Account & Data Deletion' : '7. 계정 및 데이터 삭제',
+              body: isEn
+                  ? 'Users can delete data in Settings > Account > Delete Account. External deletion requests can be sent to acoustic.jwg@gmail.com.'
+                  : '설정 > 계정 > 회원 탈퇴에서 계정 및 관련 데이터 삭제가 가능합니다. 앱 접근이 어려우면 acoustic.jwg@gmail.com으로 삭제 요청할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '8. User Rights' : '8. 사용자 권리',
+              body: isEn
+                  ? 'Users may request access, correction, linkage updates, or deletion of their data.'
+                  : '사용자는 열람, 수정, 삭제, 계정 연동 관련 요청을 할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '9. Children & Guardians' : '9. 아동 및 보호자',
+              body: isEn
+                  ? 'Minor users should use VegePet under guardian guidance. Guardian verification may be required under local laws.'
+                  : '미성년자는 보호자 지도하에 사용을 권장하며, 관련 법령에 따라 보호자 동의가 필요할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '10. Security' : '10. 보안',
+              body: isEn
+                  ? 'Reasonable protection measures are applied, but complete security cannot be guaranteed in all internet/mobile environments.'
+                  : '합리적인 보호 조치를 적용하지만 인터넷/모바일 환경 특성상 완전한 보안을 보장할 수는 없습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '11. Policy Updates' : '11. 변경 고지',
+              body: isEn
+                  ? 'Policy updates may be announced in-app or via update notices.'
+                  : '정책 변경 시 앱 내 공지 또는 업데이트 안내를 통해 고지할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '12. Contact' : '12. 문의',
+              body: 'acoustic.jwg@gmail.com',
+            ),
+          ],
+        );
+      case _SupportDocType.operation:
+        return _SupportDocument(
+          title: l10n.operationPolicy,
+          sections: [
+            _SupportDocumentSection(
+              title: isEn ? '1. Purpose' : '1. 운영 목적',
+              body: isEn
+                  ? 'Provide a stable meal-recording and VegePet growth experience.'
+                  : '안정적인 식단 기록 및 베지펫 육성 경험 제공을 목적으로 운영합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '2. Service Principles' : '2. 서비스 운영 원칙',
+              body: isEn
+                  ? 'We prioritize reliability, bug fixes, and feature improvements while distinguishing MVP and future features.'
+                  : '오류 수정, 기능 개선, 데이터 안정성을 우선하며 MVP 기능과 향후 기능을 구분해 운영합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '3. Prohibited Activities' : '3. 금지 행위',
+              body: isEn
+                  ? 'Using others’ accounts/emails, tampering with data, abnormal requests, and repeated false certification are prohibited.'
+                  : '타인 계정/이메일 사용, 데이터 변조, 비정상 요청, 허위 인증 반복 등은 금지됩니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '4. Data Operations' : '4. 데이터 및 기록 관리',
+              body: isEn
+                  ? 'Meal photos, diary entries, and pet data are managed per user account; logs may be used for error analysis.'
+                  : '식단 사진/일지/펫 데이터는 계정 기준으로 관리되며, 오류 분석을 위해 일부 로그를 활용할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '5. AI Evaluation Operations' : '5. AI 식단 평가 운영 기준',
+              body: isEn
+                  ? 'AI feedback is reference-only and may vary by photo quality or environment. Re-capture guidance may be shown for uncertain results.'
+                  : 'AI 결과는 참고용이며 사진 품질/조명 등에 따라 달라질 수 있습니다. 불확실 판정 시 재촬영 안내가 제공될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '6. Notification Operations' : '6. 알림 운영',
+              body: isEn
+                  ? 'Meal reminders can be toggled by users. Announcement/event notifications may be sent in later updates.'
+                  : '먹이 알림은 사용자가 ON/OFF할 수 있으며, 공지/이벤트 알림은 추후 운영자가 발송할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '7. Item/Reward Operations' : '7. 아이템/보상 운영',
+              body: isEn
+                  ? 'In-app items are gameplay elements. Shop/payment may be limited or deferred in MVP.'
+                  : '분양권/아이템은 게임 진행용 요소이며 상점/결제는 MVP에서 제한되거나 2차 오픈 예정일 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '8. Restrictions & Actions' : '8. 이용 제한 및 조치',
+              body: isEn
+                  ? 'Service use may be restricted for serious abuse, security threats, or rights infringement.'
+                  : '심각한 악용, 보안 위협, 권리 침해 행위에 대해 이용 제한 조치가 이뤄질 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '9. Policy Changes' : '9. 정책 변경',
+              body: isEn
+                  ? 'Operational policies may change as needed for service sustainability.'
+                  : '서비스 운영상 필요에 따라 운영정책이 변경될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '10. Contact' : '10. 문의',
+              body: 'acoustic.jwg@gmail.com',
+            ),
+          ],
+        );
+      case _SupportDocType.guardian:
+        return _SupportDocument(
+          title: l10n.guardianGuide,
+          sections: [
+            _SupportDocumentSection(
+              title: isEn ? '1. About VegePet' : '1. 베지펫 소개',
+              body: isEn
+                  ? 'VegePet is a gamified diet management app that combines meal verification with raising a virtual pet.'
+                  : '베지펫은 식단 인증과 펫 육성을 결합한 게임형 식단관리 앱입니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '2. Why Guardian Guidance Matters' : '2. 보호자 확인이 필요한 이유',
+              body: isEn
+                  ? 'The app may handle profile and meal-related information, so guardian guidance is recommended for minors.'
+                  : '앱은 프로필/식단 관련 정보를 다룰 수 있어 미성년자는 보호자 지도하에 사용하는 것을 권장합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '3. Meal Photo Safety' : '3. 식단 사진 촬영 주의',
+              body: isEn
+                  ? 'Avoid capturing personal identifiers such as faces, addresses, school names, or contact details.'
+                  : '얼굴, 주소, 학교명, 연락처 등 개인 식별 정보가 노출되지 않도록 음식 중심으로 촬영해주세요.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '4. Health Caution' : '4. 건강 관련 주의',
+              body: isEn
+                  ? 'AI meal feedback does not replace professional medical or nutrition advice.'
+                  : 'AI 식단 평가는 참고용이며 의료 조언을 대체하지 않습니다. 필요한 경우 전문가 상담이 필요합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '5. Payments & Shop' : '5. 결제 및 상점',
+              body: isEn
+                  ? 'In MVP, payment/shop features may be limited or unavailable. Future paid features should include guardian-friendly notices.'
+                  : 'MVP에서는 상점/결제가 제한 또는 2차 오픈 예정이며, 유료 기능 추가 시 보호자 확인 고지가 강화되어야 합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '6. Notification Control' : '6. 알림 관리',
+              body: isEn
+                  ? 'Meal and announcement notifications can be turned on/off in settings.'
+                  : '먹이 알림과 공지 알림은 설정에서 ON/OFF할 수 있어 보호자가 이용 상태를 확인할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '7. Account & Data Deletion' : '7. 계정 및 데이터 삭제',
+              body: isEn
+                  ? 'Data can be deleted from Settings > Account > Delete Account. Guardians may request deletion via email.'
+                  : '설정 > 계정 > 회원 탈퇴로 데이터 삭제가 가능하며, 보호자는 이메일로 삭제를 요청할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '8. Healthy Usage Habits' : '8. 안전한 이용 습관',
+              body: isEn
+                  ? 'Avoid excessive use and review meal habits together. Prioritize real health status and professional guidance.'
+                  : '과도한 사용을 피하고 보호자와 함께 식단을 점검하세요. 앱 결과보다 실제 건강 상태를 우선하세요.',
+            ),
+          ],
+        );
+      case _SupportDocType.dataDeletion:
+        return _SupportDocument(
+          title: l10n.accountDataDeletionGuide,
+          sections: [
+            _SupportDocumentSection(
+              title: isEn ? '1. In-app Deletion Path' : '1. 앱 내 삭제 경로',
+              body: isEn
+                  ? 'Go to Settings > Account > Delete Account to remove your account and related data.'
+                  : '설정 > 계정 > 회원 탈퇴에서 계정 및 관련 데이터 삭제가 가능합니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '2. Data That Will Be Deleted' : '2. 삭제되는 데이터',
+              body: isEn
+                  ? 'Profile data, linked email info, pet/collection/bag/ticket records, meal photos/logs, and diary entries are deleted.'
+                  : '프로필, 이메일 연동 정보, 펫/도감/가방/분양권 데이터, 식단 사진/인증 기록, 식단일지 입력값 등이 삭제됩니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '3. Data That May Be Retained' : '3. 삭제되지 않거나 별도 보관될 수 있는 정보',
+              body: isEn
+                  ? 'Legally required records may be retained for required periods. Non-identifying logs/backups may be deleted after retention windows.'
+                  : '법령상 보관 의무가 있는 정보는 필요한 기간 보관될 수 있으며, 비식별 로그/백업은 일정 기간 후 삭제될 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '4. External Deletion Request' : '4. 앱 외부 삭제 요청',
+              body: isEn
+                  ? 'If app access is unavailable, send a request to acoustic.jwg@gmail.com. A web deletion-request URL may be required for Google Play.'
+                  : '앱 접근이 어려운 경우 acoustic.jwg@gmail.com 으로 삭제 요청이 가능합니다. Google Play 제출 시 웹 삭제 요청 URL이 필요할 수 있습니다.',
+            ),
+            _SupportDocumentSection(
+              title: isEn ? '5. Processing Timeline' : '5. 처리 기간',
+              body: isEn
+                  ? 'Requests are processed within a reasonable period after confirmation. Additional identity verification may be required.'
+                  : '요청 확인 후 합리적인 기간 내 처리되며, 본인 확인을 위해 추가 정보 요청이 있을 수 있습니다.',
+            ),
+          ],
+        );
+    }
+  }
+
+  Future<void> _openPolicyDocumentSheet({
+    required _SupportDocType type,
+    required BuildContext sheetCtx,
+  }) async {
+    final l10n = AppLocalizations.of(sheetCtx);
+    final localeCode = _LocaleControllerScope.of(sheetCtx).locale.languageCode;
+    final doc = _buildSupportDocument(type, localeCode, l10n);
+    final isEn = localeCode == 'en';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.9,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    doc.title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '${l10n.lastUpdated}: 2026-04-27',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Text(
+                    '${l10n.effectiveDate}: 2026-04-27',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      l10n.legalNoticeDraft,
+                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  for (final section in doc.sections) ...[
+                    Text(
+                      section.title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      section.body,
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    isEn
+                        ? 'TODO: Before release, prepare public web URLs for privacy policy and account/data deletion requests. Also complete App Store Connect App Privacy and Google Play Data Safety.'
+                        : 'TODO: 출시 전 개인정보처리방침 웹 URL, 계정/데이터 삭제 요청 웹 URL 준비가 필요합니다. App Store Connect App Privacy 및 Google Play Data Safety Form도 반드시 작성해야 합니다.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: Text(l10n.close),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSettingsSheetContent(
     BuildContext sheetCtx, {
     required Future<void> Function() onProfileUpdated,
     required bool noticePushEnabled,
     required bool mealPushEnabled,
+    required bool backgroundMusicEnabled,
+    required bool soundEffectsEnabled,
     required bool noticePushBusy,
     required bool mealPushBusy,
+    required bool backgroundMusicBusy,
+    required bool soundEffectsBusy,
     required ValueChanged<bool>? onNoticePushChanged,
     required ValueChanged<bool>? onMealPushChanged,
+    required ValueChanged<bool>? onBackgroundMusicChanged,
+    required ValueChanged<bool>? onSoundEffectsChanged,
   }) {
     final l10n = AppLocalizations.of(sheetCtx);
     final localeScope = _LocaleControllerScope.of(sheetCtx);
@@ -5084,28 +6675,6 @@ class _HomePageState extends State<HomePage> {
               ),
 
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.paymentHistory} ${l10n.comingSoon}');
-              },
-              child: Row(
-                children: [
-                  Icon(Icons.receipt_long_outlined,
-                      color: theme.colorScheme.onSurface),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      l10n.paymentHistory,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
-                ],
-              ),
-            ),
-
-            roundedTile(
               onTap: () async {
                 final ok = await _confirmWithdrawAccount();
                 if (ok && mounted) {
@@ -5134,7 +6703,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 8),
 
             // ----- 언어 -----
-            sectionTitle(l10n.language, Icons.language_outlined),
+            sectionTitle(l10n.languageSettingsTitle, Icons.language_outlined),
             roundedTile(
               onTap: () async => _openLanguageSelectorSheet(sheetCtx),
               child: Row(
@@ -5184,17 +6753,46 @@ class _HomePageState extends State<HomePage> {
 
             const SizedBox(height: 8),
 
+            // ----- 사운드 -----
+            sectionTitle(l10n.sound, Icons.music_note_outlined),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              tileColor: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.85),
+              title: Text(l10n.backgroundMusic),
+              subtitle: Text(l10n.backgroundMusicDescription),
+              value: backgroundMusicEnabled,
+              onChanged:
+                  backgroundMusicBusy ? null : onBackgroundMusicChanged,
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              tileColor: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.85),
+              title: Text(l10n.soundEffects),
+              subtitle: Text(l10n.soundEffectsDescription),
+              value: soundEffectsEnabled,
+              onChanged: soundEffectsBusy ? null : onSoundEffectsChanged,
+            ),
+
+            const SizedBox(height: 8),
+
             // ----- 고객지원 -----
             sectionTitle(l10n.customerSupport, Icons.support_agent_outlined),
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
-              },
+              onTap: () async => _openSupportCenterSheet(sheetCtx),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '고객센터',
+                      l10n.supportCenter,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -5205,14 +6803,15 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
-              },
+              onTap: () async => _openPolicyDocumentSheet(
+                type: _SupportDocType.terms,
+                sheetCtx: sheetCtx,
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '이용약관',
+                      l10n.termsOfService,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -5223,14 +6822,15 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
-              },
+              onTap: () async => _openPolicyDocumentSheet(
+                type: _SupportDocType.privacy,
+                sheetCtx: sheetCtx,
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '개인정보 보호정책',
+                      l10n.privacyPolicy,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -5241,14 +6841,15 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
-              },
+              onTap: () async => _openPolicyDocumentSheet(
+                type: _SupportDocType.operation,
+                sheetCtx: sheetCtx,
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '운영정책',
+                      l10n.operationPolicy,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -5259,14 +6860,34 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             roundedTile(
-              onTap: () {
-                _showSnack('${l10n.customerSupport} ${l10n.comingSoon}');
-              },
+              onTap: () async => _openPolicyDocumentSheet(
+                type: _SupportDocType.guardian,
+                sheetCtx: sheetCtx,
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '보호자 가이드',
+                      l10n.guardianGuide,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: theme.colorScheme.outline),
+                ],
+              ),
+            ),
+            roundedTile(
+              onTap: () async => _openPolicyDocumentSheet(
+                type: _SupportDocType.dataDeletion,
+                sheetCtx: sheetCtx,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l10n.accountDataDeletionGuide,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -5611,6 +7232,8 @@ class _HomePageState extends State<HomePage> {
         _selectedGender = null;
         _selectedAgeRange = null;
         _selectedDietGoal = null;
+        _isProfileSetupPanelVisible = true;
+        _isProfileSetupClosing = false;
 
         _lastResultType = null;
         _lastFeedbackText = null;
@@ -6581,144 +8204,204 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildYardActions() {
-    return OutlinedButton.icon(
-      onPressed: _refreshAll,
-      icon: const Icon(Icons.refresh),
-      label: const Text('마당 새로고침'),
-    );
-  }
-
   // ---------- 프로필 입력 (미완성 상태) ----------
 
-  List<Widget> _buildProfileFormContent() {
-    final theme = Theme.of(context);
-    return [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '프로필을 입력해주세요',
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '베지펫이 더 잘 도와드릴 수 있도록 기본 정보를 입력해주세요.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: Colors.grey[700]),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 12),
-      _profileFormCard(
-        label: '닉네임',
-        child: TextField(
-          controller: _nicknameController,
-          maxLength: 20,
-          decoration: const InputDecoration(
-            hintText: '예: 초록이',
-            border: OutlineInputBorder(),
-            counterText: '',
-            isDense: true,
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-      ),
-      const SizedBox(height: 12),
-      _profileFormCard(
-        label: '성별',
-        child: Wrap(
-          spacing: 8,
-          children: _genderOptions.map((g) {
-            final selected = _selectedGender == g;
-            return ChoiceChip(
-              label: Text(g),
-              selected: selected,
-              onSelected: (v) {
-                setState(() => _selectedGender = v ? g : null);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-      const SizedBox(height: 12),
-      _profileFormCard(
-        label: '나이대',
-        child: Wrap(
-          spacing: 8,
-          children: _ageRangeOptions.map((a) {
-            final selected = _selectedAgeRange == a;
-            return ChoiceChip(
-              label: Text(a),
-              selected: selected,
-              onSelected: (v) {
-                setState(() => _selectedAgeRange = v ? a : null);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-      const SizedBox(height: 12),
-      _profileFormCard(
-        label: '식단 목적',
-        child: Wrap(
-          spacing: 8,
-          children: _dietGoalOptions.map((g) {
-            final selected = _selectedDietGoal == g;
-            return ChoiceChip(
-              label: Text(g),
-              selected: selected,
-              onSelected: (v) {
-                setState(() => _selectedDietGoal = v ? g : null);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-      const SizedBox(height: 16),
-      SizedBox(
-        height: 52,
-        child: FilledButton.icon(
-          onPressed: _isSavingProfile ? null : _saveProfile,
-          icon: _isSavingProfile
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.check),
-          label: Text(_isSavingProfile ? '저장 중...' : '시작하기'),
-        ),
-      ),
-    ];
-  }
+  Widget _buildProfileFormContent() {
+    final l10n = AppLocalizations.of(context);
+    // TODO(vegepet): Pretendard 폰트 asset 등록 후 fontFamily를 명시적으로 연결.
+    const titleStyle = TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const labelStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const fieldTextStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF3A3A3A),
+      height: 1.0,
+    );
 
-  Widget _profileFormCard({required String label, required Widget child}) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceContainerLowest,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    Widget iosFieldShell({required Widget child}) {
+      return Container(
+        width: 200,
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+        ),
+        alignment: Alignment.centerLeft,
+        child: child,
+      );
+    }
+
+    Widget row({
+      required double top,
+      required String label,
+      required Widget field,
+    }) {
+      return Positioned(
+        top: top,
+        left: 0,
+        width: 272,
+        height: 26,
+        child: Row(
           children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+            SizedBox(
+              width: 64,
+              child: Text(
+                label,
+                textAlign: TextAlign.left,
+                style: labelStyle,
               ),
             ),
-            const SizedBox(height: 8),
-            child,
+            const SizedBox(width: 8),
+            SizedBox(width: 200, height: 26, child: field),
           ],
         ),
+      );
+    }
+
+    return SizedBox(
+      width: 272,
+      height: 196,
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            child: Text(
+              l10n.profileSetupTitle,
+              textAlign: TextAlign.left,
+              style: titleStyle,
+            ),
+          ),
+          row(
+            top: 30,
+            label: l10n.nickname,
+            field: iosFieldShell(
+              child: TextField(
+                controller: _nicknameController,
+                onChanged: (_) => setState(() {}),
+                textAlign: TextAlign.left,
+                style: fieldTextStyle,
+                maxLines: 1,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(20),
+                ],
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+          ),
+          row(
+            top: 60,
+            label: l10n.gender,
+            field: _buildCompactProfileSelect(
+              selectKey: 'gender',
+              value: _selectedGender,
+              options: _genderOptions,
+              enabled: !_isSavingProfile,
+              onChanged: (value) => setState(() => _selectedGender = value),
+            ),
+          ),
+          row(
+            top: 90,
+            label: l10n.ageRange,
+            field: _buildCompactProfileSelect(
+              selectKey: 'ageRange',
+              value: _selectedAgeRange,
+              options: _ageRangeOptions,
+              enabled: !_isSavingProfile,
+              onChanged: (value) => setState(() => _selectedAgeRange = value),
+            ),
+          ),
+          row(
+            top: 120,
+            label: l10n.dietGoal,
+            field: _buildCompactProfileSelect(
+              selectKey: 'dietGoal',
+              value: _selectedDietGoal,
+              options: _dietGoalOptions,
+              enabled: !_isSavingProfile,
+              onChanged: (value) => setState(() => _selectedDietGoal = value),
+            ),
+          ),
+          Positioned(
+            top: 158,
+            left: 0,
+            width: 272,
+            height: 36,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: const Color(0xFFF1F1F1),
+                  width: 0.8,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: TextButton(
+                onPressed: _isSavingProfile ? null : _saveProfile,
+                style: TextButton.styleFrom(
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
+                  backgroundColor: Colors.transparent,
+                  disabledBackgroundColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+                child: _isSavingProfile
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFA8C9FF),
+                        ),
+                      )
+                    : ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
+                        ).createShader(bounds),
+                        blendMode: BlendMode.srcIn,
+                        child: Text(
+                          '${l10n.start}!',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFAFCFFF),
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -7273,77 +8956,6 @@ class _SpeciesCard extends StatelessWidget {
   }
 }
 
-class _LoadingView extends StatelessWidget {
-  const _LoadingView();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text(
-              '베지펫을 준비 중이에요...',
-              style: TextStyle(fontSize: 15),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorView extends StatelessWidget {
-  final String? message;
-  final VoidCallback onRetry;
-
-  const _ErrorView({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline,
-                  size: 56, color: Colors.redAccent),
-              const SizedBox(height: 16),
-              const Text(
-                '앱 준비 중 문제가 발생했어요',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('다시 시도'),
-              ),
-              const SizedBox(height: 24),
-              if (message != null)
-                Text(
-                  message!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // 이름 입력 전용 Dialog.
 //
 // 책임:
@@ -7483,6 +9095,64 @@ class _AffectionProgressInfo {
   final double progress;
   final String label;
   final bool isComplete;
+}
+
+class _SoftActionButton extends StatefulWidget {
+  const _SoftActionButton({
+    required this.child,
+    this.onTap,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  State<_SoftActionButton> createState() => _SoftActionButtonState();
+}
+
+class _SoftActionButtonState extends State<_SoftActionButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final disabled = widget.onTap == null;
+    final bgColor = disabled
+        ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
+        : theme.colorScheme.primaryContainer.withValues(alpha: 0.86);
+    return GestureDetector(
+      onTapDown: disabled ? null : (_) => setState(() => _pressed = true),
+      onTapCancel: disabled ? null : () => setState(() => _pressed = false),
+      onTapUp: disabled ? null : (_) => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: TweenAnimationBuilder<double>(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        tween: Tween<double>(begin: 1, end: _pressed ? 0.97 : 1),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
+            ),
+          ),
+          child: Opacity(
+            opacity: disabled ? 0.55 : 1,
+            child: widget.child,
+          ),
+        ),
+        builder: (context, scale, child) {
+          return Transform.scale(
+            scale: scale,
+            alignment: Alignment.centerLeft,
+            child: child,
+          );
+        },
+      ),
+    );
+  }
 }
 
 // ============================================================================

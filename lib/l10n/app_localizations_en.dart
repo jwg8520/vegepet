@@ -21,6 +21,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get language => 'Language';
 
   @override
+  String get languageSettingsTitle => 'Language';
+
+  @override
   String get pushNotifications => 'Push Notifications';
 
   @override
@@ -112,4 +115,156 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealNotificationTitle => 'VegePet Meal Time';
+
+  @override
+  String get sound => 'Sound';
+
+  @override
+  String get backgroundMusic => 'Background Music';
+
+  @override
+  String get backgroundMusicDescription =>
+      'Turn the yard background music on or off.';
+
+  @override
+  String get soundEffects => 'Sound Effects';
+
+  @override
+  String get soundEffectsDescription =>
+      'Turn button and interaction sound effects on or off.';
+
+  @override
+  String get backgroundMusicEnabled => 'Background music has been turned on.';
+
+  @override
+  String get backgroundMusicDisabled => 'Background music has been turned off.';
+
+  @override
+  String get soundEffectsEnabled => 'Sound effects have been turned on.';
+
+  @override
+  String get soundEffectsDisabled => 'Sound effects have been turned off.';
+
+  @override
+  String get supportCenter => 'Support Center';
+
+  @override
+  String get contactAndFeedback => 'Contact & Feedback';
+
+  @override
+  String get supportEmail => 'Contact & Feedback: acoustic.jwg@gmail.com';
+
+  @override
+  String get copyEmail => 'Copy Email';
+
+  @override
+  String get emailCopied => 'Email address copied.';
+
+  @override
+  String get termsOfService => 'Terms of Service';
+
+  @override
+  String get privacyPolicy => 'Privacy Policy';
+
+  @override
+  String get operationPolicy => 'Operation Policy';
+
+  @override
+  String get guardianGuide => 'Guardian Guide';
+
+  @override
+  String get accountDataDeletionGuide => 'Account & Data Deletion Guide';
+
+  @override
+  String get legalNoticeDraft =>
+      'This document is an in-app draft notice for VegePet and should be reviewed by legal/privacy professionals before release.';
+
+  @override
+  String get lastUpdated => 'Last Updated';
+
+  @override
+  String get effectiveDate => 'Effective Date';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get petInfoTooltip => 'Pet Info';
+
+  @override
+  String get petInfoTitle => 'VegePet Info';
+
+  @override
+  String get petInfoNameLabel => 'Name';
+
+  @override
+  String get petInfoSpeciesLabel => 'Species';
+
+  @override
+  String get petInfoStageLabel => 'Stage';
+
+  @override
+  String get petInfoFeedAction => 'Feed (Meal Photo)';
+
+  @override
+  String get petInfoPlayAction => 'Play';
+
+  @override
+  String get petInfoPetAction => 'Pet';
+
+  @override
+  String get petInfoMealTimeGuide =>
+      'Brunch: 06:00-14:00 / Dinner: 17:00-22:00';
+
+  @override
+  String get petInfoStatusDone => 'Done';
+
+  @override
+  String get petInfoStatusAvailable => 'Available';
+
+  @override
+  String get petInfoCurrentAffection => 'Current Affection';
+
+  @override
+  String get petInfoStageComplete => 'Adult Stage Reached';
+
+  @override
+  String get petInfoUntilAdult => 'Until Adult';
+
+  @override
+  String get petInfoUntilGrown => 'Until Grown';
+
+  @override
+  String get petInfoUntilChild => 'Until Child';
+
+  @override
+  String get gameMenuTooltip => 'Game Menu';
+
+  @override
+  String get profileSetupTitle => 'Please enter your profile!';
+
+  @override
+  String get nickname => 'Nickname';
+
+  @override
+  String get gender => 'Gender';
+
+  @override
+  String get ageRange => 'Age Range';
+
+  @override
+  String get dietGoal => 'Diet Goal';
+
+  @override
+  String get start => 'Start';
+
+  @override
+  String get inYardLoading => 'Loading...';
+
+  @override
+  String get inYardErrorTitle =>
+      'Something went wrong while preparing the app.';
+
+  @override
+  String get retry => 'Retry';
 }
