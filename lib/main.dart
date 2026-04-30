@@ -3661,6 +3661,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: ColoredBox(
         color: const Color(0xFFEFF5EF),
         child: Center(
