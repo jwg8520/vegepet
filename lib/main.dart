@@ -3721,14 +3721,21 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildYardBaseLayer() {
     return Positioned.fill(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFDAF3DD), Color(0xFFA9DEB0)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          _dismissFocus();
+          unawaited(_closeProfileSelectOverlay());
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFDAF3DD), Color(0xFFA9DEB0)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
           ),
         ),
@@ -8292,6 +8299,7 @@ class _HomePageState extends State<HomePage> {
               child: TextField(
                 controller: _nicknameController,
                 onChanged: (_) => setState(() {}),
+                onTapOutside: (_) => _dismissFocus(),
                 textAlign: TextAlign.left,
                 style: fieldTextStyle,
                 maxLines: 1,
