@@ -379,6 +379,7 @@ class _HomePageState extends State<HomePage> {
 
   bool _isInitialAdoptionPanelVisible = false;
   bool _isInitialAdoptionPanelClosing = false;
+  bool _isInitialAdoptionInFlight = false;
 
   // 도감(pokedex) 화면 데이터.
   // 도감 BottomSheet 가 열릴 때 한 번 조회해 들고 있다가, 시트 안에서는 DB
@@ -2291,7 +2292,12 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    _safeSetState(() => _isAdopting = true);
+    _safeSetState(() {
+      _isAdopting = true;
+      // 분양 insert/fetch가 끝나기 전 중간 프레임에서
+      // "activePet == null" 자동 표시 조건이 다시 패널을 열지 못하게 막는다.
+      _isInitialAdoptionInFlight = true;
+    });
     await _animateOutInitialAdoptionPanel();
 
     try {
@@ -2312,6 +2318,7 @@ class _HomePageState extends State<HomePage> {
       _safeSetState(() {
         _selectedSpeciesId = null;
         _isAdopting = false;
+        _isInitialAdoptionInFlight = false;
       });
 
       // 첫 분양 화면 → 마당 화면 으로 큰 전환이 발생한 직후에 곧바로
@@ -2324,6 +2331,7 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       _safeSetState(() {
         _isAdopting = false;
+        _isInitialAdoptionInFlight = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionPanelVisible = true;
       });
@@ -2456,6 +2464,7 @@ class _HomePageState extends State<HomePage> {
         _isUsingRandomTicket = false;
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionInFlight = false;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -2579,6 +2588,7 @@ class _HomePageState extends State<HomePage> {
         _isUsingRandomTicket = false;
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionInFlight = false;
         _isAdopting = false;
         _isSavingProfile = false;
         _isLoggingMeal = false;
@@ -3769,7 +3779,11 @@ class _HomePageState extends State<HomePage> {
         if (!mounted) return;
         final canShow =
             _status == _ViewStatus.ready && _isProfileComplete() && _activePet == null;
-        if (!canShow || _isInitialAdoptionPanelClosing) return;
+        if (!canShow ||
+            _isInitialAdoptionPanelClosing ||
+            _isInitialAdoptionInFlight) {
+          return;
+        }
         setState(() {
           _isInitialAdoptionPanelVisible = true;
         });
