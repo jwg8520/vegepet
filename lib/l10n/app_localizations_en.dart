@@ -267,4 +267,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get retry => 'Retry';
+
+  @override
+  String get initialAdoptionTitle => 'It\'s time to adopt a baby VegePet!';
+
+  @override
+  String get initialAdoptionDescription =>
+      'VegePets grow by eating your healthy meals.';
+
+  @override
+  String get initialAdoptionDogSectionLabel => 'Dogs';
+
+  @override
+  String get initialAdoptionCatSectionLabel => 'Cats';
+
+  @override
+  String get initialAdoptionReceiveButton => 'Adopt';
 }

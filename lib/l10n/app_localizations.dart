@@ -595,6 +595,36 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'다시 시도'**
   String get retry;
+
+  /// No description provided for @initialAdoptionTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'아기 베지펫을 분양 받을 차례에요!'**
+  String get initialAdoptionTitle;
+
+  /// No description provided for @initialAdoptionDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫은 사용자의 건강한 식단을 먹고 자라게 됩니다.'**
+  String get initialAdoptionDescription;
+
+  /// No description provided for @initialAdoptionDogSectionLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'강아지'**
+  String get initialAdoptionDogSectionLabel;
+
+  /// No description provided for @initialAdoptionCatSectionLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'고양이'**
+  String get initialAdoptionCatSectionLabel;
+
+  /// No description provided for @initialAdoptionReceiveButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양받기'**
+  String get initialAdoptionReceiveButton;
 }
 
 class _AppLocalizationsDelegate

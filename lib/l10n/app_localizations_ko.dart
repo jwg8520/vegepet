@@ -258,4 +258,19 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get retry => '다시 시도';
+
+  @override
+  String get initialAdoptionTitle => '아기 베지펫을 분양 받을 차례에요!';
+
+  @override
+  String get initialAdoptionDescription => '베지펫은 사용자의 건강한 식단을 먹고 자라게 됩니다.';
+
+  @override
+  String get initialAdoptionDogSectionLabel => '강아지';
+
+  @override
+  String get initialAdoptionCatSectionLabel => '고양이';
+
+  @override
+  String get initialAdoptionReceiveButton => '분양받기';
 }

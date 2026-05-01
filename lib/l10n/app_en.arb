@@ -82,5 +82,10 @@
   "start": "Start",
   "inYardLoading": "Loading...",
   "inYardErrorTitle": "Something went wrong while preparing the app.",
-  "retry": "Retry"
+  "retry": "Retry",
+  "initialAdoptionTitle": "It's time to adopt a baby VegePet!",
+  "initialAdoptionDescription": "VegePets grow by eating your healthy meals.",
+  "initialAdoptionDogSectionLabel": "Dogs",
+  "initialAdoptionCatSectionLabel": "Cats",
+  "initialAdoptionReceiveButton": "Adopt"
 }

@@ -306,6 +306,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const double _kGameCanvasWidth = 844;
   static const double _kGameCanvasHeight = 390;
+  static const int _kProfileNicknameMaxLength = 8;
 
   _ViewStatus _status = _ViewStatus.loading;
   String? _errorMessage;
@@ -369,6 +370,15 @@ class _HomePageState extends State<HomePage> {
   // 가방에서 랜덤 분양권 사용 중 연타/중복 분양 방지 플래그.
   // RPC 호출 + user_pets insert 가 원자적이지 않으므로, UI 레벨에서라도 락을 걸어둔다.
   bool _isUsingRandomTicket = false;
+
+  // 첫 펫 선택 분양창(프로필 완료 + activePet 없음) 오버레이.
+  static const double _kInitialAdoptionPanelLeft = 270;
+  static const double _kInitialAdoptionPanelTop = 67;
+  static const double _kInitialAdoptionPanelWidth = 304;
+  static const double _kInitialAdoptionPanelHeight = 256;
+
+  bool _isInitialAdoptionPanelVisible = false;
+  bool _isInitialAdoptionPanelClosing = false;
 
   // 도감(pokedex) 화면 데이터.
   // 도감 BottomSheet 가 열릴 때 한 번 조회해 들고 있다가, 시트 안에서는 DB
@@ -443,11 +453,13 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _nicknameController.addListener(_enforceProfileNicknameMaxLength);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _nicknameController.removeListener(_enforceProfileNicknameMaxLength);
     _profileSelectScrollController?.dispose();
     _closeProfileSelectOverlay(notify: false, animated: false);
     _emailOtpCooldownTimer?.cancel();
@@ -479,6 +491,19 @@ class _HomePageState extends State<HomePage> {
     _selectedDietGoal ??= p['diet_goal']?.toString();
   }
 
+  void _enforceProfileNicknameMaxLength() {
+    final text = _nicknameController.text;
+    if (text.characters.length <= _kProfileNicknameMaxLength) return;
+
+    final truncated =
+        text.characters.take(_kProfileNicknameMaxLength).toString();
+    _nicknameController.value = TextEditingValue(
+      text: truncated,
+      selection: TextSelection.collapsed(offset: truncated.length),
+      composing: TextRange.empty,
+    );
+  }
+
   Future<void> _saveProfile() async {
     // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
@@ -491,7 +516,20 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    _enforceProfileNicknameMaxLength();
     final nickname = _nicknameController.text.trim();
+
+    if (nickname.characters.length > _kProfileNicknameMaxLength) {
+      final fixed =
+          nickname.characters.take(_kProfileNicknameMaxLength).toString();
+      _nicknameController.value = TextEditingValue(
+        text: fixed,
+        selection: TextSelection.collapsed(offset: fixed.length),
+        composing: TextRange.empty,
+      );
+      _showSnack('닉네임은 8자까지만 입력할 수 있어요.');
+      return;
+    }
 
     if (nickname.isEmpty) {
       _showSnack('닉네임을 입력해주세요.');
@@ -628,7 +666,7 @@ class _HomePageState extends State<HomePage> {
                               ? Offset.zero
                               : const Offset(0, -0.04),
                           child: SizedBox(
-                            width: 200,
+                            width: 176,
                             child: Container(
                               decoration: BoxDecoration(
                                 color: Colors.white,
@@ -708,7 +746,7 @@ class _HomePageState extends State<HomePage> {
                 );
               },
         child: Container(
-          width: 200,
+          width: 176,
           height: 26,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
@@ -725,7 +763,7 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: const Color(0xFF3A3A3A),
+                    color: const Color(0xFF4A4A4A),
                   ),
                 ),
               ),
@@ -784,7 +822,7 @@ class _HomePageState extends State<HomePage> {
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF3A3A3A),
+                color: Color(0xFF4A4A4A),
               ),
             ),
           ),
@@ -2220,6 +2258,19 @@ class _HomePageState extends State<HomePage> {
     return _clampDiaryMonth(DateTime(now.year, now.month, 1));
   }
 
+  Future<void> _animateOutInitialAdoptionPanel() async {
+    if (_isInitialAdoptionPanelClosing || !_isInitialAdoptionPanelVisible) return;
+    _safeSetState(() {
+      _isInitialAdoptionPanelClosing = true;
+      _isInitialAdoptionPanelVisible = false;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 230));
+    if (!mounted) return;
+    _safeSetState(() {
+      _isInitialAdoptionPanelClosing = false;
+    });
+  }
+
   Future<void> _adoptSelectedPet() async {
     _dismissFocus();
 
@@ -2241,6 +2292,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     _safeSetState(() => _isAdopting = true);
+    await _animateOutInitialAdoptionPanel();
 
     try {
       await supabase.from('user_pets').insert({
@@ -2270,7 +2322,11 @@ class _HomePageState extends State<HomePage> {
       await _showNicknameDialog();
     } catch (e) {
       if (!mounted) return;
-      _safeSetState(() => _isAdopting = false);
+      _safeSetState(() {
+        _isAdopting = false;
+        _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionPanelVisible = true;
+      });
       _showSnack('분양 저장에 실패했어요: $e');
     }
   }
@@ -2398,6 +2454,8 @@ class _HomePageState extends State<HomePage> {
         _uploadingSlot = null;
         _isInteracting = false;
         _isUsingRandomTicket = false;
+        _isInitialAdoptionPanelVisible = false;
+        _isInitialAdoptionPanelClosing = false;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -2519,6 +2577,8 @@ class _HomePageState extends State<HomePage> {
         _uploadingSlot = null;
         _isInteracting = false;
         _isUsingRandomTicket = false;
+        _isInitialAdoptionPanelVisible = false;
+        _isInitialAdoptionPanelClosing = false;
         _isAdopting = false;
         _isSavingProfile = false;
         _isLoggingMeal = false;
@@ -3683,6 +3743,10 @@ class _HomePageState extends State<HomePage> {
     final hasActivePet = _activePet != null;
     final showProfileSetup = _status == _ViewStatus.ready && !profileComplete;
     final shouldMountProfileSetup = showProfileSetup || _isProfileSetupClosing;
+    final showInitialAdoption =
+        _status == _ViewStatus.ready && profileComplete && !hasActivePet;
+    final shouldMountInitialAdoption =
+        showInitialAdoption || _isInitialAdoptionPanelClosing;
     if (!showProfileSetup && _openProfileSelectKey != null) {
       unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     }
@@ -3695,6 +3759,19 @@ class _HomePageState extends State<HomePage> {
         if (!canShow || _isProfileSetupClosing) return;
         setState(() {
           _isProfileSetupPanelVisible = true;
+        });
+      });
+    }
+    if (showInitialAdoption &&
+        !_isInitialAdoptionPanelClosing &&
+        !_isInitialAdoptionPanelVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final canShow =
+            _status == _ViewStatus.ready && _isProfileComplete() && _activePet == null;
+        if (!canShow || _isInitialAdoptionPanelClosing) return;
+        setState(() {
+          _isInitialAdoptionPanelVisible = true;
         });
       });
     }
@@ -3712,8 +3789,7 @@ class _HomePageState extends State<HomePage> {
           ),
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
-        if (_status == _ViewStatus.ready && profileComplete && !hasActivePet)
-          _buildInYardAdoptionPanel(),
+        if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
         _buildInYardDebugPanel(),
       ],
     );
@@ -3892,9 +3968,9 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildInYardProfileSetupPanel({required bool visible}) {
     return Positioned(
-      left: 270,
+      left: 286,
       top: 83,
-      width: 304,
+      width: 272,
       height: 224,
       child: IgnorePointer(
         ignoring: !visible,
@@ -3928,7 +4004,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                   child: Padding(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                     child: _buildProfileFormContent(),
                   ),
                 ),
@@ -3940,21 +4016,283 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildInYardAdoptionPanel() {
-    final children = _buildAdoptContent();
-    return _buildOverlayPanel(
-      width: 520,
-      height: 300,
-      left: 162,
-      top: 45,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
+  Widget _buildInYardInitialAdoptionPanel() {
+    final visible = _isInitialAdoptionPanelVisible;
+    return Positioned(
+      left: _kInitialAdoptionPanelLeft,
+      top: _kInitialAdoptionPanelTop,
+      width: _kInitialAdoptionPanelWidth,
+      height: _kInitialAdoptionPanelHeight,
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 230),
+          curve: Curves.easeOutCubic,
+          opacity: visible ? 1 : 0,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 230),
+            curve: Curves.easeOutCubic,
+            scale: visible ? 1 : 0.985,
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 230),
+              curve: Curves.easeOutCubic,
+              offset: visible ? Offset.zero : const Offset(0, 0.02),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.07),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                      child: _buildInitialAdoptionPanelContent(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  List<Map<String, dynamic>> _initialAdoptionSpeciesByFamily(
+    List<String> familyHints,
+  ) {
+    final hints = familyHints.map((e) => e.toLowerCase()).toList();
+    final filtered = _petSpecies.where((species) {
+      final family = species['family']?.toString().toLowerCase().trim() ?? '';
+      if (family.isEmpty) return false;
+      return hints.any(family.contains);
+    }).toList();
+    return filtered.take(3).toList();
+  }
+
+  Widget _buildInitialAdoptionSpeciesCell({
+    required Map<String, dynamic>? species,
+    required bool isDogFamily,
+  }) {
+    if (species == null) return const SizedBox(width: 76);
+    final id = species['id']?.toString();
+    final speciesName =
+        species['name_ko']?.toString().trim().isNotEmpty == true
+            ? species['name_ko']?.toString().trim() ?? '-'
+            : species['code']?.toString().trim().isNotEmpty == true
+                ? species['code']?.toString().trim() ?? '-'
+                : '-';
+    final isSelected = id != null && id == _selectedSpeciesId;
+    final iconData = isDogFamily ? Icons.pets : Icons.cruelty_free;
+    final backgroundColor = isDogFamily
+        ? const Color(0xFFE8F2FF)
+        : const Color(0xFFF4ECFF);
+
+    return SizedBox(
+      width: 76,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: id == null
+            ? null
+            : () {
+                _safeSetState(() {
+                  _selectedSpeciesId = isSelected ? null : id;
+                });
+              },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedScale(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              scale: isSelected ? 1.03 : 1,
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFFDCEAFF)
+                      : backgroundColor,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFFA9C9FF)
+                        : const Color(0xFFE6E6E6),
+                    width: isSelected ? 1.4 : 1,
+                  ),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFFA9C9FF).withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Icon(iconData, size: 28, color: const Color(0xFF3A3A3A)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              speciesName,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+                height: 1.0,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInitialAdoptionSpeciesRow({
+    required List<Map<String, dynamic>> species,
+    required bool isDogFamily,
+  }) {
+    return SizedBox(
+      height: 70,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          ...List<Widget>.generate(3, (index) {
+            final item = index < species.length ? species[index] : null;
+            return _buildInitialAdoptionSpeciesCell(
+              species: item,
+              isDogFamily: isDogFamily,
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInitialAdoptionReceiveButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 36,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: const Color(0xFFF1F1F1),
+            width: 0.8,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: TextButton(
+          onPressed: (_isAdopting || _selectedSpeciesId == null)
+              ? null
+              : _adoptSelectedPet,
+          style: TextButton.styleFrom(
+            elevation: 0,
+            shadowColor: Colors.transparent,
+            backgroundColor: Colors.transparent,
+            disabledBackgroundColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            padding: EdgeInsets.zero,
+          ),
+          child: _isAdopting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFFA8C9FF),
+                  ),
+                )
+              : ShaderMask(
+                  shaderCallback: (bounds) => const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
+                  ).createShader(bounds),
+                  blendMode: BlendMode.srcIn,
+                  child: Text(
+                    '분양받기!',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFAFCFFF),
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInitialAdoptionPanelContent() {
+    final l10n = AppLocalizations.of(context);
+    final dogSpecies = _initialAdoptionSpeciesByFamily(['dog', '강아지', '댕']);
+    final catSpecies = _initialAdoptionSpeciesByFamily(['cat', '고양이', '냥']);
+    final titleText = Localizations.localeOf(context).languageCode == 'ko'
+        ? '베지펫을 분양 받을 차례에요!'
+        : l10n.initialAdoptionTitle;
+    const titleStyle = TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          titleText,
+          textAlign: TextAlign.left,
+          style: titleStyle,
+        ),
+        const SizedBox(height: 12),
+        _buildInitialAdoptionSpeciesRow(
+          species: dogSpecies,
+          isDogFamily: true,
+        ),
+        const SizedBox(height: 10),
+        _buildInitialAdoptionSpeciesRow(
+          species: catSpecies,
+          isDogFamily: false,
+        ),
+        const Spacer(),
+        _buildInitialAdoptionReceiveButton(),
+      ],
+    );
+  }
+
+  Widget _buildInYardAdoptionPanel() {
+    return _buildInYardInitialAdoptionPanel();
   }
 
   Widget _buildInYardDebugPanel() {
@@ -7233,6 +7571,8 @@ class _HomePageState extends State<HomePage> {
         _uploadingSlot = null;
         _isInteracting = false;
         _isUsingRandomTicket = false;
+        _isInitialAdoptionPanelVisible = false;
+        _isInitialAdoptionPanelClosing = false;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -8232,13 +8572,13 @@ class _HomePageState extends State<HomePage> {
     const fieldTextStyle = TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF3A3A3A),
+      color: Color(0xFF4A4A4A),
       height: 1.0,
     );
 
     Widget iosFieldShell({required Widget child}) {
       return Container(
-        width: 200,
+        width: 176,
         height: 26,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
@@ -8259,12 +8599,12 @@ class _HomePageState extends State<HomePage> {
       return Positioned(
         top: top,
         left: 0,
-        width: 272,
+        width: 244,
         height: 26,
         child: Row(
           children: [
             SizedBox(
-              width: 64,
+              width: 60,
               child: Text(
                 label,
                 textAlign: TextAlign.left,
@@ -8272,14 +8612,14 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(width: 8),
-            SizedBox(width: 200, height: 26, child: field),
+            SizedBox(width: 176, height: 26, child: field),
           ],
         ),
       );
     }
 
     return SizedBox(
-      width: 272,
+      width: 244,
       height: 196,
       child: Stack(
         children: [
@@ -8298,14 +8638,30 @@ class _HomePageState extends State<HomePage> {
             field: iosFieldShell(
               child: TextField(
                 controller: _nicknameController,
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) {
+                  _enforceProfileNicknameMaxLength();
+                  setState(() {});
+                },
                 onTapOutside: (_) => _dismissFocus(),
                 textAlign: TextAlign.left,
                 style: fieldTextStyle,
                 maxLines: 1,
+                maxLength: _kProfileNicknameMaxLength,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
                 inputFormatters: [
-                  LengthLimitingTextInputFormatter(20),
+                  LengthLimitingTextInputFormatter(
+                    _kProfileNicknameMaxLength,
+                    maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                  ),
                 ],
+                buildCounter: (
+                  BuildContext context, {
+                  required int currentLength,
+                  required bool isFocused,
+                  required int? maxLength,
+                }) {
+                  return null;
+                },
                 decoration: const InputDecoration(
                   isDense: true,
                   border: InputBorder.none,
@@ -8350,7 +8706,7 @@ class _HomePageState extends State<HomePage> {
           Positioned(
             top: 158,
             left: 0,
-            width: 272,
+            width: 244,
             height: 36,
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -8412,95 +8768,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-    );
-  }
-
-  // ---------- 첫 펫 분양 (active pet 없음) ----------
-
-  List<Widget> _buildAdoptContent() {
-    final theme = Theme.of(context);
-    return [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '첫 펫을 선택해주세요',
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '함께할 첫 베지펫을 분양받아보세요.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: Colors.grey[700]),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 12),
-      if (_petSpecies.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(child: Text('표시할 펫이 없어요.')),
-        )
-      else
-        _buildSpeciesGrid(),
-      const SizedBox(height: 16),
-      SizedBox(
-        height: 52,
-        child: FilledButton.icon(
-          onPressed: (_selectedSpeciesId != null && !_isAdopting)
-              ? _adoptSelectedPet
-              : null,
-          icon: _isAdopting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.favorite),
-          label: Text(_isAdopting ? '분양 중...' : '이 펫과 시작하기'),
-        ),
-      ),
-    ];
-  }
-
-  Widget _buildSpeciesGrid() {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _petSpecies.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.05,
-      ),
-      itemBuilder: (context, index) {
-        final species = _petSpecies[index];
-        final id = species['id']?.toString();
-        final name = species['name_ko']?.toString() ?? '-';
-        final family = species['family']?.toString() ?? '';
-        final familyKo = _familyToKorean(family);
-        final isSelected = id != null && id == _selectedSpeciesId;
-
-        return _SpeciesCard(
-          name: name,
-          familyKo: familyKo,
-          family: family,
-          selected: isSelected,
-          onTap: id == null
-              ? null
-              : () {
-                  setState(() {
-                    _selectedSpeciesId = isSelected ? null : id;
-                  });
-                },
-        );
-      },
     );
   }
 
@@ -8872,94 +9139,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SpeciesCard extends StatelessWidget {
-  final String name;
-  final String familyKo;
-  final String family;
-  final bool selected;
-  final VoidCallback? onTap;
-
-  const _SpeciesCard({
-    required this.name,
-    required this.familyKo,
-    required this.family,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bg = selected
-        ? theme.colorScheme.primaryContainer
-        : theme.colorScheme.surface;
-    final borderColor = selected
-        ? theme.colorScheme.primary
-        : Colors.grey.withValues(alpha: 0.3);
-    final icon = family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined;
-    final tagColor = family == 'cat'
-        ? Colors.orange.withValues(alpha: 0.15)
-        : Colors.blue.withValues(alpha: 0.15);
-
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: borderColor,
-              width: selected ? 2 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: tagColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      familyKo,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                  ),
-                  const Spacer(),
-                  if (selected)
-                    Icon(Icons.check_circle,
-                        size: 20, color: theme.colorScheme.primary),
-                ],
-              ),
-              const Spacer(),
-              Center(
-                child: Icon(icon,
-                    size: 48, color: theme.colorScheme.onSurface),
-              ),
-              const Spacer(),
-              Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
