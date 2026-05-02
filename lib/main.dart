@@ -349,6 +349,8 @@ class _HomePageState extends State<HomePage> {
   bool _isProfileSetupPanelVisible = false;
   bool _isProfileSetupClosing = false;
   bool _isSavingProfile = false;
+  bool _isNamingDialogOpen = false;
+  bool _canShowActivePetDuringNaming = false;
 
   static const List<String> _genderOptions = ['여자', '남자'];
   static const List<String> _ageRangeOptions = [
@@ -361,6 +363,8 @@ class _HomePageState extends State<HomePage> {
   static const List<String> _dietGoalOptions = ['다이어트', '근력향상', '혈당조정'];
 
   bool _debugExpanded = false;
+  /// 개발 확인용 디버그 오버레이 창 열림 (버튼으로 토글).
+  bool _isDebugPanelOpen = false;
   bool _isInteracting = false;
 
   // 가방 안의 랜덤 분양권(user_items.quantity 합계) 상태.
@@ -415,6 +419,11 @@ class _HomePageState extends State<HomePage> {
   bool _isToyDropHovering = false;
   bool _isCompletingToyPlay = false;
   bool _isPetInfoBannerOpen = false;
+  /// 마당 펫 터치 쓰다듬기: 하루·펫당 랜덤 목표 탭 수(3~5) 충족 시 [_interactPet] 호출.
+  int _petPettingTapCount = 0;
+  int? _petPettingRequiredTaps;
+  String? _petPettingTargetDate;
+  String? _petPettingTargetPetId;
   Timer? _emailOtpCooldownTimer;
   int _emailOtpCooldownSeconds = 0;
   final FlutterLocalNotificationsPlugin _notifications =
@@ -2248,6 +2257,85 @@ class _HomePageState extends State<HomePage> {
     return '${d.year}-$m-$day';
   }
 
+  bool _isActivePetPettedToday() {
+    if (_activePet == null) return false;
+    return _activePet!['last_petted_on']?.toString() == _todayDateStr();
+  }
+
+  void _ensurePettingTapTarget() {
+    final today = _todayDateStr();
+    final petId = _activePet?['id']?.toString();
+    if (petId == null) return;
+
+    if (_petPettingRequiredTaps == null ||
+        _petPettingTargetDate != today ||
+        _petPettingTargetPetId != petId) {
+      _petPettingTapCount = 0;
+      _petPettingRequiredTaps = 3 + Random().nextInt(3);
+      _petPettingTargetDate = today;
+      _petPettingTargetPetId = petId;
+    }
+  }
+
+  /// 프로필/분양/이름창 등이 열리거나 장난감 모드일 때 마당 펫 탭 비활성.
+  bool _isYardPetTapBlocked() {
+    if (_activePet == null) return true;
+    if (_isInteracting) return true;
+    if (_isToyMenuOpen || _isCompletingToyPlay) return true;
+    if (_isNamingDialogOpen && !_canShowActivePetDuringNaming) return true;
+    if (_status != _ViewStatus.ready) return true;
+    if (!_isProfileComplete()) return true;
+    return false;
+  }
+
+  Future<void> _onYardPetTapped() async {
+    if (_isYardPetTapBlocked()) return;
+    if (_isActivePetPettedToday()) return;
+
+    _ensurePettingTapTarget();
+    _petPettingTapCount += 1;
+    _safeSetState(() {});
+
+    final required = _petPettingRequiredTaps ?? 3;
+    if (_petPettingTapCount < required) {
+      return;
+    }
+
+    _petPettingTapCount = 0;
+    _petPettingRequiredTaps = null;
+
+    await _interactPet('pet');
+  }
+
+  /// 프로필 입력창 「시작하기!」와 동일 그라데이션 텍스트 (먹이주기/놀아주기 등 공통).
+  Widget _buildPastelBlueGradientButtonText(
+    String text, {
+    double fontSize = 14,
+    FontWeight fontWeight = FontWeight.w600,
+  }) {
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0xFFA9C9FF),
+          Color(0xFFBFD9FF),
+        ],
+      ).createShader(bounds),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: fontWeight,
+          color: Colors.white,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+
   // 식단일지/식단 인증과 동일하게 KST(UTC+9) 기준 "오늘" 날짜.
   DateTime _todayKstDate() {
     return DateTime.now().toUtc().add(const Duration(hours: 9));
@@ -2265,7 +2353,7 @@ class _HomePageState extends State<HomePage> {
       _isInitialAdoptionPanelClosing = true;
       _isInitialAdoptionPanelVisible = false;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 230));
+    await Future<void>.delayed(const Duration(milliseconds: 240));
     if (!mounted) return;
     _safeSetState(() {
       _isInitialAdoptionPanelClosing = false;
@@ -2321,10 +2409,6 @@ class _HomePageState extends State<HomePage> {
         _isInitialAdoptionInFlight = false;
       });
 
-      // 첫 분양 화면 → 마당 화면 으로 큰 전환이 발생한 직후에 곧바로
-      // Dialog 를 띄우면 element 트리 정리가 끝나기 전에 새 route 가 push 되어
-      // dispose 타이밍 오류가 날 수 있다. 한 frame 양보 후 띄운다.
-      await _waitForUiSettle();
       if (!mounted) return;
       await _showNicknameDialog();
     } catch (e) {
@@ -2359,12 +2443,26 @@ class _HomePageState extends State<HomePage> {
 
     _dismissFocus();
 
+    // 이름 짓기 창 fade-in 과 마당 activePet 표시를 같은 전환에서 같이 켠다.
+    _safeSetState(() {
+      _isNamingDialogOpen = true;
+      _canShowActivePetDuringNaming = true;
+    });
+
     final nickname = await showDialog<String>(
       context: _rootNavigatorKey.currentContext ?? context,
       barrierDismissible: false,
+      barrierColor: Colors.transparent,
       useRootNavigator: true,
-      builder: (ctx) => const _PetNicknameDialog(),
+      builder: (ctx) => _PetNicknameDialog(activePet: pet),
     );
+
+    if (mounted) {
+      _safeSetState(() {
+        _isNamingDialogOpen = false;
+        _canShowActivePetDuringNaming = false;
+      });
+    }
 
     if (!mounted || nickname == null) return;
 
@@ -2465,6 +2563,8 @@ class _HomePageState extends State<HomePage> {
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionInFlight = false;
+        _isNamingDialogOpen = false;
+        _canShowActivePetDuringNaming = false;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -2589,6 +2689,8 @@ class _HomePageState extends State<HomePage> {
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionInFlight = false;
+        _isNamingDialogOpen = false;
+        _canShowActivePetDuringNaming = false;
         _isAdopting = false;
         _isSavingProfile = false;
         _isLoggingMeal = false;
@@ -3680,10 +3782,7 @@ class _HomePageState extends State<HomePage> {
 
       _showSnack('새 베지펫이 분양되었어요!');
 
-      // 6) 새 펫이 마당 화면에 자리잡은 뒤(한 frame 양보) 이름 짓기 다이얼로그 표시.
-      await _waitForUiSettle();
       if (!mounted) return;
-
       await _showNicknameDialog();
     } finally {
       if (mounted) {
@@ -3794,6 +3893,7 @@ class _HomePageState extends State<HomePage> {
       children: [
         _buildYardBaseLayer(),
         _buildYardPetLayer(),
+        _buildInYardDebugPanel(),
         _buildTopHudLayer(),
         if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
         if (_status == _ViewStatus.error)
@@ -3804,7 +3904,6 @@ class _HomePageState extends State<HomePage> {
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
-        _buildInYardDebugPanel(),
       ],
     );
   }
@@ -3834,6 +3933,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildYardPetLayer() {
+    if (_isNamingDialogOpen && !_canShowActivePetDuringNaming) {
+      return const SizedBox.shrink();
+    }
     if (_activePet == null) return const SizedBox.shrink();
     return Positioned.fill(
       child: Stack(
@@ -3863,49 +3965,54 @@ class _HomePageState extends State<HomePage> {
           Positioned.fill(
             child: IgnorePointer(
               ignoring: !_isPetInfoBannerOpen,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                opacity: _isPetInfoBannerOpen ? 1 : 0,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _closePetInfoBanner,
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.12),
-                  ),
-                ),
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closePetInfoBanner,
+                child: const SizedBox.expand(),
               ),
             ),
           ),
           _buildPetInfoSlideBanner(),
           Positioned(
-            top: 16,
-            left: 16,
+            left: 40,
+            top: 40,
+            width: 64,
+            height: 64,
             child: IgnorePointer(
               ignoring: _isPetInfoBannerOpen,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOutCubic,
                 opacity: _isPetInfoBannerOpen ? 0 : 1,
-                child: _cornerIconButton(
-                  icon: Icons.pets,
-                  tooltip: l10n.petInfoTooltip,
-                  iconSize: 26,
-                  padding: 11,
-                  onTap: _togglePetInfoBanner,
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: _cornerIconButton(
+                    icon: Icons.pets,
+                    tooltip: l10n.petInfoTooltip,
+                    iconSize: 28,
+                    padding: 18,
+                    onTap: _togglePetInfoBanner,
+                  ),
                 ),
               ),
             ),
           ),
           Positioned(
-            top: 16,
-            right: 16,
-            child: _cornerIconButton(
-              icon: Icons.apps_rounded,
-              tooltip: l10n.gameMenuTooltip,
-              iconSize: 26,
-              padding: 11,
-              onTap: _openMenuSheet,
+            left: 740,
+            top: 40,
+            width: 64,
+            height: 64,
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: _cornerIconButton(
+                icon: Icons.apps_rounded,
+                tooltip: l10n.gameMenuTooltip,
+                iconSize: 28,
+                padding: 18,
+                onTap: _openMenuSheet,
+              ),
             ),
           ),
           if (_isToyMenuOpen)
@@ -4040,41 +4147,37 @@ class _HomePageState extends State<HomePage> {
       child: IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 230),
+          duration: const Duration(milliseconds: 240),
           curve: Curves.easeOutCubic,
           opacity: visible ? 1 : 0,
           child: AnimatedScale(
-            duration: const Duration(milliseconds: 230),
+            duration: const Duration(milliseconds: 240),
             curve: Curves.easeOutCubic,
-            scale: visible ? 1 : 0.985,
-            child: AnimatedSlide(
-              duration: const Duration(milliseconds: 230),
-              curve: Curves.easeOutCubic,
-              offset: visible ? Offset.zero : const Offset(0, 0.02),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
-                        width: 1,
+            alignment: Alignment.center,
+            scale: visible ? 1 : 0.98,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.07),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.07),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                      child: _buildInitialAdoptionPanelContent(),
-                    ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                    child: _buildInitialAdoptionPanelContent(),
                   ),
                 ),
               ),
@@ -4310,21 +4413,142 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildInYardDebugPanel() {
-    return Positioned(
-      left: 16,
-      right: 16,
-      bottom: 10,
+    return Positioned.fill(
       child: IgnorePointer(
         ignoring: _status != _ViewStatus.ready,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 180),
-          opacity: _status == _ViewStatus.ready ? 1 : 0,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            if (_isDebugPanelOpen)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () =>
+                      _safeSetState(() => _isDebugPanelOpen = false),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.14),
+                  ),
+                ),
+              ),
+            if (_isDebugPanelOpen)
+              Positioned(
+                left: 96,
+                top: 40,
+                width: 700,
+                height: 310,
+                child: _buildDebugFloatingWindow(),
+              ),
+            Positioned(
+              left: 40,
+              top: 114,
+              width: 48,
+              height: 48,
+              child: _buildDebugFloatingButton(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDebugFloatingButton() {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: '개발 확인용 디버그',
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.95),
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () =>
+              _safeSetState(() => _isDebugPanelOpen = !_isDebugPanelOpen),
           child: SizedBox(
-            height: 58,
-            child: SingleChildScrollView(
-              child: _buildDebugSection(),
+            width: 48,
+            height: 48,
+            child: Center(
+              child: Icon(
+                Icons.bug_report_outlined,
+                size: 24,
+                color: theme.colorScheme.primary,
+              ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDebugFloatingWindow() {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(19),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBF5).withValues(alpha: 0.78),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(
+            color: const Color(0xFFF0EBE3).withValues(alpha: 0.95),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    '개발 확인용 디버그',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '닫기',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      Icons.close,
+                      size: 22,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isDebugPanelOpen = false),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 14, right: 14, bottom: 6),
+              child: Text(
+                '앱 사용자에게는 보이지 않을 영역',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+                child: _buildDebugSection(
+                  useOuterCard: false,
+                  hideExpansionHeader: true,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -4413,33 +4637,34 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildPetInfoSlideBanner() {
     final isOpen = _isPetInfoBannerOpen && _activePet != null;
-    const topInset = 10.0;
-    const bottomInset = 12.0;
-    const sideInset = 10.0;
+    const panelW = 246.0;
+    const panelH = 310.0;
+    const openLeft = 40.0;
+    final closedLeft = -panelW - 12;
 
-    return LayoutBuilder(
-      builder: (ctx, constraints) {
-        final panelWidth = (constraints.maxWidth * 0.36).clamp(240.0, 360.0);
-        final closedLeft = -panelWidth - 24;
-        return AnimatedPositioned(
-          duration: const Duration(milliseconds: 260),
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      left: isOpen ? openLeft : closedLeft,
+      top: 40,
+      width: panelW,
+      height: panelH,
+      child: IgnorePointer(
+        ignoring: !isOpen,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 240),
           curve: Curves.easeOutCubic,
-          top: topInset,
-          bottom: bottomInset,
-          left: isOpen ? sideInset : closedLeft,
-          width: panelWidth,
-          child: IgnorePointer(
-            ignoring: !isOpen,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              opacity: isOpen ? 1 : 0,
-              child: _buildPetInfoBannerContent(),
-            ),
-          ),
-        );
-      },
+          opacity: isOpen ? 1 : 0,
+          child: _buildPetInfoBannerContent(),
+        ),
+      ),
     );
+  }
+
+  String _petInfoMealButtonShortLabel() {
+    final code = Localizations.localeOf(context).languageCode;
+    if (code == 'ko') return '먹이주기';
+    return 'Feed';
   }
 
   Widget _buildPetInfoBannerContent() {
@@ -4451,7 +4676,7 @@ class _HomePageState extends State<HomePage> {
     final species = pet['pet_species'] is Map
         ? Map<String, dynamic>.from(pet['pet_species'] as Map)
         : <String, dynamic>{};
-    final family = species['family']?.toString() ?? '';
+    final family = species['family']?.toString().toLowerCase() ?? '';
     final speciesName = species['name_ko']?.toString() ?? '펫';
     final nickname = pet['nickname']?.toString();
     final displayName =
@@ -4461,242 +4686,364 @@ class _HomePageState extends State<HomePage> {
     final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
     final today = _todayDateStr();
     final playedToday = pet['last_played_on']?.toString() == today;
-    final pettedToday = pet['last_petted_on']?.toString() == today;
+    final affectionInfo = _affectionProgressInfo(affectionValue, l10n);
+    final petIcon = family.contains('cat')
+        ? Icons.pets
+        : Icons.cruelty_free_outlined;
 
-    return Material(
-      color: Colors.transparent,
-      child: SafeArea(
-        bottom: false,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
+    // 이름·종류·단계 행과 동일한 가로 기준 (단계 라벨 좌변 ~ 우측 정보창 우변).
+    const petInfoPanelInnerW = 246.0;
+    const petInfoMetaRowLeft = 14.0;
+    const petInfoMetaRowRightInset = 18.0;
+    const petInfoContentLeft = petInfoMetaRowLeft;
+    const petInfoContentWidth =
+        petInfoPanelInnerW - petInfoMetaRowLeft - petInfoMetaRowRightInset;
+
+    const labelStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const valueStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+
+    Widget metaValueBox(String text) {
+      return Container(
+        height: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.52),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.45),
+            width: 0.8,
+          ),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: valueStyle,
+        ),
+      );
+    }
+
+    Widget pillButton({
+      required String label,
+      required VoidCallback? onTap,
+    }) {
+      final disabled = onTap == null;
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Ink(
+            height: 34,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.84),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: const Color(0xFFF1F1F1),
+                width: 0.8,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.chevron_left_rounded,
-                        size: 18,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 2),
-                      Expanded(
-                        child: Text(
-                          l10n.petInfoTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      InkWell(
-                        onTap: _closePetInfoBanner,
-                        borderRadius: BorderRadius.circular(99),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(Icons.close_rounded, size: 18),
-                        ),
-                      ),
-                    ],
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Opacity(
+                  opacity: disabled ? 0.45 : 1,
+                  child: _buildPastelBlueGradientButtonText(
+                    label,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                width: 52,
-                                height: 52,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.08),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Icon(
-                                  family == 'cat'
-                                      ? Icons.pets
-                                      : Icons.cruelty_free_outlined,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _petInfoMetaChip(
-                                      label: l10n.petInfoNameLabel,
-                                      value: displayName,
-                                    ),
-                                    const SizedBox(height: 5),
-                                    _petInfoMetaChip(
-                                      label: l10n.petInfoSpeciesLabel,
-                                      value: speciesName,
-                                    ),
-                                    const SizedBox(height: 5),
-                                    _petInfoMetaChip(
-                                      label: l10n.petInfoStageLabel,
-                                      value: stageKo,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _buildAffectionProgressCard(affectionValue),
-                          const SizedBox(height: 8),
-                          _bannerActionButton(
-                            label: l10n.petInfoFeedAction,
-                            icon: Icons.restaurant_rounded,
-                            onTap: _isInteracting
-                                ? null
-                                : () => _onPetInfoBannerAction('meal'),
-                          ),
-                          const SizedBox(height: 7),
-                          _bannerActionButton(
-                            label: l10n.petInfoPlayAction,
-                            icon: Icons.toys_outlined,
-                            onTap: (_isInteracting || playedToday)
-                                ? null
-                                : () => _onPetInfoBannerAction('play'),
-                          ),
-                          const SizedBox(height: 7),
-                          _bannerActionButton(
-                            label: l10n.petInfoPetAction,
-                            icon: Icons.back_hand_outlined,
-                            onTap: (_isInteracting || pettedToday)
-                                ? null
-                                : () => _onPetInfoBannerAction('pet'),
-                          ),
-                          const SizedBox(height: 7),
-                          Text(
-                            l10n.petInfoMealTimeGuide,
-                            textAlign: TextAlign.center,
-                            softWrap: true,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontSize: 10.5,
-                              height: 1.3,
-                              fontWeight: FontWeight.w600,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: 7),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            alignment: WrapAlignment.center,
-                            children: [
-                              _interactionStatusChip(
-                                l10n.petInfoPlayAction,
-                                playedToday,
-                              ),
-                              _interactionStatusChip(
-                                l10n.petInfoPetAction,
-                                pettedToday,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: 246,
+            height: 310,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                Positioned(
+                  left: 14,
+                  top: 14,
+                  right: 14,
+                  child: Text(
+                    l10n.petInfoTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF000000),
+                      height: 1.0,
                     ),
                   ),
-                ],
+                ),
+                // 더미 아이콘: 패널 상단 가로 중앙 (246-48)/2 = 99
+                Positioned(
+                  left: 99,
+                  top: 37,
+                  width: 48,
+                  height: 48,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFFD8D8D8),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Icon(
+                      petIcon,
+                      size: 26,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+                // 이름 / 종류 / 단계: 아이콘 아래 세로 정렬 (좌우 동일 여백 14 / 18)
+                Positioned(
+                  left: petInfoMetaRowLeft,
+                  right: petInfoMetaRowRightInset,
+                  top: 94,
+                  height: 24,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 38,
+                        child: Text(
+                          l10n.petInfoNameLabel,
+                          style: labelStyle,
+                        ),
+                      ),
+                      Expanded(child: metaValueBox(displayName)),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: petInfoMetaRowLeft,
+                  right: petInfoMetaRowRightInset,
+                  top: 122,
+                  height: 24,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 38,
+                        child: Text(
+                          l10n.petInfoSpeciesLabel,
+                          style: labelStyle,
+                        ),
+                      ),
+                      Expanded(child: metaValueBox(speciesName)),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: petInfoMetaRowLeft,
+                  right: petInfoMetaRowRightInset,
+                  top: 150,
+                  height: 24,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 38,
+                        child: Text(
+                          l10n.petInfoStageLabel,
+                          style: labelStyle,
+                        ),
+                      ),
+                      Expanded(child: metaValueBox(stageKo)),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: petInfoContentLeft,
+                  top: 182,
+                  width: petInfoContentWidth,
+                  height: 10,
+                  child: _buildPetInfoPanelAffectionBar(affectionInfo),
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  top: 194,
+                  child: Text(
+                    '💕 ${affectionInfo.label}',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      height: 1.15,
+                    ),
+                  ),
+                ),
+                // 먹이주기 / 놀아주기: 이름·종류·단계 행과 동일 가로 폭. 놀아주기 top = 310-14-34.
+                Positioned(
+                  left: petInfoContentLeft,
+                  top: 217,
+                  width: petInfoContentWidth,
+                  height: 34,
+                  child: pillButton(
+                    label: _petInfoMealButtonShortLabel(),
+                    onTap: _isInteracting
+                        ? null
+                        : () => _onPetInfoBannerAction('meal'),
+                  ),
+                ),
+                Positioned(
+                  left: 172,
+                  top: 211,
+                  child: IgnorePointer(
+                    child: _buildPetInfoDietBubble(),
+                  ),
+                ),
+                Positioned(
+                  left: petInfoContentLeft,
+                  top: 262,
+                  width: petInfoContentWidth,
+                  height: 34,
+                  child: pillButton(
+                    label: l10n.petInfoPlayAction,
+                    onTap: (_isInteracting || playedToday)
+                        ? null
+                        : () => _onPetInfoBannerAction('play'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPetInfoDietBubble() {
+    return SizedBox(
+      width: 68,
+      height: 20,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.centerLeft,
+        children: [
+          Container(
+            width: 68,
+            height: 18,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              color: const Color(0xFFFFFFD0),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.55),
+                width: 0.6,
+              ),
+            ),
+            child: const Text(
+              '식단 인증!',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+                height: 1.0,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 2,
+            bottom: -1,
+            child: Transform.rotate(
+              angle: -0.35,
+              child: Container(
+                width: 7,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFFD0),
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPetInfoPanelAffectionBar(_AffectionProgressInfo info) {
+    final p = info.progress.clamp(0.0, 1.0);
+    return Container(
+      height: 10,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.55),
+          width: 0.8,
+        ),
+        color: Colors.white.withValues(alpha: 0.28),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(999),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: p,
+            heightFactor: 1,
+            alignment: Alignment.centerLeft,
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                color: Color(0xFFFFD7FA),
               ),
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _petInfoMetaChip({
-    required String label,
-    required String value,
-  }) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        '$label  $value',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(
-          fontWeight: FontWeight.w700,
-          color: theme.colorScheme.onSurface,
-        ),
-      ),
-    );
-  }
-
-  Widget _bannerActionButton({
-    required String label,
-    required IconData icon,
-    String? subtitle,
-    VoidCallback? onTap,
-  }) {
-    return _SoftActionButton(
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                ),
-                if (subtitle != null && subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      height: 1.3,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_right_rounded, size: 18),
-        ],
       ),
     );
   }
@@ -5008,45 +5355,49 @@ class _HomePageState extends State<HomePage> {
     final displayName =
         (nickname == null || nickname.isEmpty) ? speciesName : nickname;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.9),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(
-            family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
-            size: 40,
-            color: theme.colorScheme.primary,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.35),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Text(
-            '$displayName이(가) 마당에서 기다리고 있어요',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_onYardPetTapped()),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.9),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(
+              family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
+              size: 40,
+              color: theme.colorScheme.primary,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              '$displayName이(가) 마당에서 기다리고 있어요',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -8759,23 +9110,10 @@ class _HomePageState extends State<HomePage> {
                           color: Color(0xFFA8C9FF),
                         ),
                       )
-                    : ShaderMask(
-                        shaderCallback: (bounds) => const LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
-                        ).createShader(bounds),
-                        blendMode: BlendMode.srcIn,
-                        child: Text(
-                          '${l10n.start}!',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFFAFCFFF),
-                            height: 1.0,
-                          ),
-                        ),
+                    : _buildPastelBlueGradientButtonText(
+                        '${l10n.start}!',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
                       ),
               ),
             ),
@@ -8787,177 +9125,187 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- 디버그 섹션 ----------
 
-  Widget _buildDebugSection() {
+  List<Widget> _debugExpansionTileChildren() {
     final user = supabase.auth.currentUser;
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: _debugExpanded,
-          onExpansionChanged: (v) => setState(() => _debugExpanded = v),
-          leading: const Icon(Icons.bug_report_outlined),
-          title: const Text(
-            '개발 확인용 디버그',
-            style: TextStyle(fontWeight: FontWeight.w600),
+    return [
+      _debugBlock(
+        title: 'Auth',
+        children: [
+          _kv('user id', user?.id ?? '-'),
+          _kv('email', user?.email ?? '(없음)'),
+        ],
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'profiles',
+        children: _buildProfileRows(),
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'active user_pet',
+        children: _buildActivePetRows(),
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'today meal_logs (${_todayMealLogs.length}개)',
+        children: _buildTodayMealRows(),
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'last AI meal evaluation',
+        children: _buildLastAiResultRows(),
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'pet_species',
+        children: [
+          _kv('count', '${_petSpecies.length}종'),
+          _kv(
+            'cat',
+            '${_petSpecies.where((s) => s['family'] == 'cat').length}종',
           ),
-          subtitle: const Text(
-            '앱 사용자에게는 보이지 않을 영역',
-            style: TextStyle(fontSize: 12),
+          _kv(
+            'dog',
+            '${_petSpecies.where((s) => s['family'] == 'dog').length}종',
           ),
-          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          children: [
-            _debugBlock(
-              title: 'Auth',
-              children: [
-                _kv('user id', user?.id ?? '-'),
-                _kv('email', user?.email ?? '(없음)'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'profiles',
-              children: _buildProfileRows(),
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'active user_pet',
-              children: _buildActivePetRows(),
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'today meal_logs (${_todayMealLogs.length}개)',
-              children: _buildTodayMealRows(),
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'last AI meal evaluation',
-              children: _buildLastAiResultRows(),
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'pet_species',
-              children: [
-                _kv('count', '${_petSpecies.length}종'),
-                _kv(
-                  'cat',
-                  '${_petSpecies.where((s) => s['family'] == 'cat').length}종',
-                ),
-                _kv(
-                  'dog',
-                  '${_petSpecies.where((s) => s['family'] == 'dog').length}종',
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'user_items',
-              children: [
-                _kv('random_adoption_ticket', '$_randomTicketCount장'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _debugBlock(
-              title: 'pokedex',
-              children: [
-                _kv('loaded entries', '${_pokedexEntries.length}개'),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _refreshProfile,
-                  icon: const Icon(Icons.person_outline, size: 18),
-                  label: const Text('프로필 다시 조회'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _refreshActivePet,
-                  icon: const Icon(Icons.pets, size: 18),
-                  label: const Text('펫 정보 다시 조회'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _refreshSpecies,
-                  icon: const Icon(Icons.pets_outlined, size: 18),
-                  label: const Text('펫 목록 다시 조회'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _refreshAll,
-                  icon: const Icon(Icons.sync, size: 18),
-                  label: const Text('전체 새로고침'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _signOut,
-                  icon: const Icon(Icons.logout, size: 18),
-                  label: const Text('로그아웃'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _resetForTesting,
-                  icon: const Icon(Icons.delete_forever, size: 18),
-                  label: const Text('개발용 전체 초기화'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              '성장 단계 테스트',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _activePet == null
-                      ? null
-                      : () => _debugAdjustAffection(10),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('애정도 +10'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _activePet == null
-                      ? null
-                      : () => _debugAdjustAffection(50),
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text('애정도 +50'),
-                ),
-                OutlinedButton.icon(
-                  onPressed:
-                      _activePet == null ? null : _debugSetJustBeforeAdult,
-                  icon: const Icon(Icons.hourglass_bottom, size: 18),
-                  label: const Text('성숙기 직전 세팅(aff 109 / grown)'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _activePet == null ? null : _debugTriggerAdult,
-                  icon: const Icon(Icons.emoji_events_outlined, size: 18),
-                  label: const Text('성숙기 테스트 실행 (+1)'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _debugRefreshRandomTicket,
-                  icon: const Icon(Icons.confirmation_number_outlined,
-                      size: 18),
-                  label: const Text('랜덤 분양권 다시 조회'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _randomTicketCount > 0
-                      ? _debugUseRandomAdoptionTicket
-                      : null,
-                  icon: const Icon(Icons.card_giftcard_outlined, size: 18),
-                  label: const Text('랜덤 분양권 사용 테스트'),
-                ),
-              ],
-            ),
-          ],
+        ],
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'user_items',
+        children: [
+          _kv('random_adoption_ticket', '$_randomTicketCount장'),
+        ],
+      ),
+      const SizedBox(height: 12),
+      _debugBlock(
+        title: 'pokedex',
+        children: [
+          _kv('loaded entries', '${_pokedexEntries.length}개'),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _refreshProfile,
+            icon: const Icon(Icons.person_outline, size: 18),
+            label: const Text('프로필 다시 조회'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _refreshActivePet,
+            icon: const Icon(Icons.pets, size: 18),
+            label: const Text('펫 정보 다시 조회'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _refreshSpecies,
+            icon: const Icon(Icons.pets_outlined, size: 18),
+            label: const Text('펫 목록 다시 조회'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _refreshAll,
+            icon: const Icon(Icons.sync, size: 18),
+            label: const Text('전체 새로고침'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _signOut,
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('로그아웃'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _resetForTesting,
+            icon: const Icon(Icons.delete_forever, size: 18),
+            label: const Text('개발용 전체 초기화'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      const Text(
+        '성장 단계 테스트',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.grey,
         ),
       ),
+      const SizedBox(height: 6),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed:
+                _activePet == null ? null : () => _debugAdjustAffection(10),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('애정도 +10'),
+          ),
+          OutlinedButton.icon(
+            onPressed:
+                _activePet == null ? null : () => _debugAdjustAffection(50),
+            icon: const Icon(Icons.add_circle_outline, size: 18),
+            label: const Text('애정도 +50'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _activePet == null ? null : _debugSetJustBeforeAdult,
+            icon: const Icon(Icons.hourglass_bottom, size: 18),
+            label: const Text('성숙기 직전 세팅(aff 109 / grown)'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _activePet == null ? null : _debugTriggerAdult,
+            icon: const Icon(Icons.emoji_events_outlined, size: 18),
+            label: const Text('성숙기 테스트 실행 (+1)'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _debugRefreshRandomTicket,
+            icon:
+                const Icon(Icons.confirmation_number_outlined, size: 18),
+            label: const Text('랜덤 분양권 다시 조회'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _randomTicketCount > 0
+                ? _debugUseRandomAdoptionTicket
+                : null,
+            icon: const Icon(Icons.card_giftcard_outlined, size: 18),
+            label: const Text('랜덤 분양권 사용 테스트'),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _buildDebugSection({
+    bool useOuterCard = true,
+    bool hideExpansionHeader = false,
+  }) {
+    final inner = Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        initiallyExpanded: _debugExpanded,
+        onExpansionChanged: (v) => setState(() => _debugExpanded = v),
+        leading: hideExpansionHeader ? null : const Icon(Icons.bug_report_outlined),
+        title: hideExpansionHeader
+            ? const SizedBox.shrink()
+            : const Text(
+                '개발 확인용 디버그',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+        subtitle: hideExpansionHeader
+            ? null
+            : const Text(
+                '앱 사용자에게는 보이지 않을 영역',
+                style: TextStyle(fontSize: 12),
+              ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: _debugExpansionTileChildren(),
+      ),
+    );
+    if (!useOuterCard) return inner;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: inner,
     );
   }
 
@@ -9197,7 +9545,9 @@ class _BagItem {
 }
 
 class _PetNicknameDialog extends StatefulWidget {
-  const _PetNicknameDialog();
+  const _PetNicknameDialog({required this.activePet});
+
+  final Map<String, dynamic> activePet;
 
   @override
   State<_PetNicknameDialog> createState() => _PetNicknameDialogState();
@@ -9205,8 +9555,7 @@ class _PetNicknameDialog extends StatefulWidget {
 
 class _PetNicknameDialogState extends State<_PetNicknameDialog> {
   final TextEditingController _controller = TextEditingController();
-  final RegExp _pattern = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
-  String? _errorText;
+  bool _isClosing = false;
 
   @override
   void dispose() {
@@ -9214,65 +9563,320 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_isClosing) return;
     final text = _controller.text.trim();
 
     if (text.isEmpty) {
-      setState(() => _errorText = '이름을 입력해주세요.');
       return;
     }
-    if (text.length < 2 || text.length > 8) {
-      setState(() => _errorText = '이름은 2~8자로 입력해주세요.');
-      return;
-    }
-    if (!_pattern.hasMatch(text)) {
-      setState(() => _errorText = '특수문자는 사용할 수 없어요.');
+    if (text.characters.length > 8) {
+      final fixed = text.characters.take(8).toString();
+      _controller.value = TextEditingValue(
+        text: fixed,
+        selection: TextSelection.collapsed(offset: fixed.length),
+        composing: TextRange.empty,
+      );
       return;
     }
 
     // pop 직전 포커스 정리: TextField 가 살아 있는 채로 pop 되어
     // 트리 dispose 와 focus 정리 타이밍이 겹치는 것을 방지한다.
     FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isClosing = true);
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!mounted) return;
     Navigator.of(context).pop(text);
+  }
+
+  IconData _petIconData() {
+    final species = widget.activePet['pet_species'];
+    final family = species is Map
+        ? species['family']?.toString().toLowerCase().trim()
+        : null;
+    if (family != null && family.contains('dog')) return Icons.pets;
+    if (family != null && family.contains('cat')) return Icons.cruelty_free;
+    return Icons.pets;
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      title: const Text('아기 베지펫이 분양 되었어요🥹 건강하게 키워주세요~!'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('귀여운 이름을 지어주세요!'),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _controller,
-            // autofocus 는 일부러 false. Dialog open 직후 focus 요청과
-            // 화면 전환 frame 이 겹쳐 dispose 타이밍 오류가 났던 케이스를 회피.
-            autofocus: false,
-            maxLength: 8,
-            decoration: InputDecoration(
-              hintText: '예: 구름이',
-              border: const OutlineInputBorder(),
-              errorText: _errorText,
-              helperText: '한글·영문·숫자 2~8자 (공백/특수문자 불가)',
-              counterText: '',
-              isDense: true,
-            ),
-            onSubmitted: (_) => _submit(),
+    const titleStyle = TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const subtitleStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+    const labelStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const fieldTextStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+
+    return Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: Center(
+        child: SizedBox(
+          width: 844,
+          height: 390,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+              Positioned(
+                left: 286,
+                top: 91,
+                width: 272,
+                height: 208,
+                child: TweenAnimationBuilder<double>(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  tween: Tween<double>(begin: 0, end: _isClosing ? 0 : 1),
+                  builder: (context, value, child) {
+                    return Opacity(
+                      opacity: value,
+                      child: Transform.scale(
+                        scale: 0.985 + (0.015 * value),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.07),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Positioned(
+                              left: 14,
+                              top: 14,
+                              right: 14,
+                              child: Text(
+                                '아기 베지펫이 분양 되었어요🥹',
+                                textAlign: TextAlign.left,
+                                style: titleStyle,
+                              ),
+                            ),
+                            const Positioned(
+                              left: 14,
+                              top: 40,
+                              right: 14,
+                              child: Text(
+                                '건강하게 키워주세요!',
+                                textAlign: TextAlign.left,
+                                style: subtitleStyle,
+                              ),
+                            ),
+                            Positioned(
+                              left: 112,
+                              top: 60,
+                              width: 48,
+                              height: 48,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF5F5F5),
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(
+                                    color: const Color(0xFFB8B8B8),
+                                    width: 1,
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  _petIconData(),
+                                  size: 24,
+                                  color: const Color(0xFF3A3A3A),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: 14,
+                              top: 120,
+                              width: 244,
+                              height: 26,
+                              child: Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 36,
+                                    child: Text(
+                                      '이름',
+                                      textAlign: TextAlign.left,
+                                      style: labelStyle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Container(
+                                      height: 26,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: const Color(0xFFE6E6E6),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      alignment: Alignment.centerLeft,
+                                      child: TextField(
+                                        controller: _controller,
+                                        autofocus: false,
+                                        maxLines: 1,
+                                        maxLength: 8,
+                                        maxLengthEnforcement:
+                                            MaxLengthEnforcement.enforced,
+                                        style: fieldTextStyle,
+                                        inputFormatters: [
+                                          LengthLimitingTextInputFormatter(
+                                            8,
+                                            maxLengthEnforcement:
+                                                MaxLengthEnforcement.enforced,
+                                          ),
+                                        ],
+                                        buildCounter: (
+                                          BuildContext context, {
+                                          required int currentLength,
+                                          required bool isFocused,
+                                          required int? maxLength,
+                                        }) {
+                                          return null;
+                                        },
+                                        decoration: InputDecoration(
+                                          isDense: true,
+                                          border: InputBorder.none,
+                                          contentPadding: EdgeInsets.zero,
+                                          hintText: '이름을 지어주세요.',
+                                          hintStyle: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                            color: Color(0xFF9A9A9A),
+                                          ),
+                                          errorText: null,
+                                        ),
+                                        onTapOutside: (_) => FocusManager
+                                            .instance.primaryFocus
+                                            ?.unfocus(),
+                                        onSubmitted: (_) {
+                                          unawaited(_submit());
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Positioned(
+                              left: 14,
+                              top: 160,
+                              width: 244,
+                              height: 34,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: const Color(0xFFF1F1F1),
+                                    width: 0.8,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.03),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: TextButton(
+                                  onPressed: _isClosing
+                                      ? null
+                                      : () {
+                                          unawaited(_submit());
+                                        },
+                                  style: TextButton.styleFrom(
+                                    elevation: 0,
+                                    shadowColor: Colors.transparent,
+                                    backgroundColor: Colors.transparent,
+                                    disabledBackgroundColor: Colors.transparent,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                  ),
+                                  child: ShaderMask(
+                                    shaderCallback: (bounds) =>
+                                        const LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Color(0xFFA9C9FF),
+                                        Color(0xFFBFD9FF),
+                                      ],
+                                    ).createShader(bounds),
+                                    blendMode: BlendMode.srcIn,
+                                    child: const Text(
+                                      '저장',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFFAFCFFF),
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-      actions: [
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('저장'),
         ),
-      ],
+      ),
     );
   }
 }
@@ -9297,64 +9901,6 @@ class _AffectionProgressInfo {
   final double progress;
   final String label;
   final bool isComplete;
-}
-
-class _SoftActionButton extends StatefulWidget {
-  const _SoftActionButton({
-    required this.child,
-    this.onTap,
-  });
-
-  final Widget child;
-  final VoidCallback? onTap;
-
-  @override
-  State<_SoftActionButton> createState() => _SoftActionButtonState();
-}
-
-class _SoftActionButtonState extends State<_SoftActionButton> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final disabled = widget.onTap == null;
-    final bgColor = disabled
-        ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
-        : theme.colorScheme.primaryContainer.withValues(alpha: 0.86);
-    return GestureDetector(
-      onTapDown: disabled ? null : (_) => setState(() => _pressed = true),
-      onTapCancel: disabled ? null : () => setState(() => _pressed = false),
-      onTapUp: disabled ? null : (_) => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: TweenAnimationBuilder<double>(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        tween: Tween<double>(begin: 1, end: _pressed ? 0.97 : 1),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
-            ),
-          ),
-          child: Opacity(
-            opacity: disabled ? 0.55 : 1,
-            child: widget.child,
-          ),
-        ),
-        builder: (context, scale, child) {
-          return Transform.scale(
-            scale: scale,
-            alignment: Alignment.centerLeft,
-            child: child,
-          );
-        },
-      ),
-    );
-  }
 }
 
 // ============================================================================
