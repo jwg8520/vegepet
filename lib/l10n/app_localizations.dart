@@ -542,6 +542,12 @@ abstract class AppLocalizations {
   /// **'게임 메뉴'**
   String get gameMenuTooltip;
 
+  /// No description provided for @gameMenuPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'메뉴'**
+  String get gameMenuPanelTitle;
+
   /// No description provided for @profileSetupTitle.
   ///
   /// In ko, this message translates to:
@@ -625,6 +631,54 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'분양받기'**
   String get initialAdoptionReceiveButton;
+
+  /// No description provided for @mealPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'먹이주기'**
+  String get mealPanelTitle;
+
+  /// No description provided for @mealPanelTodayCertLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'오늘의 식단 인증!'**
+  String get mealPanelTodayCertLabel;
+
+  /// No description provided for @mealPanelBrunchButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'아점 식단'**
+  String get mealPanelBrunchButton;
+
+  /// No description provided for @mealPanelDinnerButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'저녁 식단'**
+  String get mealPanelDinnerButton;
+
+  /// No description provided for @mealPanelFootnote1.
+  ///
+  /// In ko, this message translates to:
+  /// **'아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시'**
+  String get mealPanelFootnote1;
+
+  /// No description provided for @mealPanelFootnote2.
+  ///
+  /// In ko, this message translates to:
+  /// **'실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.'**
+  String get mealPanelFootnote2;
+
+  /// No description provided for @mealPanelFootnote3.
+  ///
+  /// In ko, this message translates to:
+  /// **'촬영된 식단 사진은 식단 일지에서 조회 가능해요.'**
+  String get mealPanelFootnote3;
+
+  /// No description provided for @mealPanelUploading.
+  ///
+  /// In ko, this message translates to:
+  /// **'판정 중...'**
+  String get mealPanelUploading;
 }
 
 class _AppLocalizationsDelegate

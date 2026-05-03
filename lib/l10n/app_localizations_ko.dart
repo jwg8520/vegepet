@@ -233,6 +233,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get gameMenuTooltip => '게임 메뉴';
 
   @override
+  String get gameMenuPanelTitle => '메뉴';
+
+  @override
   String get profileSetupTitle => '프로필을 입력해주세요!';
 
   @override
@@ -273,4 +276,28 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get initialAdoptionReceiveButton => '분양받기';
+
+  @override
+  String get mealPanelTitle => '먹이주기';
+
+  @override
+  String get mealPanelTodayCertLabel => '오늘의 식단 인증!';
+
+  @override
+  String get mealPanelBrunchButton => '아점 식단';
+
+  @override
+  String get mealPanelDinnerButton => '저녁 식단';
+
+  @override
+  String get mealPanelFootnote1 => '아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시';
+
+  @override
+  String get mealPanelFootnote2 => '실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.';
+
+  @override
+  String get mealPanelFootnote3 => '촬영된 식단 사진은 식단 일지에서 조회 가능해요.';
+
+  @override
+  String get mealPanelUploading => '판정 중...';
 }

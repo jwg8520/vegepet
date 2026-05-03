@@ -74,6 +74,7 @@
   "petInfoUntilGrown": "Until Grown",
   "petInfoUntilChild": "Until Child",
   "gameMenuTooltip": "Game Menu",
+  "gameMenuPanelTitle": "Menu",
   "profileSetupTitle": "Please enter your profile!",
   "nickname": "Nickname",
   "gender": "Gender",
@@ -87,5 +88,13 @@
   "initialAdoptionDescription": "VegePets grow by eating your healthy meals.",
   "initialAdoptionDogSectionLabel": "Dogs",
   "initialAdoptionCatSectionLabel": "Cats",
-  "initialAdoptionReceiveButton": "Adopt"
+  "initialAdoptionReceiveButton": "Adopt",
+  "mealPanelTitle": "Feed",
+  "mealPanelTodayCertLabel": "Today's meal verification!",
+  "mealPanelBrunchButton": "Brunch meal",
+  "mealPanelDinnerButton": "Dinner meal",
+  "mealPanelFootnote1": "Brunch: 06–14 / Dinner: 17–22",
+  "mealPanelFootnote2": "Only photos taken with the live camera are used for AI evaluation.",
+  "mealPanelFootnote3": "Uploaded meal photos can be viewed in the diet diary.",
+  "mealPanelUploading": "Evaluating..."
 }

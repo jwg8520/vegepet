@@ -303,7 +303,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kGameCanvasWidth = 844;
   static const double _kGameCanvasHeight = 390;
   static const int _kProfileNicknameMaxLength = 8;
@@ -419,6 +419,24 @@ class _HomePageState extends State<HomePage> {
   bool _isToyDropHovering = false;
   bool _isCompletingToyPlay = false;
   bool _isPetInfoBannerOpen = false;
+  /// 베지펫 정보창 ↔ 놀아주기 창 전환 애니메이션 진행 중.
+  bool _petToySwapInProgress = false;
+  /// 놀아주기를 베지펫 정보창의 「놀아주기」로 연 경우, 뒤로가기 시 정보창 복귀.
+  bool _toyOpenedFromPetBanner = false;
+  /// 베지펫 정보창 ↔ 먹이주기 패널 전환 애니메이션 진행 중.
+  bool _petMealSwapInProgress = false;
+  /// 먹이주기를 베지펫 정보창에서 연 경우, 뒤로가기 시 정보창 복귀.
+  bool _mealOpenedFromPetBanner = false;
+  bool _isMealPanelOpen = false;
+  bool _gameMenuPanelOpen = false;
+  late AnimationController _gameMenuPanelController;
+  late Animation<double> _gameMenuPanelCurve;
+  late AnimationController _petToySwapController;
+  late Animation<double> _petToySwapCurve;
+  late AnimationController _petMealSwapController;
+  late Animation<double> _petMealSwapCurve;
+  late AnimationController _dragHintPulseController;
+  late Animation<double> _dragHintOpacityAnim;
   /// 마당 펫 터치 쓰다듬기: 하루·펫당 랜덤 목표 탭 수(3~5) 충족 시 [_interactPet] 호출.
   int _petPettingTapCount = 0;
   int? _petPettingRequiredTaps;
@@ -460,10 +478,71 @@ class _HomePageState extends State<HomePage> {
     (Icons.settings_outlined, '설정'),
   ];
 
+  /// 844×390 마당 기준 우측 상단 게임 메뉴 글래스 패널.
+  static const double _kGameMenuPanelLeft = 558;
+  static const double _kGameMenuPanelTop = 40;
+  static const double _kGameMenuPanelW = 246;
+  static const double _kGameMenuPanelH = 310;
+  /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
+  static const double _kGameMenuPanelOffLeft = 844;
+
+  /// 마당 게임 메뉴 그리드: 아이콘+라벨 고정 행 높이로 overflow 방지 (패널 310 내 배치).
+  static const double _kYardGameMenuIconTile = 48;
+  static const double _kYardGameMenuIconLabelGap = 4;
+  static const double _kYardGameMenuLabelAreaH = 12;
+  static const double _kYardGameMenuRowCellH =
+      _kYardGameMenuIconTile +
+      _kYardGameMenuIconLabelGap +
+      _kYardGameMenuLabelAreaH; // 64
+  static const double _kYardGameMenuItemW = 64;
+  static const double _kYardGameMenuRowGap = 8;
+  static const double _kYardGameMenuTitleBelowGap = 8;
+
   @override
   void initState() {
     super.initState();
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
+    _petToySwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _petToySwapCurve = CurvedAnimation(
+      parent: _petToySwapController,
+      curve: Curves.easeInOutCubic,
+    );
+    _petMealSwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _petMealSwapCurve = CurvedAnimation(
+      parent: _petMealSwapController,
+      curve: Curves.easeInOutCubic,
+    );
+    _dragHintPulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
+    _dragHintOpacityAnim = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 0.35, end: 1.0)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 50,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1.0, end: 0.35)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 50,
+      ),
+    ]).animate(_dragHintPulseController);
+    _gameMenuPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _gameMenuPanelCurve = CurvedAnimation(
+      parent: _gameMenuPanelController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
     _bootstrap();
   }
 
@@ -476,6 +555,10 @@ class _HomePageState extends State<HomePage> {
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
     _nicknameController.dispose();
+    _petToySwapController.dispose();
+    _petMealSwapController.dispose();
+    _dragHintPulseController.dispose();
+    _gameMenuPanelController.dispose();
     super.dispose();
   }
 
@@ -2281,7 +2364,13 @@ class _HomePageState extends State<HomePage> {
   bool _isYardPetTapBlocked() {
     if (_activePet == null) return true;
     if (_isInteracting) return true;
-    if (_isToyMenuOpen || _isCompletingToyPlay) return true;
+    if (_isToyMenuOpen ||
+        _isCompletingToyPlay ||
+        _petToySwapInProgress ||
+        _isMealPanelOpen ||
+        _petMealSwapInProgress) {
+      return true;
+    }
     if (_isNamingDialogOpen && !_canShowActivePetDuringNaming) return true;
     if (_status != _ViewStatus.ready) return true;
     if (!_isProfileComplete()) return true;
@@ -2568,6 +2657,12 @@ class _HomePageState extends State<HomePage> {
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
+        _petToySwapInProgress = false;
+        _toyOpenedFromPetBanner = false;
+        _isMealPanelOpen = false;
+        _petMealSwapInProgress = false;
+        _mealOpenedFromPetBanner = false;
+        _gameMenuPanelOpen = false;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -2576,6 +2671,9 @@ class _HomePageState extends State<HomePage> {
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
       });
+      _petToySwapController.value = 0;
+      _petMealSwapController.value = 0;
+      _gameMenuPanelController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -2706,6 +2804,12 @@ class _HomePageState extends State<HomePage> {
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
+        _petToySwapInProgress = false;
+        _toyOpenedFromPetBanner = false;
+        _isMealPanelOpen = false;
+        _petMealSwapInProgress = false;
+        _mealOpenedFromPetBanner = false;
+        _gameMenuPanelOpen = false;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -2715,6 +2819,9 @@ class _HomePageState extends State<HomePage> {
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
       });
+      _petToySwapController.value = 0;
+      _petMealSwapController.value = 0;
+      _gameMenuPanelController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
       await _waitForUiSettle();
@@ -3959,6 +4066,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildTopHudLayer() {
     final l10n = AppLocalizations.of(context);
+    final hidePetInfoCornerIcon = _isPetInfoBannerOpen ||
+        _isToyMenuOpen ||
+        _petToySwapInProgress ||
+        _isMealPanelOpen ||
+        _petMealSwapInProgress;
     return Positioned.fill(
       child: Stack(
         children: [
@@ -3967,7 +4079,9 @@ class _HomePageState extends State<HomePage> {
               ignoring: !_isPetInfoBannerOpen,
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onTap: _closePetInfoBanner,
+                onTap: (_petToySwapInProgress || _petMealSwapInProgress)
+                    ? null
+                    : _closePetInfoBanner,
                 child: const SizedBox.expand(),
               ),
             ),
@@ -3979,11 +4093,11 @@ class _HomePageState extends State<HomePage> {
             width: 64,
             height: 64,
             child: IgnorePointer(
-              ignoring: _isPetInfoBannerOpen,
+              ignoring: hidePetInfoCornerIcon,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOutCubic,
-                opacity: _isPetInfoBannerOpen ? 0 : 1,
+                opacity: hidePetInfoCornerIcon ? 0 : 1,
                 child: SizedBox(
                   width: 64,
                   height: 64,
@@ -4003,30 +4117,28 @@ class _HomePageState extends State<HomePage> {
             top: 40,
             width: 64,
             height: 64,
-            child: SizedBox(
-              width: 64,
-              height: 64,
-              child: _cornerIconButton(
-                icon: Icons.apps_rounded,
-                tooltip: l10n.gameMenuTooltip,
-                iconSize: 28,
-                padding: 18,
-                onTap: _openMenuSheet,
+            child: IgnorePointer(
+              ignoring: hidePetInfoCornerIcon,
+              child: SizedBox(
+                width: 64,
+                height: 64,
+                child: _cornerIconButton(
+                  icon: Icons.apps_rounded,
+                  tooltip: l10n.gameMenuTooltip,
+                  iconSize: 28,
+                  padding: 18,
+                  onTap: _openMenuSheet,
+                ),
               ),
             ),
           ),
-          if (_isToyMenuOpen)
+          if (_isToyMenuOpen || _petToySwapInProgress)
             Positioned.fill(
               child: _buildToyDropTargetOverlay(),
             ),
-          if (_isToyMenuOpen)
-            Positioned(
-              left: 16,
-              top: 48,
-              bottom: 16,
-              width: 92,
-              child: _buildToyMenuWindow(),
-            ),
+          _buildToyMenuLayer(),
+          _buildMealPanelLayer(),
+          _buildGameMenuOverlayLayer(),
         ],
       ),
     );
@@ -4605,6 +4717,26 @@ class _HomePageState extends State<HomePage> {
 
   void _togglePetInfoBanner() {
     if (_activePet == null || _isInteracting) return;
+    if (_isToyMenuOpen ||
+        _petToySwapInProgress ||
+        _isMealPanelOpen ||
+        _petMealSwapInProgress) {
+      return;
+    }
+
+    final opening = !_isPetInfoBannerOpen;
+
+    // 게임 메뉴 열림 ↔ 베지펫 정보창 상호 배타: 펫창을 켤 때 메뉴는 즉시 닫고 슬라이드 아웃과 동시 진행.
+    if (opening &&
+        (_gameMenuPanelOpen || _gameMenuPanelController.value > 0)) {
+      _safeSetState(() {
+        _isPetInfoBannerOpen = true;
+        _gameMenuPanelOpen = false;
+      });
+      unawaited(_gameMenuPanelController.reverse());
+      return;
+    }
+
     _safeSetState(() {
       _isPetInfoBannerOpen = !_isPetInfoBannerOpen;
     });
@@ -4617,47 +4749,104 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  String? _validateToyPlayEligibility() {
+    if (_activePet == null) return '먼저 펫을 분양받아주세요.';
+    final today = _todayDateStr();
+    if (_activePet!['last_played_on']?.toString() == today) {
+      return '오늘은 이미 놀아줬어요.';
+    }
+    final family = _activePetFamily();
+    if (family != 'dog' && family != 'cat') {
+      return '펫 정보를 확인할 수 없어요.';
+    }
+    return null;
+  }
+
   Future<void> _onPetInfoBannerAction(String action) async {
+    if (action == 'play') {
+      final err = _validateToyPlayEligibility();
+      if (err != null) {
+        _showSnack(err);
+        return;
+      }
+      await _openToyPlaySheet(fromPetBanner: true);
+      return;
+    }
+    if (action == 'meal') {
+      await _openMealSheet(fromPetBanner: true);
+      return;
+    }
+
     _closePetInfoBanner();
     await _waitForUiSettle();
     if (!mounted) return;
 
-    switch (action) {
-      case 'meal':
-        await _openMealSheet();
-        break;
-      case 'play':
-        await _openToyPlaySheet();
-        break;
-      case 'pet':
-        await _interactPet('pet');
-        break;
+    if (action == 'pet') {
+      await _interactPet('pet');
     }
   }
 
   Widget _buildPetInfoSlideBanner() {
-    final isOpen = _isPetInfoBannerOpen && _activePet != null;
     const panelW = 246.0;
     const panelH = 310.0;
     const openLeft = 40.0;
     final closedLeft = -panelW - 12;
 
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
-      left: isOpen ? openLeft : closedLeft,
-      top: 40,
-      width: panelW,
-      height: panelH,
-      child: IgnorePointer(
-        ignoring: !isOpen,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 240),
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _petToySwapController,
+        _petMealSwapController,
+      ]),
+      builder: (context, _) {
+        final showToySwap =
+            _petToySwapInProgress && _toyOpenedFromPetBanner;
+        final showMealSwap =
+            _petMealSwapInProgress && _mealOpenedFromPetBanner;
+        final tToy = _petToySwapCurve.value;
+        final tMeal = _petMealSwapCurve.value;
+        final t = showToySwap ? tToy : (showMealSwap ? tMeal : 0.0);
+
+        final showPetInSwap = showToySwap || showMealSwap;
+        final slideOutOpen = _isPetInfoBannerOpen && _activePet != null;
+        final atOpen = slideOutOpen || showPetInSwap;
+        final targetLeft = atOpen ? openLeft : closedLeft;
+
+        final Widget inner;
+        if (showPetInSwap) {
+          inner = Opacity(
+            opacity: (1.0 - t).clamp(0.0, 1.0),
+            child: Transform.scale(
+              scale: 1.0 - 0.1 * t,
+              alignment: Alignment.center,
+              child: _buildPetInfoBannerContent(),
+            ),
+          );
+        } else {
+          inner = AnimatedOpacity(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            opacity: slideOutOpen ? 1 : 0,
+            child: _buildPetInfoBannerContent(),
+          );
+        }
+
+        return AnimatedPositioned(
+          duration: showPetInSwap
+              ? Duration.zero
+              : const Duration(milliseconds: 240),
           curve: Curves.easeOutCubic,
-          opacity: isOpen ? 1 : 0,
-          child: _buildPetInfoBannerContent(),
-        ),
-      ),
+          left: targetLeft,
+          top: 40,
+          width: panelW,
+          height: panelH,
+          child: IgnorePointer(
+            ignoring: _petToySwapInProgress ||
+                    _petMealSwapInProgress ||
+                    !slideOutOpen,
+            child: inner,
+          ),
+        );
+      },
     );
   }
 
@@ -4990,7 +5179,7 @@ class _HomePageState extends State<HomePage> {
             child: const Text(
               '식단 인증!',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF4A4A4A),
                 height: 1.0,
@@ -5139,8 +5328,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildToyDropTargetOverlay() {
-    final theme = Theme.of(context);
-
     return DragTarget<_BagItem>(
       onWillAcceptWithDetails: (details) {
         final item = details.data;
@@ -5162,26 +5349,151 @@ class _HomePageState extends State<HomePage> {
         _completeToyMenuDrop(details.data);
       },
       builder: (context, candidateData, rejectedData) {
-        final hovering = _isToyDropHovering || candidateData.isNotEmpty;
-        return Container(
-          color: Colors.black.withValues(alpha: hovering ? 0.14 : 0.04),
-          alignment: Alignment.topCenter,
-          padding: const EdgeInsets.only(top: 12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: hovering
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.outlineVariant,
-                width: hovering ? 2 : 1,
+        return const SizedBox.expand(
+          child: ColoredBox(color: Colors.transparent),
+        );
+      },
+    );
+  }
+
+  /// DRAG AND DROP 고정 레이아웃; 애니메이션은 부모 [Opacity]만 사용.
+  Widget _buildDragAndDropHintFixedSize() {
+    return SizedBox(
+      width: 112,
+      height: 44,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(
+              3,
+              (i) => Padding(
+                padding: EdgeInsets.only(left: i == 0 ? 0 : 1),
+                child: const Icon(
+                  Icons.keyboard_double_arrow_right,
+                  size: 14,
+                  color: Color(0xFF4A4A4A),
+                ),
               ),
             ),
-            child: Text(
-              hovering ? '여기에 놓으면 베지펫이 놀아요!' : '장난감을 마당에 놓아주세요',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'DRAG AND DROP',
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF4A4A4A),
+              height: 1.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 844×390 마당 기준 (40,40) 놀아주기 패널 + 우측 DRAG AND DROP 힌트.
+  Widget _buildToyMenuLayer() {
+    final shouldMountToyUi = _isToyMenuOpen || _petToySwapInProgress;
+    if (!shouldMountToyUi) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _petToySwapController,
+        _dragHintPulseController,
+      ]),
+      builder: (context, _) {
+        final t = _petToySwapCurve.value.clamp(0.0, 1.0);
+        final effectiveT = _petToySwapInProgress ? t : 1.0;
+
+        final toyChild = Opacity(
+          opacity: effectiveT.clamp(0.0, 1.0),
+          child: Transform.scale(
+            scale: 0.92 + 0.08 * effectiveT,
+            alignment: Alignment.center,
+            child: _buildToyPlayGlassPanel(),
+          ),
+        );
+
+        final transitionOpacity = effectiveT.clamp(0.0, 1.0);
+        final swapStatus = _petToySwapController.status;
+        final isTransitioningToyPanel = _petToySwapInProgress ||
+            swapStatus == AnimationStatus.forward ||
+            swapStatus == AnimationStatus.reverse;
+        /// 창 등장/퇴장 중에도 pulse가 계속 돌아가는 것처럼 보이도록 봉투(transitionOpacity) × pulse.
+        final pulse = _dragHintOpacityAnim.value.clamp(0.0, 1.0);
+        final hintOpacity = (transitionOpacity * pulse).clamp(0.0, 1.0);
+
+        /// 패널(`toyChild`)과 동일 곡선; 전환 중에만 스케일, 완전 오픈 후 pulse 구간은 1.0 고정.
+        final hintScale = isTransitioningToyPanel
+            ? 0.92 + 0.08 * effectiveT
+            : 1.0;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 40,
+              top: 40,
+              width: 120,
+              height: 310,
+              child: toyChild,
+            ),
+            Positioned(
+              left: 166,
+              top: 37,
+              width: 112,
+              height: 310,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: hintOpacity.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: hintScale,
+                    alignment: Alignment.center,
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: _buildDragAndDropHintFixedSize(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMealPanelLayer() {
+    final shouldMount = _isMealPanelOpen || _petMealSwapInProgress;
+    if (!shouldMount) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: _petMealSwapController,
+      builder: (context, _) {
+        final t = _petMealSwapCurve.value.clamp(0.0, 1.0);
+        final effectiveT = _petMealSwapInProgress ? t : 1.0;
+        final o = effectiveT.clamp(0.0, 1.0);
+        final s = 0.92 + 0.08 * effectiveT;
+        return Positioned(
+          left: 40,
+          top: 40,
+          width: 246,
+          height: 212,
+          child: Opacity(
+            opacity: o,
+            child: Transform.scale(
+              scale: s,
+              alignment: Alignment.center,
+              child: _buildMealGlassPanel(),
             ),
           ),
         );
@@ -5189,63 +5501,424 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildToyMenuWindow() {
-    final theme = Theme.of(context);
-    final activeFamily = _activePetFamily();
-    final toys = _defaultToyBagItems();
-
-    return Material(
-      elevation: 8,
-      color: Colors.white.withValues(alpha: 0.82),
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        child: Column(
-          children: [
-            const Text(
-              '장난감',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+  Widget _buildMealPanelSlotButton({
+    required String label,
+    required bool done,
+    required bool uploading,
+    required bool disabled,
+    required VoidCallback onTap,
+  }) {
+    final l10n = AppLocalizations.of(context);
+    if (done) {
+      return Opacity(
+        opacity: 0.6,
+        child: Container(
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFFF1F1F1),
+              width: 0.8,
             ),
-            const SizedBox(height: 10),
-            for (final toy in toys) ...[
-              _buildToyMenuDraggableItem(
-                toy,
-                toy.targetPetFamily == activeFamily,
+          ),
+          child: Center(
+            child: Transform.translate(
+              offset: const Offset(-13, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 18, color: Colors.grey[600]),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$label · ${l10n.petInfoStatusDone}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-            ],
-            const Spacer(),
-            Icon(
-              Icons.keyboard_double_arrow_right,
-              size: 22,
-              color: theme.colorScheme.primary,
             ),
-            const Text(
-              'DRAG\nAND DROP',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+    }
+    if (uploading) {
+      return Container(
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFF1F1F1),
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            const SizedBox(height: 6),
-            InkWell(
-              onTap: _cancelToyMenu,
-              borderRadius: BorderRadius.circular(10),
-              child: const Padding(
-                padding: EdgeInsets.all(2),
-                child: Icon(Icons.close, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              l10n.mealPanelUploading,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
               ),
             ),
           ],
+        ),
+      );
+    }
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: disabled ? null : onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          height: 34,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFFF1F1F1),
+              width: 0.8,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Center(
+              child: Transform.translate(
+                offset: const Offset(-13, 0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Transform.translate(
+                      offset: const Offset(0, 1),
+                      child: const Icon(
+                        Icons.camera_alt_outlined,
+                        size: 18,
+                        color: Color(0xFFA9C9FF),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _buildPastelBlueGradientButtonText(
+                      label,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMealGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
+    final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
+    final uploading = _isUploadingMeal;
+    final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
+    final uploadingDinner = uploading && _uploadingSlot == 'dinner';
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: 246,
+          height: 212,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => unawaited(_cancelMealPanel()),
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 37,
+                top: 14,
+                right: 8,
+                child: Text(
+                  l10n.mealPanelTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF000000),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 12,
+                right: 12,
+                top: 42,
+                bottom: 8,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 1),
+                      child: Text(
+                        l10n.mealPanelTodayCertLabel,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF000000),
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildMealPanelSlotButton(
+                      label: l10n.mealPanelBrunchButton,
+                      done: brunchDone,
+                      uploading: uploadingBrunch,
+                      disabled: uploading,
+                      onTap: () =>
+                          unawaited(_uploadMealPhotoAndEvaluate('brunch')),
+                    ),
+                    const SizedBox(height: 9),
+                    _buildMealPanelSlotButton(
+                      label: l10n.mealPanelDinnerButton,
+                      done: dinnerDone,
+                      uploading: uploadingDinner,
+                      disabled: uploading,
+                      onTap: () =>
+                          unawaited(_uploadMealPhotoAndEvaluate('dinner')),
+                    ),
+                    const Spacer(),
+                    Transform.translate(
+                      offset: const Offset(0, -2),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 1),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.mealPanelFootnote1,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A4A4A),
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.mealPanelFootnote2,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A4A4A),
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.mealPanelFootnote3,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A4A4A),
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToyPlayGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    final activeFamily = _activePetFamily();
+    final toys = _defaultToyBagItems();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: 120,
+          height: 310,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => unawaited(_cancelToyMenu()),
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 37,
+                top: 14,
+                right: 8,
+                child: Text(
+                  l10n.petInfoPlayAction,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF000000),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 48,
+                bottom: 10,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < toys.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 18),
+                          Center(
+                            child: _buildToyMenuDraggableItem(
+                              toys[i],
+                              toys[i].targetPetFamily == activeFamily,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildToyMenuDraggableItem(_BagItem toy, bool canUse) {
-    final child = _buildToyMenuIconVisual(toy, canUse);
+    final iconVisual = _buildToyMenuIconVisual(toy, canUse);
+    final child = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        iconVisual,
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 112,
+          child: Text(
+            toy.name,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF4A4A4A),
+              height: 1.15,
+            ),
+          ),
+        ),
+      ],
+    );
 
     if (!canUse) {
       return Opacity(
@@ -5259,7 +5932,13 @@ class _HomePageState extends State<HomePage> {
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: Material(
         color: Colors.transparent,
-        child: _buildToyDragFeedback(toy),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: _buildToyMenuIconVisual(toy, true),
+        ),
       ),
       childWhenDragging: Opacity(opacity: 0.35, child: child),
       child: child,
@@ -5269,50 +5948,25 @@ class _HomePageState extends State<HomePage> {
   Widget _buildToyMenuIconVisual(_BagItem toy, bool canUse) {
     final theme = Theme.of(context);
     return Container(
-      width: 56,
-      height: 56,
+      width: 48,
+      height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: canUse
-              ? theme.colorScheme.primary
+              ? theme.colorScheme.primary.withValues(alpha: 0.65)
               : theme.colorScheme.outlineVariant,
+          width: 0.8,
         ),
       ),
       alignment: Alignment.center,
       child: Icon(
         toy.icon,
-        size: 28,
+        size: 26,
         color: canUse
             ? theme.colorScheme.primary
             : theme.colorScheme.onSurfaceVariant,
-      ),
-    );
-  }
-
-  Widget _buildToyDragFeedback(_BagItem toy) {
-    return Container(
-      width: 110,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(toy.icon, size: 22, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              toy.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -5444,33 +6098,33 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _openToyPlaySheet() async {
-    if (_activePet == null) {
-      _showSnack('먼저 펫을 분양받아주세요.');
-      return;
-    }
-
-    final today = _todayDateStr();
-    if (_activePet!['last_played_on']?.toString() == today) {
-      _showSnack('오늘은 이미 놀아줬어요.');
-      return;
-    }
-
-    final family = _activePetFamily();
-    if (family != 'dog' && family != 'cat') {
-      _showSnack('펫 정보를 확인할 수 없어요.');
+  Future<void> _openToyPlaySheet({bool fromPetBanner = false}) async {
+    final err = _validateToyPlayEligibility();
+    if (err != null) {
+      _showSnack(err);
       return;
     }
 
     await _waitForUiSettle();
     if (!mounted) return;
 
+    final openedFromPetBanner = fromPetBanner && _isPetInfoBannerOpen;
+
+    _petToySwapController.value = 0;
     _safeSetState(() {
-      _isPetInfoBannerOpen = false;
+      _petToySwapInProgress = true;
       _isToyMenuOpen = true;
+      _toyOpenedFromPetBanner = openedFromPetBanner;
       _isToyDropHovering = false;
     });
-    _showSnack('장난감을 길게 눌러 마당에 놓아주세요.');
+
+    await _petToySwapController.forward(from: 0.0);
+    if (!mounted) return;
+
+    _safeSetState(() {
+      _isPetInfoBannerOpen = false;
+      _petToySwapInProgress = false;
+    });
   }
 
   Future<void> _completeToyMenuDrop(_BagItem toy) async {
@@ -5484,15 +6138,18 @@ class _HomePageState extends State<HomePage> {
 
     final today = _todayDateStr();
     if (_activePet?['last_played_on']?.toString() == today) {
-      _cancelToyMenu();
+      _closeToyMenuInstant();
       _showSnack('오늘은 이미 놀아줬어요.');
       return;
     }
 
+    _petToySwapController.value = 0;
     _safeSetState(() {
       _isCompletingToyPlay = true;
       _isToyMenuOpen = false;
       _isToyDropHovering = false;
+      _petToySwapInProgress = false;
+      _toyOpenedFromPetBanner = false;
     });
 
     try {
@@ -5504,11 +6161,40 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _cancelToyMenu() {
+  void _closeToyMenuInstant() {
+    if (!mounted) return;
+    _petToySwapController.value = 0;
     _safeSetState(() {
       _isToyMenuOpen = false;
       _isToyDropHovering = false;
       _isCompletingToyPlay = false;
+      _petToySwapInProgress = false;
+      _toyOpenedFromPetBanner = false;
+    });
+  }
+
+  Future<void> _cancelToyMenu() async {
+    if (_petToySwapInProgress) return;
+    if (!_isToyMenuOpen) return;
+
+    _petToySwapController.value = 1.0;
+    _safeSetState(() {
+      _petToySwapInProgress = true;
+      _isToyDropHovering = false;
+    });
+
+    await _petToySwapController.reverse(from: 1.0);
+    if (!mounted) return;
+
+    final reopenPet = _toyOpenedFromPetBanner;
+    _safeSetState(() {
+      _isToyMenuOpen = false;
+      _isCompletingToyPlay = false;
+      if (reopenPet) {
+        _isPetInfoBannerOpen = true;
+      }
+      _petToySwapInProgress = false;
+      _toyOpenedFromPetBanner = false;
     });
   }
 
@@ -6151,368 +6837,311 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  String _resultTypeToKorean(String? type) {
-    switch (type) {
-      case 'good':
-        return '좋아요';
-      case 'supplement_needed':
-        return '보충 필요';
-      case 'bad':
-        return '아쉬워요';
-      case 'uncertain':
-        return '판단 어려움';
-      default:
-        return '-';
-    }
-  }
-
-  // 펫 상태창 > 먹이주기에서 호출되는 식단 인증 전용 BottomSheet.
-  // 아점/저녁 사진 업로드 버튼, 오늘 완료 여부, 최근 AI 판정 결과까지 보여준다.
-  //
-  // BottomSheet 내부에서는 어떤 slot 을 선택했는지만 String 으로 pop 해서 반환하고,
-  // 실제 카메라 촬영 / 업로드 / AI 판정 등 긴 async 작업은 시트가 완전히 닫힌 뒤
-  // HomePage 의 context 에서 실행한다. StatefulBuilder/setSheetState 와 await 가
-  // 겹쳐서 dispose 타이밍 오류가 나는 경로를 차단한다.
-  Future<void> _openMealSheet() async {
+  Future<void> _openMealSheet({bool fromPetBanner = false}) async {
     if (_activePet == null) return;
 
-    final slot = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isDismissible: !_isUploadingMeal,
-      enableDrag: !_isUploadingMeal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetCtx) {
-        return _buildMealSheetContent(
-          onUpload: (slot) {
-            Navigator.of(sheetCtx).pop(slot);
-          },
-        );
-      },
-    );
-
-    if (!mounted || slot == null) return;
-
     await _waitForUiSettle();
     if (!mounted) return;
 
-    await _uploadMealPhotoAndEvaluate(slot);
+    final openedFromPetBanner = fromPetBanner && _isPetInfoBannerOpen;
+
+    _petMealSwapController.value = 0;
+    _safeSetState(() {
+      _petMealSwapInProgress = true;
+      _isMealPanelOpen = true;
+      _mealOpenedFromPetBanner = openedFromPetBanner;
+    });
+
+    await _petMealSwapController.forward(from: 0.0);
+    if (!mounted) return;
+
+    _safeSetState(() {
+      _isPetInfoBannerOpen = false;
+      _petMealSwapInProgress = false;
+    });
   }
 
-  Widget _buildMealSheetContent({
-    required void Function(String slot) onUpload,
-  }) {
-    final theme = Theme.of(context);
-    final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
-    final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
+  Future<void> _cancelMealPanel() async {
+    if (_petMealSwapInProgress) return;
+    if (!_isMealPanelOpen) return;
 
-    final uploading = _isUploadingMeal;
-    final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
-    final uploadingDinner = uploading && _uploadingSlot == 'dinner';
+    _petMealSwapController.value = 1.0;
+    _safeSetState(() {
+      _petMealSwapInProgress = true;
+    });
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    await _petMealSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+
+    final reopenPet = _mealOpenedFromPetBanner;
+    _safeSetState(() {
+      _isMealPanelOpen = false;
+      if (reopenPet) {
+        _isPetInfoBannerOpen = true;
+      }
+      _petMealSwapInProgress = false;
+      _mealOpenedFromPetBanner = false;
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // 우측 상단 게임 메뉴 (844×390 기준 (558,40) · 246×310 글래스 패널, 슬라이드+페이드)
+  // --------------------------------------------------------------------------
+
+  Widget _buildGameMenuOverlayLayer() {
+    if (!_gameMenuPanelOpen && _gameMenuPanelController.value == 0) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: _gameMenuPanelController,
+      builder: (context, _) {
+        final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
+        final slide =
+            _kGameMenuPanelOffLeft + (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+        return Stack(
+          clipBehavior: Clip.none,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.restaurant_outlined, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  '오늘의 식단 인증',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildPhotoMealButton(
-                    slot: 'brunch',
-                    label: '아점 식단 사진 올리기',
-                    done: brunchDone,
-                    uploading: uploadingBrunch,
-                    disabled: uploading,
-                    onTap: () => onUpload('brunch'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPhotoMealButton(
-                    slot: 'dinner',
-                    label: '저녁 식단 사진 올리기',
-                    done: dinnerDone,
-                    uploading: uploadingDinner,
-                    disabled: uploading,
-                    onTap: () => onUpload('dinner'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _mealStatusChip('아점', brunchDone),
-                const SizedBox(width: 6),
-                _mealStatusChip('저녁', dinnerDone),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '실시간 카메라로 촬영한 사진만 AI 판정에 사용돼요.\n아점 06~14시 / 저녁 17~22시 사이에 올려주세요.',
-              style: TextStyle(
-                fontSize: 10,
-                height: 1.4,
-                color: Colors.grey[600],
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => unawaited(_closeGameMenuPanel()),
+                child: const ColoredBox(color: Colors.transparent),
               ),
             ),
-            if (_lastStatusMessage != null) ...[
-              const SizedBox(height: 14),
-              _buildAiResultCard(),
-            ],
+            Positioned(
+              left: slide,
+              top: _kGameMenuPanelTop,
+              width: _kGameMenuPanelW,
+              height: _kGameMenuPanelH,
+              child: Opacity(
+                opacity: t,
+                child: _buildYardGameMenuGlassPanel(),
+              ),
+            ),
           ],
-        ),
-      ),
-    );
-  }
-
-  // ignore: unused_element
-  Widget _mealSheetSectionLabel(String text) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        color: Colors.grey[700],
-        letterSpacing: 0.2,
-      ),
-    );
-  }
-
-  Widget _buildPhotoMealButton({
-    required String slot,
-    required String label,
-    required bool done,
-    required bool uploading,
-    required bool disabled,
-    required VoidCallback onTap,
-  }) {
-    if (done) {
-      return OutlinedButton.icon(
-        onPressed: null,
-        icon: const Icon(Icons.check_circle_outline, size: 18),
-        label: Text('$label · 완료'),
-      );
-    }
-    if (uploading) {
-      return FilledButton.tonalIcon(
-        onPressed: null,
-        icon: const SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        label: const Text('판정 중...'),
-      );
-    }
-    return FilledButton.tonalIcon(
-      onPressed: disabled ? null : onTap,
-      icon: const Icon(Icons.camera_alt_outlined, size: 18),
-      label: Text(label),
-    );
-  }
-
-  // 최근 AI 판정 결과를 보여주는 결과 카드 (먹이주기 시트 하단).
-  Widget _buildAiResultCard() {
-    final theme = Theme.of(context);
-    final resultType = _lastResultType;
-    final message = _lastStatusMessage ?? '';
-    final gain = _lastAffectionGain ?? 0;
-
-    Color chipColor;
-    switch (resultType) {
-      case 'good':
-        chipColor = Colors.green;
-        break;
-      case 'supplement_needed':
-        chipColor = Colors.orange;
-        break;
-      case 'bad':
-        chipColor = Colors.redAccent;
-        break;
-      case 'uncertain':
-      default:
-        chipColor = Colors.grey;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: chipColor.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: chipColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _resultTypeToKorean(resultType),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: chipColor,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '애정도 +$gain',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            style: const TextStyle(fontSize: 13, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 우측 상단 게임 메뉴 아이콘 버튼을 누르면 열리는 8개 메뉴 허브.
-  //
-  // BottomSheet 내부 builder의 BuildContext를 await 이후에 사용하면
-  // `_dependents.isEmpty is not true` 같은 위젯 트리 정리 타이밍 오류가 날 수 있다.
-  // 그래서 sheetCtx 에서는 라벨만 pop 으로 반환하고, 후속 동작(_onMenuTap)은
-  // BottomSheet 가 완전히 닫힌 뒤 HomePage 의 context 에서 실행한다.
-  Future<void> _openMenuSheet() async {
-    _closePetInfoBanner();
-    final selectedLabel = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetCtx) {
-        return _buildMenuSheetContent(
-          onTap: (label) {
-            Navigator.of(sheetCtx).pop(label);
-          },
         );
       },
     );
-
-    if (!mounted || selectedLabel == null) return;
-
-    // 다음 frame 까지 한 frame 양보해서 BottomSheet 트리가 dispose 된 뒤
-    // 다음 화면/시트가 열리도록 한다.
-    await _waitForUiSettle();
-    if (!mounted) return;
-
-    await _onMenuTap(selectedLabel);
   }
 
-  Widget _buildMenuSheetContent({required ValueChanged<String> onTap}) {
+  Widget _buildYardGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
     final items = _menuSheetItems;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '게임 메뉴',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kGameMenuPanelW,
+          height: _kGameMenuPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
             ),
-            const SizedBox(height: 12),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 4,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 0.95,
-              children: items
-                  .map((item) => _sheetMenuTile(
-                        icon: item.$1,
-                        label: item.$2,
-                        onTap: () => onTap(item.$2),
-                      ))
-                  .toList(),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.gameMenuPanelTitle,
+                  style: _yardGameMenuTitleTextStyle(),
+                ),
+                const SizedBox(height: _kYardGameMenuTitleBelowGap),
+                SizedBox(
+                  height: _kYardGameMenuRowCellH,
+                  child: _yardGameMenuIconRow(items.sublist(0, 3)),
+                ),
+                const SizedBox(height: _kYardGameMenuRowGap),
+                SizedBox(
+                  height: _kYardGameMenuRowCellH,
+                  child: _yardGameMenuIconRow(items.sublist(3, 6)),
+                ),
+                const SizedBox(height: _kYardGameMenuRowGap),
+                SizedBox(
+                  height: _kYardGameMenuRowCellH,
+                  child: _yardGameMenuIconRowTwo(items.sublist(6, 8)),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _sheetMenuTile({
+  /// TODO(vegepet): Pretendard 폰트 asset 등록 후 fontFamily 연결.
+  TextStyle _yardGameMenuTitleTextStyle() {
+    return const TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+  }
+
+  Widget _yardGameMenuIconRow(List<(IconData, String)> rowItems) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        for (final item in rowItems)
+          Expanded(
+            child: Center(
+              child: _yardGameMenuItem(
+                icon: item.$1,
+                label: item.$2,
+                onTap: () => unawaited(_onYardGameMenuItemTap(item.$2)),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _yardGameMenuIconRowTwo(List<(IconData, String)> rowItems) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Center(
+            child: _yardGameMenuItem(
+              icon: rowItems[0].$1,
+              label: rowItems[0].$2,
+              onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[0].$2)),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Center(
+            child: _yardGameMenuItem(
+              icon: rowItems[1].$1,
+              label: rowItems[1].$2,
+              onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[1].$2)),
+            ),
+          ),
+        ),
+        const Expanded(child: SizedBox.shrink()),
+      ],
+    );
+  }
+
+  /// 단일 메뉴 셀: 48×48 타일 + 라벨(고정 높이), 전체 `_kYardGameMenuRowCellH`.
+  Widget _yardGameMenuItem({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.6),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 26,
-                color: theme.colorScheme.onSecondaryContainer,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSecondaryContainer,
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: _kYardGameMenuItemW,
+            height: _kYardGameMenuRowCellH,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: _kYardGameMenuItemW,
+                  height: _kYardGameMenuIconTile,
+                  child: Center(
+                    child: Container(
+                      width: _kYardGameMenuIconTile,
+                      height: _kYardGameMenuIconTile,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                          width: 0.9,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.04),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        icon,
+                        size: 22,
+                        color: const Color(0xFF5C5C5C),
+                      ),
+                    ),
+                  ),
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                SizedBox(height: _kYardGameMenuIconLabelGap),
+                SizedBox(
+                  height: _kYardGameMenuLabelAreaH,
+                  width: _kYardGameMenuItemW,
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _onYardGameMenuItemTap(String label) async {
+    await _closeGameMenuPanel();
+    if (!mounted) return;
+    await _onMenuTap(label);
+  }
+
+  Future<void> _closeGameMenuPanel() async {
+    if (!_gameMenuPanelOpen) return;
+    await _gameMenuPanelController.reverse();
+    if (!mounted) return;
+    _safeSetState(() {
+      _gameMenuPanelOpen = false;
+    });
+  }
+
+  Future<void> _openMenuSheet() async {
+    if (_gameMenuPanelController.isAnimating) return;
+
+    if (_gameMenuPanelOpen && _gameMenuPanelController.value >= 0.999) {
+      await _closeGameMenuPanel();
+      return;
+    }
+
+    _safeSetState(() {
+      _isPetInfoBannerOpen = false;
+      _gameMenuPanelOpen = true;
+    });
+    _gameMenuPanelController.value = 0;
+    await _gameMenuPanelController.forward(from: 0);
   }
 
   Future<void> _onMenuTap(String label) async {
@@ -7941,6 +8570,12 @@ class _HomePageState extends State<HomePage> {
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
+        _petToySwapInProgress = false;
+        _toyOpenedFromPetBanner = false;
+        _isMealPanelOpen = false;
+        _petMealSwapInProgress = false;
+        _mealOpenedFromPetBanner = false;
+        _gameMenuPanelOpen = false;
         _nicknameController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
@@ -7957,6 +8592,9 @@ class _HomePageState extends State<HomePage> {
         _isSavingProfile = false;
         _isLoggingMeal = false;
       });
+      _petToySwapController.value = 0;
+      _petMealSwapController.value = 0;
+      _gameMenuPanelController.value = 0;
 
       await _waitForUiSettle();
       if (!mounted) return;
@@ -8895,25 +9533,6 @@ class _HomePageState extends State<HomePage> {
             )
           : const Icon(Icons.restaurant, size: 18),
       label: Text(label),
-    );
-  }
-
-  Widget _mealStatusChip(String label, bool done) {
-    final color = done ? Colors.green : Colors.grey;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        done ? '$label 완료' : '$label 대기중',
-        style: TextStyle(
-          fontSize: 11,
-          color: color,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 

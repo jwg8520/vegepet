@@ -241,6 +241,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get gameMenuTooltip => 'Game Menu';
 
   @override
+  String get gameMenuPanelTitle => 'Menu';
+
+  @override
   String get profileSetupTitle => 'Please enter your profile!';
 
   @override
@@ -283,4 +286,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get initialAdoptionReceiveButton => 'Adopt';
+
+  @override
+  String get mealPanelTitle => 'Feed';
+
+  @override
+  String get mealPanelTodayCertLabel => 'Today\'s meal verification!';
+
+  @override
+  String get mealPanelBrunchButton => 'Brunch meal';
+
+  @override
+  String get mealPanelDinnerButton => 'Dinner meal';
+
+  @override
+  String get mealPanelFootnote1 => 'Brunch: 06–14 / Dinner: 17–22';
+
+  @override
+  String get mealPanelFootnote2 =>
+      'Only photos taken with the live camera are used for AI evaluation.';
+
+  @override
+  String get mealPanelFootnote3 =>
+      'Uploaded meal photos can be viewed in the diet diary.';
+
+  @override
+  String get mealPanelUploading => 'Evaluating...';
 }

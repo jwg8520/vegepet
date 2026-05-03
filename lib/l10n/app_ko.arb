@@ -74,6 +74,7 @@
   "petInfoUntilGrown": "성장기까지",
   "petInfoUntilChild": "유년기까지",
   "gameMenuTooltip": "게임 메뉴",
+  "gameMenuPanelTitle": "메뉴",
   "profileSetupTitle": "프로필을 입력해주세요!",
   "nickname": "닉네임",
   "gender": "성별",
@@ -87,5 +88,13 @@
   "initialAdoptionDescription": "베지펫은 사용자의 건강한 식단을 먹고 자라게 됩니다.",
   "initialAdoptionDogSectionLabel": "강아지",
   "initialAdoptionCatSectionLabel": "고양이",
-  "initialAdoptionReceiveButton": "분양받기"
+  "initialAdoptionReceiveButton": "분양받기",
+  "mealPanelTitle": "먹이주기",
+  "mealPanelTodayCertLabel": "오늘의 식단 인증!",
+  "mealPanelBrunchButton": "아점 식단",
+  "mealPanelDinnerButton": "저녁 식단",
+  "mealPanelFootnote1": "아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시",
+  "mealPanelFootnote2": "실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.",
+  "mealPanelFootnote3": "촬영된 식단 사진은 식단 일지에서 조회 가능해요.",
+  "mealPanelUploading": "판정 중..."
 }
