@@ -575,7 +575,7 @@ abstract class AppLocalizations {
   /// No description provided for @dietGoal.
   ///
   /// In ko, this message translates to:
-  /// **'식단목적'**
+  /// **'식단 목적'**
   String get dietGoal;
 
   /// No description provided for @start.
@@ -659,19 +659,19 @@ abstract class AppLocalizations {
   /// No description provided for @mealPanelFootnote1.
   ///
   /// In ko, this message translates to:
-  /// **'아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시'**
+  /// **'• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시'**
   String get mealPanelFootnote1;
 
   /// No description provided for @mealPanelFootnote2.
   ///
   /// In ko, this message translates to:
-  /// **'실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.'**
+  /// **'• 실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.'**
   String get mealPanelFootnote2;
 
   /// No description provided for @mealPanelFootnote3.
   ///
   /// In ko, this message translates to:
-  /// **'촬영된 식단 사진은 식단 일지에서 조회 가능해요.'**
+  /// **'• 촬영된 식단 사진은 식단 일지에서 조회 가능해요.'**
   String get mealPanelFootnote3;
 
   /// No description provided for @mealPanelUploading.
@@ -679,6 +679,18 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'판정 중...'**
   String get mealPanelUploading;
+
+  /// No description provided for @profilePanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필'**
+  String get profilePanelTitle;
+
+  /// No description provided for @profilePanelFootnoteAi.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!'**
+  String get profilePanelFootnoteAi;
 }
 
 class _AppLocalizationsDelegate

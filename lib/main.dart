@@ -429,8 +429,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _mealOpenedFromPetBanner = false;
   bool _isMealPanelOpen = false;
   bool _gameMenuPanelOpen = false;
+  /// 게임 메뉴 패널 내부에서 열리는 프로필 수정 창.
+  bool _isProfilePanelOpen = false;
+  bool _profilePanelSwapInProgress = false;
+  bool _profileOpenedFromGameMenu = false; // ignore: unused_field
+  bool _isSavingProfilePanel = false;
   late AnimationController _gameMenuPanelController;
   late Animation<double> _gameMenuPanelCurve;
+  late AnimationController _gameProfileSwapController;
+  late Animation<double> _gameProfileSwapCurve;
   late AnimationController _petToySwapController;
   late Animation<double> _petToySwapCurve;
   late AnimationController _petMealSwapController;
@@ -543,6 +550,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+    _gameProfileSwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _gameProfileSwapCurve = CurvedAnimation(
+      parent: _gameProfileSwapController,
+      curve: Curves.easeInOutCubic,
+    );
     _bootstrap();
   }
 
@@ -559,6 +574,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _petMealSwapController.dispose();
     _dragHintPulseController.dispose();
     _gameMenuPanelController.dispose();
+    _gameProfileSwapController.dispose();
     super.dispose();
   }
 
@@ -571,6 +587,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         nonEmpty(p['gender']) &&
         nonEmpty(p['age_range']) &&
         nonEmpty(p['diet_goal']);
+  }
+
+  /// 프로필 완료 → 선택 분양 → 분양 펫 이름 저장이 끝나기 전까지
+  /// 좌/우 상단 HUD 코너 버튼(베지펫 정보, 게임 메뉴) 터치를 막는다.
+  bool _isInitialOnboardingHudBlocked() {
+    if (!_isProfileComplete()) return true;
+    if (_isSavingProfile || _isProfileSetupClosing) return true;
+    if (_isInitialAdoptionPanelVisible ||
+        _isInitialAdoptionPanelClosing ||
+        _isInitialAdoptionInFlight) {
+      return true;
+    }
+    if (_isNamingDialogOpen) return true;
+    if (_activePet == null) return true;
+    final nick = _activePet!['nickname']?.toString().trim() ?? '';
+    if (nick.isEmpty) return true;
+    return false;
   }
 
   void _syncProfileFormFromFetched() {
@@ -714,6 +747,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required String? selectedValue,
     required ValueChanged<String> onChanged,
+    double dropdownWidth = 176,
   }) {
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     _openProfileSelectKey = selectKey;
@@ -722,7 +756,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final overlay = Overlay.of(context, rootOverlay: true);
     _profileSelectScrollController?.dispose();
     _profileSelectScrollController = ScrollController();
-    final menuHeight = (options.length > 3 ? 3 : options.length) * 30.0;
+    final menuHeight = min(options.length, 3) * 30.0;
     _profileSelectOverlayEntry = OverlayEntry(
       builder: (context) {
         return Positioned.fill(
@@ -759,7 +793,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ? Offset.zero
                               : const Offset(0, -0.04),
                           child: SizedBox(
-                            width: 176,
+                            width: dropdownWidth,
                             child: Container(
                               decoration: BoxDecoration(
                                 color: Colors.white,
@@ -815,9 +849,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required ValueChanged<String> onChanged,
     required bool enabled,
+    double fieldWidth = 176,
   }) {
     final link = _profileSelectLinks.putIfAbsent(selectKey, LayerLink.new);
     final isOpen = _openProfileSelectKey == selectKey;
+
+    final fieldChild = Container(
+      width: fieldWidth,
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              value ?? '',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+              ),
+            ),
+          ),
+          Icon(
+            isOpen
+                ? Icons.keyboard_arrow_up_rounded
+                : Icons.keyboard_arrow_down_rounded,
+            size: 16,
+            color: const Color(0xFF757575),
+          ),
+        ],
+      ),
+    );
+
     return CompositedTransformTarget(
       link: link,
       child: InkWell(
@@ -836,40 +905,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   options: options,
                   selectedValue: value,
                   onChanged: onChanged,
+                  dropdownWidth: fieldWidth,
                 );
               },
-        child: Container(
-          width: 176,
-          height: 26,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  value ?? '',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF4A4A4A),
-                  ),
-                ),
-              ),
-              Icon(
-                isOpen
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 16,
-                color: const Color(0xFF757575),
-              ),
-            ],
-          ),
-        ),
+        child: fieldChild,
       ),
     );
   }
@@ -879,7 +918,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required String? selectedValue,
     required ValueChanged<String> onChanged,
   }) {
-    return ListView.builder(
+    final listView = ListView.builder(
       controller: _profileSelectScrollController,
       padding: EdgeInsets.zero,
       itemExtent: 30,
@@ -913,7 +952,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               option,
               textAlign: TextAlign.left,
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF4A4A4A),
               ),
@@ -921,6 +960,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         );
       },
+    );
+    if (options.length <= 3) {
+      return listView;
+    }
+    return Scrollbar(
+      controller: _profileSelectScrollController,
+      thumbVisibility: true,
+      child: listView,
     );
   }
 
@@ -2663,6 +2710,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
         _gameMenuPanelOpen = false;
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -2674,6 +2724,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _petToySwapController.value = 0;
       _petMealSwapController.value = 0;
       _gameMenuPanelController.value = 0;
+      _gameProfileSwapController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -2810,6 +2861,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
         _gameMenuPanelOpen = false;
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -2822,6 +2876,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _petToySwapController.value = 0;
       _petMealSwapController.value = 0;
       _gameMenuPanelController.value = 0;
+      _gameProfileSwapController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
       await _waitForUiSettle();
@@ -3963,7 +4018,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _status == _ViewStatus.ready && profileComplete && !hasActivePet;
     final shouldMountInitialAdoption =
         showInitialAdoption || _isInitialAdoptionPanelClosing;
-    if (!showProfileSetup && _openProfileSelectKey != null) {
+    final profileSelectOwnerActive = showProfileSetup ||
+        _isProfilePanelOpen ||
+        _profilePanelSwapInProgress;
+    if (!profileSelectOwnerActive && _openProfileSelectKey != null) {
       unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     }
     if (showProfileSetup &&
@@ -4071,6 +4129,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petToySwapInProgress ||
         _isMealPanelOpen ||
         _petMealSwapInProgress;
+    final blockHudByInitialOnboarding = _isInitialOnboardingHudBlocked();
+    final isPetInfoCornerTouchBlocked =
+        hidePetInfoCornerIcon || blockHudByInitialOnboarding;
+    final isGameMenuCornerTouchBlocked =
+        hidePetInfoCornerIcon || blockHudByInitialOnboarding;
     return Positioned.fill(
       child: Stack(
         children: [
@@ -4093,7 +4156,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             width: 64,
             height: 64,
             child: IgnorePointer(
-              ignoring: hidePetInfoCornerIcon,
+              ignoring: isPetInfoCornerTouchBlocked,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOutCubic,
@@ -4118,7 +4181,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             width: 64,
             height: 64,
             child: IgnorePointer(
-              ignoring: hidePetInfoCornerIcon,
+              ignoring: isGameMenuCornerTouchBlocked,
               child: SizedBox(
                 width: 64,
                 height: 64,
@@ -4732,6 +4795,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _safeSetState(() {
         _isPetInfoBannerOpen = true;
         _gameMenuPanelOpen = false;
+        _resetGameProfilePanelStateForMenuClose();
       });
       unawaited(_gameMenuPanelController.reverse());
       return;
@@ -5349,8 +5413,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _completeToyMenuDrop(details.data);
       },
       builder: (context, candidateData, rejectedData) {
-        return const SizedBox.expand(
-          child: ColoredBox(color: Colors.transparent),
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => unawaited(_closePetChildPanelByOutsideTap()),
+          child: const SizedBox.expand(
+            child: ColoredBox(color: Colors.transparent),
+          ),
         );
       },
     );
@@ -5476,28 +5544,41 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return const SizedBox.shrink();
     }
 
-    return AnimatedBuilder(
-      animation: _petMealSwapController,
-      builder: (context, _) {
-        final t = _petMealSwapCurve.value.clamp(0.0, 1.0);
-        final effectiveT = _petMealSwapInProgress ? t : 1.0;
-        final o = effectiveT.clamp(0.0, 1.0);
-        final s = 0.92 + 0.08 * effectiveT;
-        return Positioned(
+    return Stack(
+      clipBehavior: Clip.none,
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => unawaited(_closePetChildPanelByOutsideTap()),
+            child: const SizedBox.expand(),
+          ),
+        ),
+        Positioned(
           left: 40,
           top: 40,
           width: 246,
           height: 212,
-          child: Opacity(
-            opacity: o,
-            child: Transform.scale(
-              scale: s,
-              alignment: Alignment.center,
-              child: _buildMealGlassPanel(),
-            ),
+          child: AnimatedBuilder(
+            animation: _petMealSwapController,
+            builder: (context, _) {
+              final t = _petMealSwapCurve.value.clamp(0.0, 1.0);
+              final effectiveT = _petMealSwapInProgress ? t : 1.0;
+              final o = effectiveT.clamp(0.0, 1.0);
+              final s = 0.92 + 0.08 * effectiveT;
+              return Opacity(
+                opacity: o,
+                child: Transform.scale(
+                  scale: s,
+                  alignment: Alignment.center,
+                  child: _buildMealGlassPanel(),
+                ),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 
@@ -6884,6 +6965,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
   }
 
+  /// 베지펫 정보창에서 연 놀아주기/먹이주기만 닫고 일반 마당으로 복귀한다.
+  /// (뒤로가기 버튼의 정보창 복귀 경로와 구분)
+  Future<void> _closePetChildPanelByOutsideTap() async {
+    if (_petToySwapInProgress || _petMealSwapInProgress) return;
+    if (_isCompletingToyPlay || _isUploadingMeal) return;
+
+    final closingToy = _isToyMenuOpen;
+    final closingMeal = _isMealPanelOpen;
+    if (!closingToy && !closingMeal) return;
+
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+
+    if (closingToy) {
+      _petToySwapController.value = 1.0;
+      _safeSetState(() {
+        _petToySwapInProgress = true;
+        _isToyDropHovering = false;
+        _toyOpenedFromPetBanner = false;
+        _isPetInfoBannerOpen = false;
+      });
+
+      await _petToySwapController.reverse(from: 1.0);
+      if (!mounted) return;
+      _safeSetState(() {
+        _isToyMenuOpen = false;
+        _isCompletingToyPlay = false;
+        _petToySwapInProgress = false;
+        _toyOpenedFromPetBanner = false;
+        _isPetInfoBannerOpen = false;
+      });
+    } else if (closingMeal) {
+      _petMealSwapController.value = 1.0;
+      _safeSetState(() {
+        _petMealSwapInProgress = true;
+        _mealOpenedFromPetBanner = false;
+        _isPetInfoBannerOpen = false;
+      });
+
+      await _petMealSwapController.reverse(from: 1.0);
+      if (!mounted) return;
+      _safeSetState(() {
+        _isMealPanelOpen = false;
+        _petMealSwapInProgress = false;
+        _mealOpenedFromPetBanner = false;
+        _isPetInfoBannerOpen = false;
+      });
+    }
+  }
+
   // --------------------------------------------------------------------------
   // 우측 상단 게임 메뉴 (844×390 기준 (558,40) · 246×310 글래스 패널, 슬라이드+페이드)
   // --------------------------------------------------------------------------
@@ -6894,11 +7025,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     return AnimatedBuilder(
-      animation: _gameMenuPanelController,
+      animation: Listenable.merge([
+        _gameMenuPanelController,
+        _gameProfileSwapController,
+      ]),
       builder: (context, _) {
         final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
         final slide =
             _kGameMenuPanelOffLeft + (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+        final swapT = _gameProfileSwapCurve.value.clamp(0.0, 1.0);
+        final showMenuLayer =
+            !_isProfilePanelOpen || _profilePanelSwapInProgress;
+        final showProfileLayer =
+            _isProfilePanelOpen || _profilePanelSwapInProgress;
+        final menuOpacity = showProfileLayer ? (1.0 - swapT) : 1.0;
+        final profileOpacity = showProfileLayer ? swapT : 0.0;
+        final menuScale = 1.0 - (0.04 * swapT);
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -6916,12 +7058,373 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               height: _kGameMenuPanelH,
               child: Opacity(
                 opacity: t,
-                child: _buildYardGameMenuGlassPanel(),
+                child: SizedBox(
+                  width: _kGameMenuPanelW,
+                  height: _kGameMenuPanelH,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (showMenuLayer)
+                        IgnorePointer(
+                          ignoring: menuOpacity < 0.05,
+                          child: Opacity(
+                            opacity: menuOpacity.clamp(0.0, 1.0),
+                            child: Transform.scale(
+                              scale: menuScale,
+                              alignment: Alignment.center,
+                              child: _buildYardGameMenuGlassPanel(),
+                            ),
+                          ),
+                        ),
+                      if (showProfileLayer)
+                        IgnorePointer(
+                          ignoring: profileOpacity < 0.05,
+                          child: Opacity(
+                            opacity: profileOpacity.clamp(0.0, 1.0),
+                            child: _buildGameMenuProfileGlassPanel(),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  static const double _kGameMenuProfileFieldW = 172;
+  static const double _kGameMenuProfileLabelW = 50;
+  static const double _kGameMenuProfileRowGap = 4;
+
+  Widget _buildGameMenuProfileAvatarDummy(String? gender) {
+    final isFemale = gender == '여자';
+    final isMale = gender == '남자';
+    final IconData icon;
+    if (isFemale) {
+      icon = Icons.face_3_rounded;
+    } else if (isMale) {
+      icon = Icons.face_rounded;
+    } else {
+      icon = Icons.person_outline_rounded;
+    }
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+          width: 0.9,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        size: 28,
+        color: const Color(0xFF5C5C5C),
+      ),
+    );
+  }
+
+  Widget _buildGameMenuProfileGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    final genderForAvatar =
+        _selectedGender ?? _profile?['gender']?.toString();
+    final fieldsEnabled = !_isSavingProfile && !_isSavingProfilePanel;
+
+    Widget rowForWidth(double fieldW, String label, Widget field) {
+      final useW = fieldW.clamp(100.0, _kGameMenuProfileFieldW);
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: _kGameMenuProfileLabelW,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF000000),
+                height: 1.15,
+              ),
+            ),
+          ),
+          const SizedBox(width: _kGameMenuProfileRowGap),
+          SizedBox(width: useW, child: field),
+        ],
+      );
+    }
+
+    Widget fieldShell(Widget child) {
+      return Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+        ),
+        alignment: Alignment.centerLeft,
+        child: child,
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kGameMenuPanelW,
+          height: _kGameMenuPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => unawaited(_closeProfilePanelToGameMenu()),
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 9,
+                top: 14,
+                right: 8,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 28),
+                  child: Text(
+                    l10n.profilePanelTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF000000),
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 48,
+                bottom: 8,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(9, 0, 8, 0),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: _buildGameMenuProfileAvatarDummy(genderForAvatar),
+                        ),
+                        const SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final fieldW = constraints.maxWidth -
+                                  _kGameMenuProfileLabelW -
+                                  _kGameMenuProfileRowGap;
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  rowForWidth(
+                                    fieldW,
+                                    l10n.nickname,
+                                    fieldShell(
+                                      TextField(
+                                        controller: _nicknameController,
+                                        enabled: fieldsEnabled,
+                                        onChanged: (_) {
+                                          _enforceProfileNicknameMaxLength();
+                                          setState(() {});
+                                        },
+                                        onEditingComplete: () {
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                          unawaited(
+                                            _submitGameMenuProfileNickname(),
+                                          );
+                                        },
+                                        onSubmitted: (_) {
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                          unawaited(
+                                            _submitGameMenuProfileNickname(),
+                                          );
+                                        },
+                                        textInputAction: TextInputAction.done,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF4A4A4A),
+                                          height: 1.1,
+                                        ),
+                                        maxLines: 1,
+                                        maxLength: _kProfileNicknameMaxLength,
+                                        maxLengthEnforcement:
+                                            MaxLengthEnforcement.enforced,
+                                        inputFormatters: [
+                                          LengthLimitingTextInputFormatter(
+                                            _kProfileNicknameMaxLength,
+                                            maxLengthEnforcement:
+                                                MaxLengthEnforcement.enforced,
+                                          ),
+                                        ],
+                                        buildCounter: (
+                                          BuildContext context, {
+                                          required int currentLength,
+                                          required bool isFocused,
+                                          required int? maxLength,
+                                        }) {
+                                          return null;
+                                        },
+                                        decoration: const InputDecoration(
+                                          isDense: true,
+                                          border: InputBorder.none,
+                                          contentPadding: EdgeInsets.zero,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  rowForWidth(
+                                    fieldW,
+                                    l10n.gender,
+                                    _buildCompactProfileSelect(
+                                      selectKey: 'gm_gender',
+                                      value: _selectedGender,
+                                      options: _genderOptions,
+                                      enabled: fieldsEnabled,
+                                      fieldWidth: fieldW.clamp(
+                                        100.0,
+                                        _kGameMenuProfileFieldW,
+                                      ),
+                                      onChanged: (value) {
+                                        setState(() => _selectedGender = value);
+                                        unawaited(
+                                          _persistGameMenuProfilePatch(
+                                            {'gender': value},
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  rowForWidth(
+                                    fieldW,
+                                    l10n.ageRange,
+                                    _buildCompactProfileSelect(
+                                      selectKey: 'gm_ageRange',
+                                      value: _selectedAgeRange,
+                                      options: _ageRangeOptions,
+                                      enabled: fieldsEnabled,
+                                      fieldWidth: fieldW.clamp(
+                                        100.0,
+                                        _kGameMenuProfileFieldW,
+                                      ),
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _selectedAgeRange = value,
+                                        );
+                                        unawaited(
+                                          _persistGameMenuProfilePatch(
+                                            {'age_range': value},
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  rowForWidth(
+                                    fieldW,
+                                    l10n.dietGoal,
+                                    _buildCompactProfileSelect(
+                                      selectKey: 'gm_dietGoal',
+                                      value: _selectedDietGoal,
+                                      options: _dietGoalOptions,
+                                      enabled: fieldsEnabled,
+                                      fieldWidth: fieldW.clamp(
+                                        100.0,
+                                        _kGameMenuProfileFieldW,
+                                      ),
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _selectedDietGoal = value,
+                                        );
+                                        unawaited(
+                                          _persistGameMenuProfilePatch(
+                                            {'diet_goal': value},
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    l10n.profilePanelFootnoteAi,
+                                    softWrap: true,
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF4A4A4A),
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -6960,6 +7463,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   style: _yardGameMenuTitleTextStyle(),
                 ),
                 const SizedBox(height: _kYardGameMenuTitleBelowGap),
+                const SizedBox(height: 2),
                 SizedBox(
                   height: _kYardGameMenuRowCellH,
                   child: _yardGameMenuIconRow(items.sublist(0, 3)),
@@ -7114,13 +7618,120 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _onYardGameMenuItemTap(String label) async {
+    if (label == '프로필') {
+      await _openProfilePanelFromGameMenu();
+      return;
+    }
     await _closeGameMenuPanel();
     if (!mounted) return;
     await _onMenuTap(label);
   }
 
+  Future<void> _persistGameMenuProfilePatch(Map<String, dynamic> patch) async {
+    if (_isSavingProfilePanel) return;
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack('로그인이 필요해요.');
+      return;
+    }
+    _safeSetState(() => _isSavingProfilePanel = true);
+    try {
+      await supabase.from('profiles').update({
+        ...patch,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user.id);
+      await _fetchProfile();
+      if (!mounted) return;
+      _syncProfileFormFromFetched();
+      _safeSetState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('프로필 저장 실패: $e');
+      try {
+        await _fetchProfile();
+      } catch (_) {}
+      if (mounted) {
+        _syncProfileFormFromFetched();
+        _safeSetState(() {});
+      }
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isSavingProfilePanel = false);
+      }
+    }
+  }
+
+  Future<void> _submitGameMenuProfileNickname() async {
+    if (_isSavingProfilePanel) return;
+    _enforceProfileNicknameMaxLength();
+    final nickname = _nicknameController.text.trim();
+    if (nickname.isEmpty) {
+      _showSnack('닉네임을 입력해주세요.');
+      return;
+    }
+    if (nickname.characters.length > _kProfileNicknameMaxLength) {
+      _showSnack('닉네임은 8자까지만 입력할 수 있어요.');
+      return;
+    }
+    await _persistGameMenuProfilePatch({'nickname': nickname});
+  }
+
+  Future<void> _openProfilePanelFromGameMenu() async {
+    if (_profilePanelSwapInProgress) return;
+    final user = supabase.auth.currentUser;
+    if (user == null || _profile == null) {
+      _showSnack('프로필 정보를 불러올 수 없어요.');
+      return;
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    _syncProfileFormFromFetched();
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    _safeSetState(() {
+      _profilePanelSwapInProgress = true;
+      _profileOpenedFromGameMenu = true;
+      _isProfilePanelOpen = true;
+    });
+    await _gameProfileSwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _profilePanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closeProfilePanelToGameMenu() async {
+    if (_profilePanelSwapInProgress) return;
+    _dismissFocus();
+    await _closeProfileSelectOverlay(animated: true);
+    _gameProfileSwapController.value = 1.0;
+    _safeSetState(() {
+      _profilePanelSwapInProgress = true;
+    });
+    await _gameProfileSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _profilePanelSwapInProgress = false;
+      _isProfilePanelOpen = false;
+      _profileOpenedFromGameMenu = false;
+    });
+  }
+
+  void _resetGameProfilePanelStateForMenuClose() {
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0;
+    _isProfilePanelOpen = false;
+    _profilePanelSwapInProgress = false;
+    _profileOpenedFromGameMenu = false;
+  }
+
   Future<void> _closeGameMenuPanel() async {
     if (!_gameMenuPanelOpen) return;
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    if (mounted) {
+      _safeSetState(_resetGameProfilePanelStateForMenuClose);
+    }
     await _gameMenuPanelController.reverse();
     if (!mounted) return;
     _safeSetState(() {
@@ -7139,6 +7750,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() {
       _isPetInfoBannerOpen = false;
       _gameMenuPanelOpen = true;
+      _resetGameProfilePanelStateForMenuClose();
     });
     _gameMenuPanelController.value = 0;
     await _gameMenuPanelController.forward(from: 0);
@@ -7151,8 +7763,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _openBagSheet();
     } else if (label == '도감') {
       await _openPokedexSheet();
-    } else if (label == '프로필') {
-      await _openProfileSheet();
     } else if (label == '식단일지') {
       await _openDietDiarySheet();
     } else if (label == '상점') {
@@ -8576,6 +9186,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
         _gameMenuPanelOpen = false;
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
         _nicknameController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
@@ -8595,6 +9208,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _petToySwapController.value = 0;
       _petMealSwapController.value = 0;
       _gameMenuPanelController.value = 0;
+      _gameProfileSwapController.value = 0;
 
       await _waitForUiSettle();
       if (!mounted) return;
@@ -8625,6 +9239,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   //   - 컬럼이 없으면 update 시 PostgREST 에서 에러가 나므로,
   //     필요시 Supabase SQL 에서 아래를 한 번 실행해야 한다.
   //       alter table public.profiles add column if not exists resolution text;
+  // ignore: unused_element — 게임 메뉴 프로필 패널로 대체되었으나, 동일 폼 참고용으로 유지.
   Future<void> _openProfileSheet() async {
     _dismissFocus();
 
@@ -9548,13 +10163,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       height: 1.0,
     );
     const labelStyle = TextStyle(
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: FontWeight.w600,
       color: Color(0xFF000000),
       height: 1.0,
     );
     const fieldTextStyle = TextStyle(
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: FontWeight.w600,
       color: Color(0xFF4A4A4A),
       height: 1.0,
@@ -10233,13 +10848,13 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
       height: 1.0,
     );
     const labelStyle = TextStyle(
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: FontWeight.w600,
       color: Color(0xFF000000),
       height: 1.0,
     );
     const fieldTextStyle = TextStyle(
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: FontWeight.w600,
       color: Color(0xFF4A4A4A),
       height: 1.0,
@@ -10405,9 +11020,9 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
                                           contentPadding: EdgeInsets.zero,
                                           hintText: '이름을 지어주세요.',
                                           hintStyle: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500,
-                                            color: Color(0xFF9A9A9A),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF4A4A4A),
                                           ),
                                           errorText: null,
                                         ),

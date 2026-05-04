@@ -300,16 +300,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mealPanelDinnerButton => 'Dinner meal';
 
   @override
-  String get mealPanelFootnote1 => 'Brunch: 06–14 / Dinner: 17–22';
+  String get mealPanelFootnote1 => '• Brunch: 06–14 / Dinner: 17–22';
 
   @override
   String get mealPanelFootnote2 =>
-      'Only photos taken with the live camera are used for AI evaluation.';
+      '• Only photos taken with the live camera are used for AI evaluation.';
 
   @override
   String get mealPanelFootnote3 =>
-      'Uploaded meal photos can be viewed in the diet diary.';
+      '• Captured meal photos can be viewed in the diet diary.';
 
   @override
   String get mealPanelUploading => 'Evaluating...';
+
+  @override
+  String get profilePanelTitle => 'Profile';
+
+  @override
+  String get profilePanelFootnoteAi =>
+      '• Meal feedback is based on gender, age range, and diet goals.';
 }

@@ -79,7 +79,7 @@
   "nickname": "닉네임",
   "gender": "성별",
   "ageRange": "나이대",
-  "dietGoal": "식단목적",
+  "dietGoal": "식단 목적",
   "start": "시작하기",
   "inYardLoading": "불러오는 중...",
   "inYardErrorTitle": "앱 준비 중 문제가 발생했어요",
@@ -93,8 +93,10 @@
   "mealPanelTodayCertLabel": "오늘의 식단 인증!",
   "mealPanelBrunchButton": "아점 식단",
   "mealPanelDinnerButton": "저녁 식단",
-  "mealPanelFootnote1": "아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시",
-  "mealPanelFootnote2": "실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.",
-  "mealPanelFootnote3": "촬영된 식단 사진은 식단 일지에서 조회 가능해요.",
-  "mealPanelUploading": "판정 중..."
+  "mealPanelFootnote1": "• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시",
+  "mealPanelFootnote2": "• 실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.",
+  "mealPanelFootnote3": "• 촬영된 식단 사진은 식단 일지에서 조회 가능해요.",
+  "mealPanelUploading": "판정 중...",
+  "profilePanelTitle": "프로필",
+  "profilePanelFootnoteAi": "• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!"
 }

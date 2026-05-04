@@ -93,8 +93,10 @@
   "mealPanelTodayCertLabel": "Today's meal verification!",
   "mealPanelBrunchButton": "Brunch meal",
   "mealPanelDinnerButton": "Dinner meal",
-  "mealPanelFootnote1": "Brunch: 06–14 / Dinner: 17–22",
-  "mealPanelFootnote2": "Only photos taken with the live camera are used for AI evaluation.",
-  "mealPanelFootnote3": "Uploaded meal photos can be viewed in the diet diary.",
-  "mealPanelUploading": "Evaluating..."
+  "mealPanelFootnote1": "• Brunch: 06–14 / Dinner: 17–22",
+  "mealPanelFootnote2": "• Only photos taken with the live camera are used for AI evaluation.",
+  "mealPanelFootnote3": "• Captured meal photos can be viewed in the diet diary.",
+  "mealPanelUploading": "Evaluating...",
+  "profilePanelTitle": "Profile",
+  "profilePanelFootnoteAi": "• Meal feedback is based on gender, age range, and diet goals."
 }

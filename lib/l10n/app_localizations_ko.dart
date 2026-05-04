@@ -248,7 +248,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get ageRange => '나이대';
 
   @override
-  String get dietGoal => '식단목적';
+  String get dietGoal => '식단 목적';
 
   @override
   String get start => '시작하기';
@@ -290,14 +290,20 @@ class AppLocalizationsKo extends AppLocalizations {
   String get mealPanelDinnerButton => '저녁 식단';
 
   @override
-  String get mealPanelFootnote1 => '아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시';
+  String get mealPanelFootnote1 => '• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시';
 
   @override
-  String get mealPanelFootnote2 => '실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.';
+  String get mealPanelFootnote2 => '• 실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.';
 
   @override
-  String get mealPanelFootnote3 => '촬영된 식단 사진은 식단 일지에서 조회 가능해요.';
+  String get mealPanelFootnote3 => '• 촬영된 식단 사진은 식단 일지에서 조회 가능해요.';
 
   @override
   String get mealPanelUploading => '판정 중...';
+
+  @override
+  String get profilePanelTitle => '프로필';
+
+  @override
+  String get profilePanelFootnoteAi => '• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!';
 }
