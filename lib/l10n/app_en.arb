@@ -98,5 +98,8 @@
   "mealPanelFootnote3": "• Captured meal photos can be viewed in the diet diary.",
   "mealPanelUploading": "Evaluating...",
   "profilePanelTitle": "Profile",
-  "profilePanelFootnoteAi": "• Meal feedback is based on gender, age range, and diet goals."
+  "profilePanelFootnoteAi": "• Meal feedback is based on gender, age range, and diet goals.",
+  "dietDiaryPanelTitle": "Diet diary",
+  "dietDiaryMonthPickerTitle": "Choose month",
+  "dietDiarySavedSnackbar": "Diet diary saved."
 }

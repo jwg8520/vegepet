@@ -306,4 +306,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get profilePanelFootnoteAi => '• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!';
+
+  @override
+  String get dietDiaryPanelTitle => '식단일지';
+
+  @override
+  String get dietDiaryMonthPickerTitle => '월 선택';
+
+  @override
+  String get dietDiarySavedSnackbar => '식단일지가 저장되었어요.';
 }

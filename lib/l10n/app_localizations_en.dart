@@ -319,4 +319,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get profilePanelFootnoteAi =>
       '• Meal feedback is based on gender, age range, and diet goals.';
+
+  @override
+  String get dietDiaryPanelTitle => 'Diet diary';
+
+  @override
+  String get dietDiaryMonthPickerTitle => 'Choose month';
+
+  @override
+  String get dietDiarySavedSnackbar => 'Diet diary saved.';
 }

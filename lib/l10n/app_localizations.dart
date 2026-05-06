@@ -691,6 +691,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!'**
   String get profilePanelFootnoteAi;
+
+  /// No description provided for @dietDiaryPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단일지'**
+  String get dietDiaryPanelTitle;
+
+  /// No description provided for @dietDiaryMonthPickerTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'월 선택'**
+  String get dietDiaryMonthPickerTitle;
+
+  /// No description provided for @dietDiarySavedSnackbar.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단일지가 저장되었어요.'**
+  String get dietDiarySavedSnackbar;
 }
 
 class _AppLocalizationsDelegate
