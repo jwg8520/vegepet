@@ -439,6 +439,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 게임 메뉴 ↔ 식단일지 창 전환
   bool _isDietDiaryPanelOpen = false;
   bool _dietDiaryPanelSwapInProgress = false;
+  final GlobalKey<_DietDiarySheetPanelState> _dietDiarySheetPanelKey =
+      GlobalKey<_DietDiarySheetPanelState>();
   late AnimationController _gameDietDiarySwapController;
   late Animation<double> _gameDietDiarySwapCurve;
   late AnimationController _petToySwapController;
@@ -7080,7 +7082,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => unawaited(_closeGameMenuPanel()),
+                onTap: () => unawaited(_handleGameMenuBackdropTap()),
                 child: const ColoredBox(color: Colors.transparent),
               ),
             ),
@@ -7800,6 +7802,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
   }
 
+  Future<void> _handleGameMenuBackdropTap() async {
+    if (_isDietDiaryPanelOpen) {
+      final handled =
+          await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??
+          false;
+      if (handled) return;
+    }
+    await _closeGameMenuPanel();
+  }
+
   /// 식단일지 상단 우측 "May. 26" 형식 (MVP 와이어 기준, 월 약어 + 연도 2자리).
   String _formatDietDiaryMonthYearCaption(DateTime m) {
     final raw = DateFormat('MMM', 'en_US').format(m);
@@ -7833,6 +7845,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ],
           ),
           child: _DietDiarySheetPanel(
+            key: _dietDiarySheetPanelKey,
             embeddedInGameMenuPanel: true,
             onEmbeddedBack: () => unawaited(_closeDietDiaryPanelToGameMenu()),
             monthYearCaptionBuilder: _formatDietDiaryMonthYearCaption,
@@ -9952,8 +9965,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required Future<void> Function() onNextMonth,
     required ValueChanged<DateTime> onTapDate,
   }) {
-    final theme = Theme.of(sheetContext);
-
     const kBlack = Color(0xFF000000);
     const kMuted = Color(0xFF6A6A6A);
     const kSunday = Color(0xFF7E7E7E);
@@ -10012,8 +10023,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              color: isToday
-                  ? theme.colorScheme.primary.withValues(alpha: 0.12)
+              gradient: isToday
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0xFFA9C9FF),
+                        Color(0xFFBFD9FF),
+                      ],
+                    )
                   : null,
             ),
             child: Center(
@@ -10174,11 +10192,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              padding: const EdgeInsets.fromLTRB(9, 4, 9, 6),
               decoration: BoxDecoration(
-                color: isSelected
-                    ? Colors.black.withValues(alpha: 0.09)
-                    : Colors.transparent,
+                gradient: isSelected
+                    ? const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFFA9C9FF),
+                          Color(0xFFBFD9FF),
+                        ],
+                      )
+                    : null,
+                color: isSelected ? null : Colors.transparent,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
@@ -11353,6 +11379,7 @@ class _AffectionProgressInfo {
 // ============================================================================
 class _DietDiarySheetPanel extends StatefulWidget {
   const _DietDiarySheetPanel({
+    super.key,
     required this.initialMonth,
     required this.clampMonth,
     required this.isMonthInRange,
@@ -11420,6 +11447,8 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
   String mode = 'calendar'; // 'calendar' | 'monthPicker' | 'detail'
   DateTime? selectedDate;
   bool sheetLoading = false;
+  final GlobalKey<_DietDiaryDetailPanelState> _detailPanelKey =
+      GlobalKey<_DietDiaryDetailPanelState>();
 
   @override
   void initState() {
@@ -11444,6 +11473,72 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
         sheetLoading = false;
       });
     }
+  }
+
+  Future<void> _moveDetailDate(int deltaDays) async {
+    final current = selectedDate;
+    if (current == null) return;
+    final nextDate = current.add(Duration(days: deltaDays));
+    final nextMonth = DateTime(nextDate.year, nextDate.month, 1);
+    final isMonthChanged =
+        visibleMonth.year != nextMonth.year || visibleMonth.month != nextMonth.month;
+    if (isMonthChanged) {
+      await reloadMonth(nextMonth, showHeaderLoading: false);
+      if (!mounted) return;
+    }
+    setState(() {
+      selectedDate = nextDate;
+    });
+  }
+
+  Future<bool> handleOutsideDismiss() async {
+    if (mode != 'detail' || selectedDate == null) return false;
+    final ok = await _detailPanelKey.currentState?.saveForPanelExit() ?? true;
+    if (!mounted) return true;
+    if (ok) {
+      setState(() {
+        mode = 'calendar';
+        selectedDate = null;
+      });
+    }
+    return true;
+  }
+
+  Widget _detailBottomArrow({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(icon, size: 22, color: const Color(0xFF000000)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleDetailBackToCalendar() async {
+    if (mode != 'detail' || selectedDate == null) {
+      widget.onEmbeddedBack?.call();
+      return;
+    }
+    final ok = await _detailPanelKey.currentState?.saveForPanelExit() ?? true;
+    if (!mounted || !ok) return;
+    setState(() {
+      mode = 'calendar';
+      selectedDate = null;
+    });
+  }
+
+  String _formatDetailHeaderCaption(DateTime d) {
+    final raw = DateFormat('MMM', 'en_US').format(d);
+    final mon = raw.endsWith('.') ? raw : '$raw.';
+    final yy = (d.year % 100).toString().padLeft(2, '0');
+    return '${d.day}. $mon $yy';
   }
 
   @override
@@ -11473,19 +11568,14 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
       final dk = widget.dateKey(selectedDate!);
       final dayLogs = List<Map<String, dynamic>>.from(logs[dk] ?? const []);
       body = _DietDiaryDetailPanel(
-        key: ValueKey('diary-detail-$dk'),
+        key: _detailPanelKey,
         date: selectedDate!,
         logs: dayLogs,
         signedUrlBuilder: widget.signedUrlBuilder,
         onPhotoTap: widget.onPhotoTap,
         fetchNote: widget.fetchNote,
         saveNote: widget.saveNote,
-        onBack: () {
-          setState(() {
-            mode = 'calendar';
-            selectedDate = null;
-          });
-        },
+        onMoveDate: _moveDetailDate,
         onSavedSuccess: widget.onSavedSuccess,
       );
     } else {
@@ -11515,7 +11605,12 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
     if (widget.embeddedInGameMenuPanel) {
       final l10n = AppLocalizations.of(context);
       final caption = widget.monthYearCaptionBuilder!(visibleMonth);
-      Widget embeddedHeader() {
+      Widget embeddedHeader({
+        required String rightCaption,
+        required VoidCallback? onCaptionTap,
+        VoidCallback? onBackTap,
+        bool showLoading = false,
+      }) {
         return SizedBox(
           height: 48,
           child: Stack(
@@ -11530,7 +11625,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
                   color: Colors.transparent,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
-                    onTap: widget.onEmbeddedBack,
+                    onTap: onBackTap ?? widget.onEmbeddedBack,
                     child: const SizedBox(
                       width: 28,
                       height: 28,
@@ -11563,7 +11658,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
                         ),
                       ),
                     ),
-                    if (sheetLoading)
+                    if (showLoading)
                       const Padding(
                         padding: EdgeInsets.only(right: 6),
                         child: SizedBox(
@@ -11578,9 +11673,9 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(8),
-                          onTap: () => setState(() => mode = 'monthPicker'),
+                          onTap: onCaptionTap,
                           child: Text(
-                            caption,
+                            rightCaption,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               fontSize: 13,
@@ -11612,7 +11707,12 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
           key: const ValueKey('diet-diary-calendar'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            embeddedHeader(),
+            embeddedHeader(
+              rightCaption: caption,
+              onCaptionTap: () => setState(() => mode = 'monthPicker'),
+              onBackTap: widget.onEmbeddedBack,
+              showLoading: sheetLoading,
+            ),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
@@ -11631,10 +11731,44 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
           key: const ValueKey('diet-diary-detail'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            embeddedHeader(
+              rightCaption: _formatDetailHeaderCaption(selectedDate!),
+              onCaptionTap: null,
+              onBackTap: () => unawaited(_handleDetailBackToCalendar()),
+            ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
                 child: body,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Transform.translate(
+              offset: const Offset(0, -2),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _detailBottomArrow(
+                      icon: Icons.chevron_left,
+                      onTap: () => unawaited(
+                        _detailPanelKey.currentState?.movePrevDay() ??
+                            Future<void>.value(),
+                      ),
+                    ),
+                    Transform.translate(
+                      offset: const Offset(2, 0),
+                      child: _detailBottomArrow(
+                        icon: Icons.chevron_right,
+                        onTap: () => unawaited(
+                          _detailPanelKey.currentState?.moveNextDay() ??
+                              Future<void>.value(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -11707,7 +11841,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     required this.onPhotoTap,
     required this.fetchNote,
     required this.saveNote,
-    required this.onBack,
+    required this.onMoveDate,
     required this.onSavedSuccess,
   });
 
@@ -11721,7 +11855,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     required String? weightText,
     required String noteText,
   }) saveNote;
-  final VoidCallback onBack;
+  final Future<void> Function(int deltaDays) onMoveDate;
   final VoidCallback onSavedSuccess;
 
   @override
@@ -11729,19 +11863,30 @@ class _DietDiaryDetailPanel extends StatefulWidget {
 }
 
 class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
-  static const String _diaryFontFamily = 'Cormorant Garamond';
-  static const List<String> _diaryFontFallback = <String>[
-    'Times New Roman',
-    'serif',
-  ];
+  static const String _diaryFontFamily = 'Pretendard';
+  static const List<String> _diaryFontFallback = <String>['sans-serif'];
+  static final TextInputFormatter _weightFormatter =
+      TextInputFormatter.withFunction((oldValue, newValue) {
+        final text = newValue.text;
+        if (text.isEmpty) return newValue;
+        if (text.length > 6) return oldValue;
+        if (!RegExp(r'^[0-9.]+$').hasMatch(text)) return oldValue;
+        if ('.'.allMatches(text).length > 1) return oldValue;
+        return newValue;
+      });
 
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+  final FocusNode _weightFocusNode = FocusNode();
+  final FocusNode _noteFocusNode = FocusNode();
 
   bool _isLoadingNote = true;
   bool _isSaving = false;
+  bool _isMovingDay = false;
   String? _brunchUrl;
   String? _dinnerUrl;
+  String _lastSavedWeightText = '';
+  String _lastSavedNoteText = '';
 
   @override
   void initState() {
@@ -11750,7 +11895,17 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant _DietDiaryDetailPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.date != widget.date || oldWidget.logs != widget.logs) {
+      _bootstrap();
+    }
+  }
+
+  @override
   void dispose() {
+    _weightFocusNode.dispose();
+    _noteFocusNode.dispose();
     _weightController.dispose();
     _noteController.dispose();
     super.dispose();
@@ -11770,6 +11925,11 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   }
 
   Future<void> _bootstrap() async {
+    setState(() {
+      _isLoadingNote = true;
+      _brunchUrl = null;
+      _dinnerUrl = null;
+    });
     final brunch = _logForSlot('brunch');
     final dinner = _logForSlot('dinner');
 
@@ -11788,7 +11948,13 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       final w = note['weight_kg'];
       _weightController.text = w == null ? '' : w.toString();
       _noteController.text = note['note_text']?.toString() ?? '';
+    } else {
+      _weightController.clear();
+      _noteController.clear();
     }
+
+    _lastSavedWeightText = _weightController.text.trim();
+    _lastSavedNoteText = _noteController.text.trim();
 
     setState(() {
       _brunchUrl = brunchUrl;
@@ -11797,157 +11963,167 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
     });
   }
 
-  Future<void> _handleSave() async {
-    if (_isSaving) return;
-    setState(() => _isSaving = true);
+  bool get _hasUnsavedChanges {
+    return _weightController.text.trim() != _lastSavedWeightText ||
+        _noteController.text.trim() != _lastSavedNoteText;
+  }
+
+  Future<bool> saveForPanelExit({bool showSavingIndicator = true}) async {
+    if (_isLoadingNote || _isSaving || !_hasUnsavedChanges) return true;
+    if (showSavingIndicator) {
+      setState(() => _isSaving = true);
+    }
     final ok = await widget.saveNote(
       date: widget.date,
       weightText: _weightController.text,
       noteText: _noteController.text,
     );
-    if (!mounted) return;
-    setState(() => _isSaving = false);
+    if (!mounted) return false;
+    if (showSavingIndicator) {
+      setState(() => _isSaving = false);
+    }
     if (ok) {
+      _lastSavedWeightText = _weightController.text.trim();
+      _lastSavedNoteText = _noteController.text.trim();
       widget.onSavedSuccess();
+    }
+    return ok;
+  }
+
+  Future<void> _moveDay(int deltaDays) async {
+    if (_isMovingDay || _isLoadingNote) return;
+    _isMovingDay = true;
+    try {
+      final ok = await saveForPanelExit(showSavingIndicator: false);
+      if (!mounted || !ok) return;
+      await widget.onMoveDate(deltaDays);
+    } finally {
+      _isMovingDay = false;
     }
   }
 
-  String _displayDate(DateTime d) {
-    final yy = (d.year % 100).toString();
-    return '$yy. ${d.month}. ${d.day}';
+  Future<void> movePrevDay() => _moveDay(-1);
+  Future<void> moveNextDay() => _moveDay(1);
+
+  Widget _diaryFieldShell({
+    required Widget child,
+    double height = 26,
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(horizontal: 10),
+    AlignmentGeometry alignment = Alignment.centerLeft,
+  }) {
+    return Container(
+      height: height,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+      ),
+      alignment: alignment,
+      child: child,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final l10n = AppLocalizations.of(context);
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-    return SingleChildScrollView(
-      padding: EdgeInsets.only(bottom: viewInsets),
+    const labelStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      fontFamily: _diaryFontFamily,
+      fontFamilyFallback: _diaryFontFallback,
+      height: 1.0,
+    );
+    const fieldStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      fontFamily: _diaryFontFamily,
+      fontFamilyFallback: _diaryFontFallback,
+      height: 1.2,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: widget.onBack,
-                  borderRadius: BorderRadius.circular(10),
-                  child: const SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      size: 16,
-                      color: Color(0xFF000000),
-                    ),
-                  ),
-                ),
-              ),
-              Text(
-                l10n.dietDiaryPanelTitle,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF000000),
-                  height: 1.0,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '일자: ${_displayDate(widget.date)}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontFamily: _diaryFontFamily,
-                  fontFamilyFallback: _diaryFontFallback,
-                ),
-              ),
-              const SizedBox(width: 8),
+              _photoSlot(label: '(아점)', url: _brunchUrl),
+              _photoSlot(label: '(저녁)', url: _dinnerUrl),
             ],
           ),
           const SizedBox(height: 8),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Expanded(
-                child: _photoSlot(
-                  context: context,
-                  label: '아점 사진',
-                  url: _brunchUrl,
+              SizedBox(
+                width: 62,
+                child: Transform.translate(
+                  offset: Offset(0, -1),
+                  child: Text('• 체중(Kg)', style: labelStyle),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 6),
               Expanded(
-                child: _photoSlot(
-                  context: context,
-                  label: '저녁 사진',
-                  url: _dinnerUrl,
+                child: _diaryFieldShell(
+                  child: TextField(
+                    controller: _weightController,
+                    focusNode: _weightFocusNode,
+                    enabled: !_isSaving && !_isLoadingNote,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      _weightFormatter,
+                    ],
+                    style: fieldStyle,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          if (_isLoadingNote)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+          const SizedBox(height: 7),
+          const Text('• 식후 감정 & 실패 요인', style: labelStyle),
+          const SizedBox(height: 4),
+          Expanded(
+            child: _diaryFieldShell(
+              height: double.infinity,
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              alignment: Alignment.topLeft,
+              child: TextField(
+                controller: _noteController,
+                focusNode: _noteFocusNode,
+                enabled: !_isSaving && !_isLoadingNote,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                minLines: 4,
+                maxLines: 4,
+                maxLength: 64,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                buildCounter: (
+                  BuildContext context, {
+                  required int currentLength,
+                  required bool isFocused,
+                  required int? maxLength,
+                }) {
+                  return null;
+                },
+                scrollPhysics: const NeverScrollableScrollPhysics(),
+                style: fieldStyle,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
-            ),
-          TextField(
-            controller: _weightController,
-            enabled: !_isSaving && !_isLoadingNote,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(
-              fontFamily: _diaryFontFamily,
-              fontFamilyFallback: _diaryFontFallback,
-            ),
-            decoration: const InputDecoration(
-              labelText: '체중 (kg)',
-              prefixIcon: Icon(Icons.monitor_weight_outlined),
-              border: OutlineInputBorder(),
-              isDense: true,
-              hintText: '예: 62.5',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _noteController,
-            enabled: !_isSaving && !_isLoadingNote,
-            minLines: 3,
-            maxLines: 5,
-            keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            style: const TextStyle(
-              fontFamily: _diaryFontFamily,
-              fontFamilyFallback: _diaryFontFallback,
-            ),
-            decoration: const InputDecoration(
-              labelText: '식후 감정 OR 실패 요인',
-              alignLabelWithHint: true,
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.fromLTRB(12, 12, 32, 28),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 48,
-            child: FilledButton(
-              onPressed: (_isSaving || _isLoadingNote) ? null : _handleSave,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('저장'),
             ),
           ),
         ],
@@ -11955,27 +12131,21 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
     );
   }
 
-  // 사진 슬롯 한 개. url 이 있으면 Image.network + 탭하면 큰 미리보기로 위임.
-  // url 이 없으면 placeholder 사각형 + 라벨만 표시.
-  Widget _photoSlot({
-    required BuildContext context,
-    required String label,
-    required String? url,
-  }) {
-    final theme = Theme.of(context);
+  Widget _photoSlot({required String label, required String? url}) {
     final hasPhoto = url != null && url.isNotEmpty;
 
-    return AspectRatio(
-      aspectRatio: 1,
+    return SizedBox(
+      width: 96,
+      height: 96,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(20),
         onTap: hasPhoto ? () => widget.onPhotoTap(url) : null,
         child: Container(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
+            color: Colors.white.withValues(alpha: 0.40),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: theme.colorScheme.outlineVariant,
+              color: const Color(0xFFD8D8D8),
               width: 1,
             ),
           ),
@@ -11989,35 +12159,12 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Center(
                         child: Text(
-                          '$label\n(불러오기 실패)',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontFamily: _diaryFontFamily,
-                            fontFamilyFallback: _diaryFontFallback,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 6,
-                      bottom: 6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
                           label,
+                          textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Colors.white,
                             fontWeight: FontWeight.w600,
+                            color: Color(0xFF4A4A4A),
                             fontFamily: _diaryFontFamily,
                             fontFamilyFallback: _diaryFontFallback,
                           ),
@@ -12026,26 +12173,17 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                     ),
                   ],
                 )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.photo_camera_outlined,
-                      size: 28,
-                      color: theme.colorScheme.onSurfaceVariant,
+              : Center(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      fontFamily: _diaryFontFamily,
+                      fontFamilyFallback: _diaryFontFallback,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontFamily: _diaryFontFamily,
-                        fontFamilyFallback: _diaryFontFallback,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
         ),
       ),
