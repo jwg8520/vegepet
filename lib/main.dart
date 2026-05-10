@@ -116,7 +116,7 @@ const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요.
 final Random _mealMessageRandom = Random();
 
 /// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 중앙 퇴장 모션을 적용할 대상.
-enum _GameMenuSubOutsideDismissKind { none, profile, dietDiary, bag }
+enum _GameMenuSubOutsideDismissKind { none, profile, dietDiary, bag, pokedex }
 
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
 ///
@@ -459,6 +459,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   _BagItem? _bagPanelDetailItem;
   late AnimationController _gameBagSwapController;
   late Animation<double> _gameBagSwapCurve;
+  bool _isPokedexPanelOpen = false;
+  bool _pokedexPanelSwapInProgress = false;
+  Map<String, dynamic>? _pokedexPanelSelectedEntry;
+  late AnimationController _gamePokedexSwapController;
+  late Animation<double> _gamePokedexSwapCurve;
   /// 베지펫 정보창 ↔ 먹이·놀이 패널 닫기와 유사한 중앙 scale/fade (게임 메뉴 하위 외부 탭 전용).
   late AnimationController _gameMenuSubOutsideDismissController;
   late Animation<double> _gameMenuSubOutsideDismissCurve;
@@ -606,6 +611,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _gameBagSwapController,
       curve: Curves.easeInOutCubic,
     );
+    _gamePokedexSwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _gamePokedexSwapCurve = CurvedAnimation(
+      parent: _gamePokedexSwapController,
+      curve: Curves.easeInOutCubic,
+    );
     _gameMenuSubOutsideDismissController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 340),
@@ -633,6 +646,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameProfileSwapController.dispose();
     _gameDietDiarySwapController.dispose();
     _gameBagSwapController.dispose();
+    _gamePokedexSwapController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
     super.dispose();
   }
@@ -1034,6 +1048,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() {
       _status = _ViewStatus.loading;
       _errorMessage = null;
+      // 부트스트랩 재조회 전에 이전 세션·탈퇴 직후 찌꺼기가 화면에 남지 않도록 캐시만 선비움.
+      // (실 데이터는 아래 fetch 들로 다시 채움 — 깜빡임은 짧은 로딩 상태로 흡수)
+      _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      _residentPets = [];
+      _randomTicketCount = 0;
     });
 
     try {
@@ -1905,6 +1925,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (user == null) {
       debugPrint('pokedex fetch skipped: user is null');
       _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      if (mounted) {
+        _safeSetState(() {});
+      }
       return;
     }
 
@@ -1921,131 +1945,162 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-    } catch (e) {
-      debugPrint('fetch pokedex base entries failed: $e');
+    } catch (e, st) {
+      debugPrint('fetch pokedex base entries failed: $e\n$st');
       _pokedexEntries = [];
-      rethrow;
+      _pokedexPanelSelectedEntry = null;
+      if (mounted) {
+        _safeSetState(() {});
+      }
+      return;
     }
 
     debugPrint('pokedex base entries count: ${entries.length}');
 
     if (entries.isEmpty) {
       _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      if (mounted) {
+        _safeSetState(() {});
+      }
       return;
     }
 
-    // 2) pet_species_id 모음 → pet_species 별도 조회.
-    final speciesIds = entries
-        .map((e) {
-          final raw = e['pet_species_id'];
-          return raw is int
-              ? raw
-              : int.tryParse(raw?.toString() ?? '');
-        })
-        .whereType<int>()
-        .toSet()
-        .toList();
+    try {
+      // 2) pet_species_id 모음 → pet_species 별도 조회.
+      final speciesIds = entries
+          .map((e) {
+            final raw = e['pet_species_id'];
+            return raw is int
+                ? raw
+                : int.tryParse(raw?.toString() ?? '');
+          })
+          .whereType<int>()
+          .toSet()
+          .toList();
 
-    debugPrint('pokedex species ids: $speciesIds');
+      debugPrint('pokedex species ids: $speciesIds');
 
-    final speciesById = <int, Map<String, dynamic>>{};
-    if (speciesIds.isNotEmpty) {
-      try {
-        final speciesRows = await supabase
-            .from('pet_species')
-            .select('id, code, name_ko, family, sort_order')
-            .filter('id', 'in', '(${speciesIds.join(',')})');
-        for (final s in (speciesRows as List).whereType<Map>()) {
-          final raw = s['id'];
-          final id = raw is int
-              ? raw
-              : int.tryParse(raw?.toString() ?? '');
-          if (id != null) {
-            speciesById[id] = Map<String, dynamic>.from(s);
+      final speciesById = <int, Map<String, dynamic>>{};
+      if (speciesIds.isNotEmpty) {
+        try {
+          final speciesRows = await supabase
+              .from('pet_species')
+              .select('id, code, name_ko, family, sort_order')
+              .filter('id', 'in', '(${speciesIds.join(',')})');
+          for (final s in (speciesRows as List).whereType<Map>()) {
+            final raw = s['id'];
+            final id = raw is int
+                ? raw
+                : int.tryParse(raw?.toString() ?? '');
+            if (id != null) {
+              speciesById[id] = Map<String, dynamic>.from(s);
+            }
           }
+        } catch (e) {
+          debugPrint('fetch pet_species for pokedex failed: $e');
         }
-      } catch (e) {
-        debugPrint('fetch pet_species for pokedex failed: $e');
       }
-    }
 
-    // 3) source_user_pet_id 모음 → user_pets 별도 조회 (실패해도 진행).
-    final sourcePetIds = entries
-        .map((e) => e['source_user_pet_id']?.toString())
-        .whereType<String>()
-        .where((id) => id.trim().isNotEmpty)
-        .toSet()
-        .toList();
+      // 3) source_user_pet_id 모음 → user_pets 별도 조회 (실패해도 진행).
+      final sourcePetIds = entries
+          .map((e) => e['source_user_pet_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.trim().isNotEmpty)
+          .toSet()
+          .toList();
 
-    debugPrint('pokedex source pet ids: $sourcePetIds');
+      debugPrint('pokedex source pet ids: $sourcePetIds');
 
-    final sourcePetById = <String, Map<String, dynamic>>{};
-    if (sourcePetIds.isNotEmpty) {
-      try {
-        final quoted =
-            sourcePetIds.map((id) => '"$id"').join(',');
-        final sourcePetRows = await supabase
-            .from('user_pets')
-            .select('id, nickname, stage, graduated_at')
-            .filter('id', 'in', '($quoted)');
-        for (final p in (sourcePetRows as List).whereType<Map>()) {
-          final id = p['id']?.toString();
-          if (id != null && id.isNotEmpty) {
-            sourcePetById[id] = Map<String, dynamic>.from(p);
+      final sourcePetById = <String, Map<String, dynamic>>{};
+      if (sourcePetIds.isNotEmpty) {
+        try {
+          final quoted =
+              sourcePetIds.map((id) => '"$id"').join(',');
+          final sourcePetRows = await supabase
+              .from('user_pets')
+              .select('id, nickname, stage, graduated_at')
+              .filter('id', 'in', '($quoted)');
+          for (final p in (sourcePetRows as List).whereType<Map>()) {
+            final id = p['id']?.toString();
+            if (id != null && id.isNotEmpty) {
+              sourcePetById[id] = Map<String, dynamic>.from(p);
+            }
           }
+        } catch (e) {
+          debugPrint('fetch source user_pets for pokedex failed: $e');
         }
-      } catch (e) {
-        debugPrint('fetch source user_pets for pokedex failed: $e');
+      }
+
+      // 4) 각 row 에 species / source_user_pet 을 직접 붙인다.
+      for (final e in entries) {
+        final rawSpeciesId = e['pet_species_id'];
+        final speciesId = rawSpeciesId is int
+            ? rawSpeciesId
+            : int.tryParse(rawSpeciesId?.toString() ?? '');
+        if (speciesId != null) {
+          e['pet_species'] = speciesById[speciesId];
+        }
+
+        final sourcePetId = e['source_user_pet_id']?.toString();
+        if (sourcePetId != null && sourcePetId.isNotEmpty) {
+          e['source_user_pet'] = sourcePetById[sourcePetId];
+        }
+      }
+
+      // 5) sort_order(asc) → registered_at(asc) 로 정렬.
+      int sortOrderOf(Map<String, dynamic> entry) {
+        final species = entry['pet_species'];
+        if (species is Map) {
+          final v = species['sort_order'];
+          if (v is int) return v;
+          if (v is num) return v.toInt();
+          return int.tryParse(v?.toString() ?? '') ?? 9999;
+        }
+        return 9999;
+      }
+
+      DateTime registeredAtOf(Map<String, dynamic> entry) {
+        final raw = entry['registered_at']?.toString();
+        if (raw == null || raw.isEmpty) {
+          return DateTime.fromMillisecondsSinceEpoch(0);
+        }
+        return DateTime.tryParse(raw) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+      }
+
+      entries.sort((a, b) {
+        final c = sortOrderOf(a).compareTo(sortOrderOf(b));
+        if (c != 0) return c;
+        return registeredAtOf(a).compareTo(registeredAtOf(b));
+      });
+
+      debugPrint('pokedex merged entries count: ${entries.length}');
+      _pokedexEntries = entries;
+      if (mounted) {
+        _invalidatePokedexPanelSelectedEntryIfStale();
+      }
+    } catch (e, st) {
+      debugPrint('fetch pokedex merge/sort failed: $e\n$st');
+      _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      if (mounted) {
+        _safeSetState(() {});
       }
     }
+  }
 
-    // 4) 각 row 에 species / source_user_pet 을 직접 붙인다.
-    for (final e in entries) {
-      final rawSpeciesId = e['pet_species_id'];
-      final speciesId = rawSpeciesId is int
-          ? rawSpeciesId
-          : int.tryParse(rawSpeciesId?.toString() ?? '');
-      if (speciesId != null) {
-        e['pet_species'] = speciesById[speciesId];
-      }
-
-      final sourcePetId = e['source_user_pet_id']?.toString();
-      if (sourcePetId != null && sourcePetId.isNotEmpty) {
-        e['source_user_pet'] = sourcePetById[sourcePetId];
-      }
+  /// [_fetchPokedexEntries] 이후 도감에 없어진 종이면 상세 선택만 해제.
+  void _invalidatePokedexPanelSelectedEntryIfStale() {
+    final sel = _pokedexPanelSelectedEntry;
+    if (sel == null) return;
+    final raw = sel['pet_species_id'];
+    final id = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+    final invalid =
+        id == null || _pokedexEntryForSpeciesId(id) == null;
+    if (invalid && mounted) {
+      _safeSetState(() => _pokedexPanelSelectedEntry = null);
     }
-
-    // 5) sort_order(asc) → registered_at(asc) 로 정렬.
-    //    pokedex_entries 테이블에는 created_at 이 없고 registered_at 컬럼이
-    //    실제 등록 시각을 담고 있으므로 그 값을 보조 정렬 키로 사용한다.
-    int sortOrderOf(Map<String, dynamic> entry) {
-      final species = entry['pet_species'];
-      if (species is Map) {
-        final v = species['sort_order'];
-        if (v is int) return v;
-        if (v is num) return v.toInt();
-        return int.tryParse(v?.toString() ?? '') ?? 9999;
-      }
-      return 9999;
-    }
-
-    DateTime registeredAtOf(Map<String, dynamic> entry) {
-      final raw = entry['registered_at']?.toString();
-      if (raw == null || raw.isEmpty) {
-        return DateTime.fromMillisecondsSinceEpoch(0);
-      }
-      return DateTime.tryParse(raw) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-    }
-
-    entries.sort((a, b) {
-      final c = sortOrderOf(a).compareTo(sortOrderOf(b));
-      if (c != 0) return c;
-      return registeredAtOf(a).compareTo(registeredAtOf(b));
-    });
-
-    debugPrint('pokedex merged entries count: ${entries.length}');
-    _pokedexEntries = entries;
   }
 
   // pet_species.family 문자열을 'cat' / 'dog' / '' 로 정규화한다.
@@ -2127,6 +2182,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       result.add(entry);
     }
     return result;
+  }
+
+  int _petSpeciesSortKey(Map<String, dynamic> species) {
+    final v = species['sort_order'];
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v?.toString() ?? '') ?? 9999;
+  }
+
+  /// `family` 는 [_normalizePetFamily] 결과인 `dog` / `cat` 기준.
+  List<Map<String, dynamic>> _petSpeciesSortedForFamilyNorm(String familyNorm) {
+    final out = _petSpecies
+        .where((s) =>
+            _normalizePetFamily(s['family']?.toString() ?? '') == familyNorm)
+        .toList();
+    out.sort((a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)));
+    return out;
+  }
+
+  int? _speciesIdFromSpeciesMap(Map<String, dynamic> species) {
+    final raw = species['id'];
+    if (raw is int) return raw;
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  /// 도감에 등록된 entry( pet_species / source_user_pet 병합 형태 ). 없으면 null.
+  /// **잠금/해제는 오직 [_pokedexEntries] 만** — resident / activePet / 이전 선택으로는
+  /// 잠금 해제로 취급하지 않는다.
+  Map<String, dynamic>? _pokedexEntryForSpeciesId(int speciesId) {
+    final ded = _dedupePokedexEntriesBySpecies(_pokedexEntries);
+    for (final e in ded) {
+      final raw = e['pet_species_id'];
+      final id = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+      if (id == speciesId) return e;
+    }
+    return null;
   }
 
   // 기존: Flutter에서 직접 meal_logs insert + user_pets.affection update를 수행하던 경로.
@@ -2795,6 +2886,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isBagPanelOpen = false;
         _bagPanelSwapInProgress = false;
         _bagPanelDetailItem = null;
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -2809,6 +2903,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
       _gameBagSwapController.value = 0;
+      _gamePokedexSwapController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -2823,14 +2918,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // 현재 로그인된 익명 유저 기준으로 테스트 데이터를 싹 비우고,
   // 앱이 처음 시작된 것처럼 "프로필 입력 화면"부터 다시 흐름이 시작되게 만든다.
   //
-  // 동작 순서:
-  //   1) meal_logs 삭제 (user_pets 보다 먼저 — FK 참조 회피)
-  //   2) pokedex_entries 삭제 (source_user_pet_id 등으로 user_pets 참조 가능)
-  //   3) user_items 삭제 (랜덤 분양권 등 보유 아이템 전부)
-  //   4) user_pets 삭제
-  //   5) profiles 초기화 (nickname/gender/age_range/diet_goal = null)
-  //   6) 로컬 상태/폼/진행중 플래그 싹 정리
-  //   7) _bootstrap() 재호출
+  // 동작 순서 (FK 안전):
+  //   1) meal_logs
+  //   2) meal_diary_notes — 테이블 없을 수 있음 → 개별 try/catch
+  //   3) pokedex_entries — **반드시 user_pets 보다 먼저** (source_user_pet_id FK)
+  //   4) user_items
+  //   5) user_pets
+  //   6) profiles 프로필 필드만 초기화 (개발용이므로 email/account_type/linked_at 은 유지)
+  //   7) 로컬 상태·플래그·애니메이션 컨트롤러 정리
+  //   8) _bootstrap() 재호출
   //
   // Storage bucket(meal-photos) 의 사진 파일 삭제는 이번 단계에서 다루지 않는다.
   // 오직 디버그 섹션에서만 노출하며, 실제 서비스 기능이 아님에 주의.
@@ -2866,14 +2962,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!mounted) return;
 
     try {
-      // 삭제 순서 주의:
-      //   meal_logs / pokedex_entries 가 user_pets 를 FK 로 참조할 수 있으므로
-      //   user_pets 보다 먼저 비워야 한다. user_items 는 user_pets 와 무관하지만
-      //   "전체 초기화" 의 의미상 같은 사이클에서 함께 정리한다.
       await supabase.from('meal_logs').delete().eq('user_id', user.id);
+      try {
+        await supabase.from('meal_diary_notes').delete().eq('user_id', user.id);
+      } catch (e) {
+        debugPrint('meal_diary_notes delete skipped (reset): $e');
+      }
       await supabase.from('pokedex_entries').delete().eq('user_id', user.id);
       await supabase.from('user_items').delete().eq('user_id', user.id);
       await supabase.from('user_pets').delete().eq('user_id', user.id);
+      // 개발용 초기화: 동일 Supabase 유저·세션 유지 — 이메일 연동 필드는 건드리지 않음.
       await supabase.from('profiles').update({
         'nickname': null,
         'gender': null,
@@ -2882,6 +2980,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         'gold_balance': 1000,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
+
+      try {
+        final remains = await supabase
+            .from('pokedex_entries')
+            .select('id')
+            .eq('user_id', user.id);
+        final remainList = remains as List;
+        if (remainList.isNotEmpty) {
+          debugPrint(
+            'reset warning: pokedex_entries still remain after delete (${remainList.length})',
+          );
+          await supabase.from('pokedex_entries').delete().eq('user_id', user.id);
+        }
+      } catch (e) {
+        debugPrint('reset pokedex verify skipped/failed: $e');
+      }
 
       if (!mounted) return;
       _safeSetState(() {
@@ -2911,6 +3025,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _pokedexEntries = [];
         _isLoadingPokedex = false;
         _residentPets = [];
+        _activePet = null;
+        _todayMealLogs = [];
+        _profile = null;
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _isToyMenuOpen = false;
@@ -2930,6 +3047,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isBagPanelOpen = false;
         _bagPanelSwapInProgress = false;
         _bagPanelDetailItem = null;
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+        _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -2945,6 +3066,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
       _gameBagSwapController.value = 0;
+      _gamePokedexSwapController.value = 0;
+      _gameMenuSubOutsideDismissController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
       await _waitForUiSettle();
@@ -3155,6 +3278,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!mounted) return;
     _gameBagSwapController.stop();
     _gameBagSwapController.value = 0.0;
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
     _safeSetState(() {
       _bagPanelDetailItem = null;
       _bagPanelSwapInProgress = true;
@@ -3180,6 +3312,83 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _bagPanelSwapInProgress = false;
       _isBagPanelOpen = false;
       _bagPanelDetailItem = null;
+    });
+  }
+
+  Future<void> _openPokedexPanelFromGameMenu() async {
+    if (_pokedexPanelSwapInProgress) return;
+    if (_gamePokedexSwapController.isAnimating) return;
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+      });
+    }
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    try {
+      final pending = <Future<void>>[_fetchPokedexEntries()];
+      if (_petSpecies.isEmpty) pending.add(_fetchPetSpecies());
+      await Future.wait(pending);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('도감 정보를 불러오지 못했어요.');
+      return;
+    }
+    if (!mounted) return;
+    if (_petSpecies.isEmpty) {
+      _showSnack('펫 종류 정보를 불러오지 못했어요.');
+      return;
+    }
+    await _waitForUiSettle();
+    if (!mounted) return;
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    _safeSetState(() {
+      _pokedexPanelSelectedEntry = null;
+      _pokedexPanelSwapInProgress = true;
+      _isPokedexPanelOpen = true;
+    });
+    await _gamePokedexSwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _pokedexPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closePokedexPanelToGameMenu() async {
+    if (_pokedexPanelSwapInProgress) return;
+    _dismissFocus();
+    _gamePokedexSwapController.value = 1.0;
+    _safeSetState(() {
+      _pokedexPanelSwapInProgress = true;
+      _pokedexPanelSelectedEntry = null;
+    });
+    await _gamePokedexSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _pokedexPanelSwapInProgress = false;
+      _isPokedexPanelOpen = false;
     });
   }
 
@@ -3224,56 +3433,75 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
-  Widget _buildBagWireframeDummyTile({
-    required _BagItem item,
-    required VoidCallback onTap,
+  /// VegePet 더미 아이콘 터치 정책:
+  /// 아이콘+라벨 구조에서는 실제 onTap을 반드시 48×48 아이콘 사각형 영역에만 연결한다.
+  /// 라벨, 여백, 전체 타일 영역을 눌러서는 로직이 실행되면 안 된다.
+  /// (스플래시/하이라이트는 borderRadius 20 기준으로 이 사각형 내부에만.)
+  ///
+  /// [child] 는 48×48 영역을 채우는 시각(보통 [Container] + [Icon]).
+  Widget _buildVegePetDummyIconInkWell({
+    required VoidCallback? onTap,
+    required Widget child,
   }) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.78),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
-                  width: 0.9,
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                item.icon,
-                size: 22,
-                color: const Color(0xFF5C5C5C),
-              ),
-            ),
-            const SizedBox(height: 4),
-            SizedBox(
-              width: 72,
-              child: Text(
-                item.name,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF4A4A4A),
-                  height: 1.15,
-                ),
-              ),
-            ),
-          ],
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: child,
         ),
       ),
+    );
+  }
+
+  /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
+  /// 터치는 [_buildVegePetDummyIconInkWell] 와 동일: **아이콘 사각형만** onTap.
+  Widget _buildBagWireframeDummyTile({
+    required _BagItem item,
+    required VoidCallback onTap,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildVegePetDummyIconInkWell(
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                width: 0.9,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              item.icon,
+              size: 22,
+              color: const Color(0xFF5C5C5C),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 72,
+          child: Text(
+            item.name,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF4A4A4A),
+              height: 1.15,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -3412,6 +3640,369 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPokedexGameMenuGlassPanel() {
+    const sectionTitleStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
+    );
+    final dogs = _petSpeciesSortedForFamilyNorm('dog');
+    final cats = _petSpeciesSortedForFamilyNorm('cat');
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kGameMenuPanelW,
+          height: _kGameMenuPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      if (_pokedexPanelSelectedEntry != null) {
+                        _safeSetState(() => _pokedexPanelSelectedEntry = null);
+                      } else {
+                        unawaited(_closePokedexPanelToGameMenu());
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 37,
+                top: 14,
+                right: 8,
+                child: const Text(
+                  '도감',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF000000),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 48,
+                bottom: 0,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('• 강아지', style: sectionTitleStyle),
+                        const SizedBox(height: 8),
+                        _buildPokedexGameMenuThreeSpeciesRow(dogs, 'dog'),
+                        const SizedBox(height: 12),
+                        const Text('• 고양이', style: sectionTitleStyle),
+                        const SizedBox(height: 8),
+                        _buildPokedexGameMenuThreeSpeciesRow(cats, 'cat'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 도감 성숙기 완료 펫 상세 (176×222 · 가방 아이템 설명창과 동일 글래스 셸).
+  Widget _buildPokedexMaturePetDetailGlassPanel(Map<String, dynamic> entry) {
+    final family = _pokedexFamilyOf(entry);
+    final speciesName = _pokedexSpeciesNameOf(entry);
+    final nicknameLine = _pokedexNicknameOf(entry);
+    final iconData = family == 'cat'
+        ? Icons.pets
+        : family == 'dog'
+            ? Icons.cruelty_free_outlined
+            : Icons.eco_outlined;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: _kBagItemDetailW,
+            height: _kBagItemDetailH,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  return SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: c.maxHeight),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.78),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: const Color(0xFFE5E5E5)
+                                    .withValues(alpha: 0.75),
+                                width: 0.9,
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(
+                              iconData,
+                              size: 22,
+                              color: const Color(0xFF5C5C5C),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            speciesName,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF000000),
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            nicknameLine,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF4A4A4A),
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 강아지/고양이 각 3슬롯 — 해당 family 의 pet_species 가 3개 미만이면 잠금 슬롯으로 채움.
+  Widget _buildPokedexGameMenuThreeSpeciesRow(
+    List<Map<String, dynamic>> sorted,
+    String familyNorm,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < 3; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(
+            child: i < sorted.length
+                ? _buildPokedexGameMenuSpeciesCell(sorted[i], familyNorm)
+                : _buildPokedexGameMenuEmptySpeciesSlot(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPokedexGameMenuEmptySpeciesSlot() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAEAEA).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+              width: 0.9,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '?',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: Colors.grey.withValues(alpha: 0.45),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        const SizedBox(
+          width: 72,
+          child: Text(
+            '???',
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF4A4A4A),
+              height: 1.15,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPokedexGameMenuSpeciesCell(
+    Map<String, dynamic> species,
+    String familyNorm,
+  ) {
+    final speciesId = _speciesIdFromSpeciesMap(species);
+    final entry =
+        speciesId != null ? _pokedexEntryForSpeciesId(speciesId) : null;
+    final unlocked = entry != null;
+    final speciesName = species['name_ko']?.toString().trim();
+    final codeFallback = species['code']?.toString().trim();
+    final label = unlocked
+        ? ((speciesName != null && speciesName.isNotEmpty)
+            ? speciesName
+            : (codeFallback != null && codeFallback.isNotEmpty)
+                ? codeFallback
+                : '베지펫')
+        : '???';
+    final iconData = familyNorm == 'cat'
+        ? Icons.pets
+        : familyNorm == 'dog'
+            ? Icons.cruelty_free_outlined
+            : Icons.eco_outlined;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        _buildVegePetDummyIconInkWell(
+          onTap: unlocked
+              ? () => _safeSetState(() => _pokedexPanelSelectedEntry = entry)
+              : null,
+          child: Container(
+            decoration: BoxDecoration(
+              color: unlocked
+                  ? Colors.white.withValues(alpha: 0.78)
+                  : const Color(0xFFE8E8E8).withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                width: 0.9,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: unlocked
+                ? Icon(
+                    iconData,
+                    size: 22,
+                    color: const Color(0xFF5C5C5C),
+                  )
+                : Text(
+                    '?',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.grey.withValues(alpha: 0.52),
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 72,
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: unlocked
+                  ? const Color(0xFF4A4A4A)
+                  : const Color(0xFF8A8A8A),
+              height: 1.15,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -3569,7 +4160,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _BagItem(
         category: 'toy',
         name: '뼈다귀 인형',
-        description: '강아지 베지펫이 좋아하는 장난감',
+        description: ' 강아지 베지펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.',
         quantity: 1,
         icon: Icons.cruelty_free_outlined,
         usable: false,
@@ -3578,7 +4169,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _BagItem(
         category: 'toy',
         name: '실뭉치',
-        description: '고양이 베지펫이 좋아하는 장난감',
+        description: ' 고양이 베지펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.',
         quantity: 1,
         icon: Icons.sports_baseball_outlined,
         usable: false,
@@ -3587,7 +4178,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ];
   }
 
-  // 도감 BottomSheet 열기.
+  // 도감 BottomSheet 열기 (레거시). 마당 게임 메뉴에서는 [_openPokedexPanelFromGameMenu] 사용.
   //
   // 시트 안에서 추가로 showDialog 를 띄우거나 DB 호출을 일으키면 모달 트리
   // 정리 타이밍이 다시 꼬일 수 있다. 그래서:
@@ -3595,21 +4186,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   //   2) 시트 안에서는 로컬 selectedEntry 상태만 다루며
   //   3) 펫 정보 표시창도 별도 Dialog 가 아니라 같은 시트 안의 Stack overlay 로
   //      구현한다 (overlay 어디든 탭하면 닫힘).
+  // ignore: unused_element
   Future<void> _openPokedexSheet() async {
     _dismissFocus();
 
     _safeSetState(() => _isLoadingPokedex = true);
     try {
       await _fetchPokedexEntries();
-    } catch (e) {
-      if (!mounted) return;
-      _safeSetState(() => _isLoadingPokedex = false);
-      _showSnack('도감 조회 실패: $e');
-      return;
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isLoadingPokedex = false);
+      }
     }
 
     if (!mounted) return;
-    _safeSetState(() => _isLoadingPokedex = false);
 
     debugPrint('pokedex entries loaded in sheet: ${_pokedexEntries.length}');
 
@@ -4496,7 +5086,75 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
         _buildBagItemDetailGlobalOverlay(),
+        _buildPokedexMaturePetDetailGlobalOverlay(),
       ],
+    );
+  }
+
+  /// 도감 등록 완료 펫 상세(176×222): 가방 아이템 설명창과 동일 좌표·스케일·바깥 탭 dismiss.
+  Widget _buildPokedexMaturePetDetailGlobalOverlay() {
+    final entry = _pokedexPanelSelectedEntry;
+    if (entry == null || !_isPokedexPanelOpen) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: Listenable.merge([
+          _gameMenuPanelController,
+          _gamePokedexSwapController,
+        ]),
+        builder: (context, _) {
+          final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
+          final slide = _kGameMenuPanelOffLeft +
+              (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+          final dexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
+          final showDexLayer =
+              _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
+          final dexOpacity = showDexLayer ? dexSwapT : 0.0;
+          final dexScale = 0.92 + 0.08 * dexSwapT;
+          final o = dexOpacity.clamp(0.0, 1.0);
+          final s = dexScale.clamp(0.0, 1.0);
+
+          return Stack(
+            clipBehavior: Clip.none,
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: o < 0.05,
+                  child: Opacity(
+                    opacity: o,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () =>
+                          _safeSetState(() => _pokedexPanelSelectedEntry = null),
+                      child: const ColoredBox(color: Colors.transparent),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: slide + _kBagItemDetailLeft,
+                top: _kGameMenuPanelTop + _kBagItemDetailTop,
+                width: _kBagItemDetailW,
+                height: _kBagItemDetailH,
+                child: IgnorePointer(
+                  ignoring: o < 0.05,
+                  child: Opacity(
+                    opacity: o,
+                    child: Transform.scale(
+                      scale: s,
+                      alignment: Alignment.center,
+                      child: _buildPokedexMaturePetDetailGlassPanel(entry),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -7525,6 +8183,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameProfileSwapController,
         _gameDietDiarySwapController,
         _gameBagSwapController,
+        _gamePokedexSwapController,
         _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
@@ -7534,6 +8193,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final profileSwapT = _gameProfileSwapCurve.value.clamp(0.0, 1.0);
         final dietSwapT = _gameDietDiarySwapCurve.value.clamp(0.0, 1.0);
         final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
+        final pokedexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
         final subExitRaw = _gameMenuSubOutsideDismissCurve.value.clamp(0.0, 1.0);
         final profileSubExit = _gameMenuSubOutsideDismissKind ==
                 _GameMenuSubOutsideDismissKind.profile
@@ -7547,21 +8207,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.bag
                 ? subExitRaw
                 : 0.0;
+        final pokedexSubExit =
+            _gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.pokedex
+                ? subExitRaw
+                : 0.0;
         final subExitFadeProfile = (1.0 - profileSubExit).clamp(0.0, 1.0);
         final subExitScaleProfile = (1.0 - 0.06 * profileSubExit).clamp(0.92, 1.0);
         final subExitFadeDiet = (1.0 - dietSubExit).clamp(0.0, 1.0);
         final subExitScaleDietMultiplier = (1.0 - 0.06 * dietSubExit).clamp(0.92, 1.0);
         final subExitFadeBag = (1.0 - bagSubExit).clamp(0.0, 1.0);
         final subExitScaleBagMultiplier = (1.0 - 0.06 * bagSubExit).clamp(0.92, 1.0);
+        final subExitFadePokedex = (1.0 - pokedexSubExit).clamp(0.0, 1.0);
+        final subExitScalePokedexMultiplier =
+            (1.0 - 0.06 * pokedexSubExit).clamp(0.92, 1.0);
         final showProfileLayer =
             _isProfilePanelOpen || _profilePanelSwapInProgress;
         final showDietLayer =
             _isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress;
         final showBagLayer = _isBagPanelOpen || _bagPanelSwapInProgress;
+        final showPokedexLayer =
+            _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
         final showMenuLayer =
             (!_isProfilePanelOpen || _profilePanelSwapInProgress) &&
                 (!_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress) &&
-                (!_isBagPanelOpen || _bagPanelSwapInProgress);
+                (!_isBagPanelOpen || _bagPanelSwapInProgress) &&
+                (!_isPokedexPanelOpen || _pokedexPanelSwapInProgress);
         var menuOpacity = 1.0;
         if (showProfileLayer) {
           menuOpacity *= (1.0 - profileSwapT);
@@ -7571,6 +8241,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
         if (showBagLayer) {
           menuOpacity *= (1.0 - bagSwapT);
+        }
+        if (showPokedexLayer) {
+          menuOpacity *= (1.0 - pokedexSwapT);
         }
         var menuScale = 1.0;
         if (showProfileLayer) {
@@ -7582,15 +8255,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (showBagLayer) {
           menuScale *= (1.0 - 0.04 * bagSwapT);
         }
+        if (showPokedexLayer) {
+          menuScale *= (1.0 - 0.04 * pokedexSwapT);
+        }
         final profileOpacity = showProfileLayer ? profileSwapT : 0.0;
         var dietOpacity = showDietLayer ? dietSwapT : 0.0;
         var dietScale = 0.92 + 0.08 * dietSwapT;
         var bagOpacity = showBagLayer ? bagSwapT : 0.0;
         var bagScale = 0.92 + 0.08 * bagSwapT;
+        var pokedexOpacity = showPokedexLayer ? pokedexSwapT : 0.0;
+        var pokedexScale = 0.92 + 0.08 * pokedexSwapT;
         dietOpacity *= subExitFadeDiet;
         dietScale *= subExitScaleDietMultiplier;
         bagOpacity *= subExitFadeBag;
         bagScale *= subExitScaleBagMultiplier;
+        pokedexOpacity *= subExitFadePokedex;
+        pokedexScale *= subExitScalePokedexMultiplier;
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -7664,6 +8344,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               scale: bagScale.clamp(0.0, 1.0),
                               alignment: Alignment.center,
                               child: _buildBagGameMenuGlassPanel(),
+                            ),
+                          ),
+                        ),
+                      if (showPokedexLayer)
+                        IgnorePointer(
+                          ignoring: pokedexOpacity < 0.05,
+                          child: Opacity(
+                            opacity: pokedexOpacity.clamp(0.0, 1.0),
+                            child: Transform.scale(
+                              scale: pokedexScale.clamp(0.0, 1.0),
+                              alignment: Alignment.center,
+                              child: _buildPokedexGameMenuGlassPanel(),
                             ),
                           ),
                         ),
@@ -8124,77 +8816,73 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// 단일 메뉴 셀: 48×48 타일 + 라벨(고정 높이), 전체 `_kYardGameMenuRowCellH`.
+  /// onTap 은 [_buildVegePetDummyIconInkWell] 로 **아이콘 사각형에만** 연결 (라벨/여백 비반응).
   Widget _yardGameMenuItem({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: SizedBox(
+    return SizedBox(
+      width: _kYardGameMenuItemW,
+      height: _kYardGameMenuRowCellH,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
             width: _kYardGameMenuItemW,
-            height: _kYardGameMenuRowCellH,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: _kYardGameMenuItemW,
-                  height: _kYardGameMenuIconTile,
-                  child: Center(
-                    child: Container(
-                      width: _kYardGameMenuIconTile,
-                      height: _kYardGameMenuIconTile,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.78),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
-                          width: 0.9,
+            height: _kYardGameMenuIconTile,
+            child: Center(
+              child: Semantics(
+                button: true,
+                label: label,
+                child: _buildVegePetDummyIconInkWell(
+                  onTap: onTap,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                        width: 0.9,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        icon,
-                        size: 22,
-                        color: const Color(0xFF5C5C5C),
-                      ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      icon,
+                      size: 22,
+                      color: const Color(0xFF5C5C5C),
                     ),
                   ),
                 ),
-                SizedBox(height: _kYardGameMenuIconLabelGap),
-                SizedBox(
-                  height: _kYardGameMenuLabelAreaH,
-                  width: _kYardGameMenuItemW,
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A4A4A),
-                      height: 1.2,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+          SizedBox(height: _kYardGameMenuIconLabelGap),
+          SizedBox(
+            height: _kYardGameMenuLabelAreaH,
+            width: _kYardGameMenuItemW,
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -8210,6 +8898,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     if (label == '가방') {
       await _openBagPanelFromGameMenu();
+      return;
+    }
+    if (label == '도감') {
+      await _openPokedexPanelFromGameMenu();
       return;
     }
     await _closeGameMenuPanel();
@@ -8290,6 +8982,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _bagPanelDetailItem = null;
       });
     }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (_isPokedexPanelOpen) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _syncProfileFormFromFetched();
@@ -8340,9 +9041,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isBagPanelOpen = false;
     _bagPanelSwapInProgress = false;
     _bagPanelDetailItem = null;
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0;
+    _isPokedexPanelOpen = false;
+    _pokedexPanelSwapInProgress = false;
+    _pokedexPanelSelectedEntry = null;
   }
 
-  /// 게임 메뉴 **하위 기능창**(프로필/식단일지/가방)을 외부 탭만으로 내린다.
+  /// 게임 메뉴 **하위 기능창**(프로필/식단일지/가방/도감)을 외부 탭만으로 내린다.
   ///
   /// 베지펫 정보창 → 먹이·놀이 전환처럼 중앙 기준 scale+fade 로 닫은 뒤,
   /// 슬라이드(reverse) 없이 마당 상태로 되돌린다. (`_gameMenuPanelOpen == false`)
@@ -8382,6 +9088,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isBagPanelOpen = false;
           _bagPanelSwapInProgress = false;
           _bagPanelDetailItem = null;
+          break;
+        case _GameMenuSubOutsideDismissKind.pokedex:
+          _gamePokedexSwapController.stop();
+          _gamePokedexSwapController.value = 0;
+          _isPokedexPanelOpen = false;
+          _pokedexPanelSwapInProgress = false;
+          _pokedexPanelSelectedEntry = null;
           break;
         case _GameMenuSubOutsideDismissKind.none:
           break;
@@ -8445,6 +9158,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_isBagPanelOpen && !_bagPanelSwapInProgress) {
       await _dismissGameSubPanelWithCenterExit(
         _GameMenuSubOutsideDismissKind.bag,
+      );
+      return;
+    }
+    if (_isPokedexPanelOpen && !_pokedexPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.pokedex,
       );
       return;
     }
@@ -8576,6 +9295,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _bagPanelDetailItem = null;
       });
     }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
 
     _diaryVisibleMonth = _todayDiaryMonth();
     final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
@@ -8634,8 +9362,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _onMenuTap(String label) async {
     if (label == '설정') {
       await _openSettingsSheet();
-    } else if (label == '도감') {
-      await _openPokedexSheet();
     } else if (label == '식단일지') {
       await _openDietDiaryFromGameMenu();
     } else if (label == '상점') {
@@ -9958,8 +10684,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// 회원 탈퇴: 사용자 데이터 삭제 후 익명 세션으로 재시작.
-  /// auth.users 행 완전 삭제는 클라이언트 권한으로 불가할 수 있음 →
-  /// TODO(vegepet): 추후 Edge Function / Admin API로 사용자 계정 정리.
+  /// auth.users 행 완전 삭제는 클라이언트 단독으로 불가 → Edge Function `delete-auth-user` 필요.
   Future<void> _deleteCurrentAuthUserByEdgeFunction() async {
     try {
       final response = await supabase.functions.invoke(
@@ -9968,11 +10693,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
 
       final data = response.data;
-      if (data is Map && data['ok'] == false) {
-        debugPrint('delete auth user failed: ${data['error']}');
+      debugPrint(
+        'delete-auth-user: status=${response.status} data=$data',
+      );
+      if (data is Map) {
+        if (data['ok'] == false) {
+          debugPrint(
+            'delete auth user failed: ok=false error=${data['error']} '
+            'details=${data['details']}',
+          );
+        }
+      } else if (data != null) {
+        debugPrint(
+          'delete auth user: unexpected response type ${data.runtimeType}',
+        );
       }
-    } catch (e) {
-      debugPrint('delete auth user edge function failed: $e');
+    } catch (e, st) {
+      debugPrint('delete auth user edge function failed: $e\n$st');
     }
   }
 
@@ -10007,6 +10744,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await supabase.from('pokedex_entries').delete().eq('user_id', uid);
       await supabase.from('user_items').delete().eq('user_id', uid);
       await supabase.from('user_pets').delete().eq('user_id', uid);
+
+      try {
+        final remains = await supabase
+            .from('pokedex_entries')
+            .select('id')
+            .eq('user_id', uid);
+        final remainList = remains as List;
+        if (remainList.isNotEmpty) {
+          debugPrint(
+            'withdraw warning: pokedex_entries still remain after delete (${remainList.length})',
+          );
+          await supabase.from('pokedex_entries').delete().eq('user_id', uid);
+        }
+      } catch (e) {
+        debugPrint('withdraw pokedex verify skipped/failed: $e');
+      }
 
       await supabase.from('profiles').update({
         'nickname': null,
@@ -10048,6 +10801,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isUsingRandomTicket = false;
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionInFlight = false;
+        _isNamingDialogOpen = false;
+        _canShowActivePetDuringNaming = false;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -10065,6 +10821,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isBagPanelOpen = false;
         _bagPanelSwapInProgress = false;
         _bagPanelDetailItem = null;
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+        _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
         _nicknameController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
@@ -10087,6 +10847,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
       _gameBagSwapController.value = 0;
+      _gamePokedexSwapController.value = 0;
+      _gameMenuSubOutsideDismissController.value = 0;
 
       await _waitForUiSettle();
       if (!mounted) return;
