@@ -115,6 +115,9 @@ const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요.
 
 final Random _mealMessageRandom = Random();
 
+/// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 중앙 퇴장 모션을 적용할 대상.
+enum _GameMenuSubOutsideDismissKind { none, profile, dietDiary, bag }
+
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
 ///
 /// feedback_text가 비어 있거나 null 이면 fallback 메시지 세트에서 선택한다.
@@ -307,6 +310,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kGameCanvasWidth = 844;
   static const double _kGameCanvasHeight = 390;
+
+  /// VegePet 공통 확인창 — 844×390 논리좌표 (화면에는 FittedBox 와 동일 스케일로 맞춤).
+  static const double _kVegePetConfirmDialogLeft = 302;
+  static const double _kVegePetConfirmDialogTop = 129;
+  static const double _kVegePetConfirmDialogW = 240;
+  static const double _kVegePetConfirmDialogH = 116;
+
   static const int _kProfileNicknameMaxLength = 8;
 
   _ViewStatus _status = _ViewStatus.loading;
@@ -443,6 +453,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       GlobalKey<_DietDiarySheetPanelState>();
   late AnimationController _gameDietDiarySwapController;
   late Animation<double> _gameDietDiarySwapCurve;
+  /// 게임 메뉴 ↔ 가방 창 전환 (프로필/식단일지와 동일 계열)
+  bool _isBagPanelOpen = false;
+  bool _bagPanelSwapInProgress = false;
+  _BagItem? _bagPanelDetailItem;
+  late AnimationController _gameBagSwapController;
+  late Animation<double> _gameBagSwapCurve;
+  /// 베지펫 정보창 ↔ 먹이·놀이 패널 닫기와 유사한 중앙 scale/fade (게임 메뉴 하위 외부 탭 전용).
+  late AnimationController _gameMenuSubOutsideDismissController;
+  late Animation<double> _gameMenuSubOutsideDismissCurve;
+  _GameMenuSubOutsideDismissKind _gameMenuSubOutsideDismissKind =
+      _GameMenuSubOutsideDismissKind.none;
   late AnimationController _petToySwapController;
   late Animation<double> _petToySwapCurve;
   late AnimationController _petMealSwapController;
@@ -497,6 +518,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kGameMenuPanelH = 310;
   /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
   static const double _kGameMenuPanelOffLeft = 844;
+
+  /// 가방 아이템 설명창 (844×390 기준 593,84) — 가방 글래스 패널 내부 상대좌표.
+  static const double _kBagItemDetailLeft = 593 - _kGameMenuPanelLeft;
+  static const double _kBagItemDetailTop = 84 - _kGameMenuPanelTop;
+  static const double _kBagItemDetailW = 176;
+  static const double _kBagItemDetailH = 222;
 
   /// 마당 게임 메뉴 그리드: 아이콘+라벨 고정 행 높이로 overflow 방지 (패널 310 내 배치).
   static const double _kYardGameMenuIconTile = 48;
@@ -571,6 +598,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _gameDietDiarySwapController,
       curve: Curves.easeInOutCubic,
     );
+    _gameBagSwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _gameBagSwapCurve = CurvedAnimation(
+      parent: _gameBagSwapController,
+      curve: Curves.easeInOutCubic,
+    );
+    _gameMenuSubOutsideDismissController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _gameMenuSubOutsideDismissCurve = CurvedAnimation(
+      parent: _gameMenuSubOutsideDismissController,
+      curve: Curves.easeInOutCubic,
+    );
     _bootstrap();
   }
 
@@ -589,6 +632,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameMenuPanelController.dispose();
     _gameProfileSwapController.dispose();
     _gameDietDiarySwapController.dispose();
+    _gameBagSwapController.dispose();
+    _gameMenuSubOutsideDismissController.dispose();
     super.dispose();
   }
 
@@ -1822,6 +1867,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  /// 랜덤 분양권은 `finalize_pet_graduation`(성숙기 졸업) 이후에만 지급된다.
+  /// 테스트/마이그레이션 등으로 `user_items` 에만 남은 행은 졸업 이력이 없으면
+  /// 가방·사용 플로우에서 노출하지 않는다.
+  bool _hasCompletedMaturityGraduationForTicketUi() {
+    if (_residentPets.isNotEmpty) return true;
+    final p = _activePet;
+    if (p != null &&
+        p['graduated_at'] != null &&
+        p['is_resident'] == true) {
+      return true;
+    }
+    return false;
+  }
+
+  /// 가방/분양권 사용 버튼 등 사용자에게 보여 줄 유효 수량.
+  int _effectiveRandomTicketCountForBag() {
+    if (!_hasCompletedMaturityGraduationForTicketUi()) return 0;
+    return _randomTicketCount;
+  }
+
   // 도감(pokedex) 등록 펫 조회.
   //
   // 이전에는 pokedex_entries / pet_species / source_user_pet 을 PostgREST relation
@@ -2727,6 +2792,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _profileOpenedFromGameMenu = false;
         _isDietDiaryPanelOpen = false;
         _dietDiaryPanelSwapInProgress = false;
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -2740,6 +2808,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameMenuPanelController.value = 0;
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
+      _gameBagSwapController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -2768,35 +2837,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // --------------------------------------------------------------------------
 
   Future<bool> _confirmResetForTesting() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+    return _showVegePetConfirmDialog(
+      message: '개발용 전체 초기화를 진행할까요?',
+      description:
+          '현재 계정의 펫, 식단 기록, 프로필 입력값이 초기화됩니다.',
+      primaryLabel: '초기화',
+      secondaryLabel: '취소',
       barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('개발용 전체 초기화'),
-          content: const Text(
-            '개발용 전체 초기화를 진행할까요?\n'
-            '현재 계정의 펫, 식단 기록, 도감 기록, 보유 아이템/분양권, 프로필 입력값이 모두 초기화됩니다.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('초기화 실행'),
-            ),
-          ],
-        );
-      },
     );
-    return confirmed == true;
   }
 
   Future<void> _resetForTesting() async {
@@ -2879,6 +2927,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _profileOpenedFromGameMenu = false;
         _isDietDiaryPanelOpen = false;
         _dietDiaryPanelSwapInProgress = false;
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
 
         _selectedSpeciesId = null;
         _nicknameController.clear();
@@ -2893,6 +2944,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameMenuPanelController.value = 0;
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
+      _gameBagSwapController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
       await _waitForUiSettle();
@@ -3068,304 +3120,294 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // --------------------------------------------------------------------------
   // 가방 (Bag) 화면
   //
-  // 우측 상단 게임 메뉴 > 가방 진입 시 열리는 BottomSheet.
-  // 이번 단계에서는 분양권 카테고리만 노출하고, 가구/장난감은 후속 단계에서 추가한다.
-  // 분양권 카드 탭 → 사용 확인 AlertDialog → 실제 분양 흐름은
-  // _useRandomAdoptionTicketFromBag() 가 담당한다.
+  // 우측 상단 게임 메뉴 그리드에서 진입. 프로필/식단일지와 같이 동일 오버레이 슬롯에서
+  // 메뉴 패널과 크로스페이드+스케일 전환한다. 아이템 탭 → 패널 내부 Stack 으로 설명창.
+  // 랜덤 분양권 사용 확인/ RPC 는 _confirmUseRandomTicket · _useRandomAdoptionTicketFromBag.
   // --------------------------------------------------------------------------
 
-  // 가방 BottomSheet.
-  //
-  // 도감 시트와 동일한 패턴:
-  //   - 시트 내부에서 추가 showDialog 를 띄우지 않는다.
-  //   - 아이콘 탭 → 같은 시트 안의 Stack overlay 로 설명창 표시.
-  //   - 분양권 "사용하기" 버튼은 카드 안에 별도 버튼으로 분리해서, 아이콘 탭(설명
-  //     보기) 과 사용 트리거가 충돌하지 않게 한다.
-  //   - "사용하기" 버튼이 눌리면 시트는 bool(true) 만 pop 하고, 확인 다이얼로그/
-  //     실제 분양 흐름은 시트가 완전히 닫힌 뒤 HomePage context 에서 실행한다.
-  Future<void> _openBagSheet() async {
-    await _fetchRandomTicketCount();
+  Future<void> _openBagPanelFromGameMenu() async {
+    if (_bagPanelSwapInProgress) return;
+    if (_gameBagSwapController.isAnimating) return;
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+      });
+    }
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    try {
+      await _fetchRandomTicketCount();
+    } catch (_) {}
     if (!mounted) return;
     await _waitForUiSettle();
     if (!mounted) return;
-
-    final shouldUseTicket = await showModalBottomSheet<bool>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetCtx) {
-        _BagItem? selectedItem;
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            return _buildBagSheetContent(
-              selectedItem: selectedItem,
-              onSelectItem: (item) {
-                setSheetState(() => selectedItem = item);
-              },
-              onCloseInfo: () {
-                setSheetState(() => selectedItem = null);
-              },
-              onUseTicket: () {
-                Navigator.of(sheetCtx).pop(true);
-              },
-            );
-          },
-        );
-      },
-    );
-
-    if (!mounted || shouldUseTicket != true) return;
-
-    // 시트 dispose 가 끝난 뒤 다이얼로그를 띄우도록 한 frame 양보.
-    await _waitForUiSettle();
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    _safeSetState(() {
+      _bagPanelDetailItem = null;
+      _bagPanelSwapInProgress = true;
+      _isBagPanelOpen = true;
+    });
+    await _gameBagSwapController.forward(from: 0.0);
     if (!mounted) return;
-
-    final confirmed = await _confirmUseRandomTicket();
-    if (!mounted || !confirmed) return;
-
-    await _useRandomAdoptionTicketFromBag();
+    _safeSetState(() {
+      _bagPanelSwapInProgress = false;
+    });
   }
 
-  Widget _buildBagSheetContent({
-    required _BagItem? selectedItem,
-    required ValueChanged<_BagItem> onSelectItem,
-    required VoidCallback onCloseInfo,
-    required VoidCallback onUseTicket,
+  Future<void> _closeBagPanelToGameMenu() async {
+    if (_bagPanelSwapInProgress) return;
+    _dismissFocus();
+    _gameBagSwapController.value = 1.0;
+    _safeSetState(() {
+      _bagPanelSwapInProgress = true;
+    });
+    await _gameBagSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _bagPanelSwapInProgress = false;
+      _isBagPanelOpen = false;
+      _bagPanelDetailItem = null;
+    });
+  }
+
+  /// 가방 설명창의 「사용하기」에서 호출. 확인 후 RPC·분양까지 진행하고,
+  /// **성공 시에만** [_dismissGameSubPanelWithCenterExit](bag) 로 외부 탭과 동일한 중앙 퇴장.
+  Future<void> _onBagPanelUseTicketPressed() async {
+    if (_isUsingRandomTicket) return;
+    if (_effectiveRandomTicketCountForBag() <= 0) {
+      _showSnack('보유 중인 랜덤 분양권이 없어요.');
+      return;
+    }
+    _dismissFocus();
+    final confirmed = await _confirmUseRandomTicket();
+    if (!mounted || !confirmed) return;
+    await _useRandomAdoptionTicketFromBag();
+    try {
+      await _fetchRandomTicketCount();
+    } catch (_) {}
+  }
+
+  /// 랜덤 분양권 분양까지 성공한 뒤: 설명 오버레이 제거 후 가방·게임메뉴 슬라브를 마당 상태로 내린다.
+  Future<void> _dismissBagPanelAfterTicketAdoptSuccessLikeBackdrop() async {
+    if (!mounted) return;
+    _safeSetState(() => _bagPanelDetailItem = null);
+    if (!mounted || !_isBagPanelOpen || !_gameMenuPanelOpen) return;
+    await _dismissGameSubPanelWithCenterExit(
+      _GameMenuSubOutsideDismissKind.bag,
+    );
+  }
+
+  _BagItem _bagWireframeRandomTicketDef() {
+    return _BagItem(
+      category: 'ticket',
+      name: '분양권(랜덤)',
+      description:
+          ' 성숙기를 달성하면 주는 베지펫 분양권 랜덤 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!',
+      quantity: _effectiveRandomTicketCountForBag() > 0
+          ? _effectiveRandomTicketCountForBag()
+          : 1,
+      icon: Icons.confirmation_number_outlined,
+      usable: false,
+    );
+  }
+
+  /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
+  Widget _buildBagWireframeDummyTile({
+    required _BagItem item,
+    required VoidCallback onTap,
   }) {
-    final theme = Theme.of(context);
-    final hasTicket = _randomTicketCount > 0;
-    final useDisabled = !hasTicket || _isUsingRandomTicket;
-
-    // 분양권은 _randomTicketCount 가 1 이상일 때만 더미 티켓 카드로 노출한다.
-    // MVP에서는 상점/가구 시스템을 제외하고, 장난감 2종은 기본 지급 아이템으로 고정 표시한다.
-    final ticketItems = <_BagItem>[
-      if (hasTicket)
-        _BagItem(
-          category: 'ticket',
-          name: '분양권(랜덤)',
-          description:
-              '성숙기를 달성하면 주는 베지펫 분양권 랜덤 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다! '
-              '(단, 보유중인 펫은 제외)',
-          quantity: _randomTicketCount,
-          icon: Icons.confirmation_number_outlined,
-          usable: !_isUsingRandomTicket,
-        ),
-    ];
-    final toyItems = _defaultToyBagItems();
-
-    return SafeArea(
-      top: false,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
-        ),
-        child: Stack(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.backpack_outlined, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          '가방',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '보유한 아이템을 확인할 수 있어요.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildBagSection(
-                      title: '분양권',
-                      emptyText: '보유 중인 분양권이 없어요.',
-                      items: ticketItems,
-                      onSelectItem: onSelectItem,
-                      onUseTicket: useDisabled ? null : onUseTicket,
-                      isUsing: _isUsingRandomTicket,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildBagSection(
-                      title: '장난감',
-                      emptyText: '보유 중인 장난감이 없어요.',
-                      items: toyItems,
-                      onSelectItem: onSelectItem,
-                    ),
-                  ],
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                  width: 0.9,
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                item.icon,
+                size: 22,
+                color: const Color(0xFF5C5C5C),
+              ),
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 72,
+              child: Text(
+                item.name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4A4A4A),
+                  height: 1.15,
                 ),
               ),
             ),
-            if (selectedItem != null)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: onCloseInfo,
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(24),
-                    child: _buildBagInfoCard(selectedItem),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBagSection({
-    required String title,
-    required String emptyText,
-    required List<_BagItem> items,
-    required ValueChanged<_BagItem> onSelectItem,
-    VoidCallback? onUseTicket,
-    bool isUsing = false,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              emptyText,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          )
-        else
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: items
-                .map(
-                  (it) => _buildBagItemTile(
-                    item: it,
-                    onTap: () => onSelectItem(it),
-                    onUse: it.category == 'ticket' ? onUseTicket : null,
-                    isUsing: isUsing && it.category == 'ticket',
-                  ),
-                )
-                .toList(),
-          ),
-      ],
+  Widget _buildBagGameMenuGlassPanel() {
+    final toys = _defaultToyBagItems();
+    final ticketDef = _effectiveRandomTicketCountForBag() > 0
+        ? _bagWireframeRandomTicketDef()
+        : null;
+    const sectionTitleStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
     );
-  }
 
-  Widget _buildBagItemTile({
-    required _BagItem item,
-    required VoidCallback onTap,
-    VoidCallback? onUse,
-    bool isUsing = false,
-  }) {
-    final theme = Theme.of(context);
-    // 분양권만 "사용하기" 버튼을 카드 하단에 노출한다. 가구/장난감 등은
-    // 아이콘 탭(설명 보기) 만 동작한다.
-    final showUseButton = item.category == 'ticket' && item.usable;
-
-    return SizedBox(
-      width: 156,
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: theme.colorScheme.outlineVariant),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kGameMenuPanelW,
+          height: _kGameMenuPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              InkWell(
-                onTap: onTap,
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircleAvatar(
-                        radius: 26,
-                        backgroundColor: theme.colorScheme.primaryContainer
-                            .withValues(alpha: 0.7),
-                        child: Icon(
-                          item.icon,
-                          size: 28,
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      if (_bagPanelDetailItem != null) {
+                        _safeSetState(() => _bagPanelDetailItem = null);
+                      } else {
+                        unawaited(_closeBagPanelToGameMenu());
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        item.name,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'x${item.quantity}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-              if (showUseButton) ...[
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.tonal(
-                    onPressed: isUsing ? null : onUse,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(32),
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                    child: isUsing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            '사용하기',
-                            style: TextStyle(fontSize: 12),
-                          ),
+              Positioned(
+                left: 37,
+                top: 14,
+                right: 8,
+                child: Text(
+                  '가방',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF000000),
+                    height: 1.0,
                   ),
                 ),
-              ],
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 48,
+                bottom: 0,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('• 분양권', style: sectionTitleStyle),
+                        const SizedBox(height: 8),
+                        if (ticketDef != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _buildBagWireframeDummyTile(
+                              item: ticketDef,
+                              onTap: () => _safeSetState(
+                                () => _bagPanelDetailItem = ticketDef,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        const Text('• 장난감', style: sectionTitleStyle),
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildBagWireframeDummyTile(
+                              item: toys[0],
+                              onTap: () => _safeSetState(
+                                () => _bagPanelDetailItem = toys[0],
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _buildBagWireframeDummyTile(
+                              item: toys[1],
+                              onTap: () => _safeSetState(
+                                () => _bagPanelDetailItem = toys[1],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -3373,51 +3415,150 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  // 가방 BottomSheet 위에 띄우는 설명 카드.
-  //
-  // 요구사항: "이름:", "설명:" 같은 라벨은 노출하지 않고 값만 보여준다.
-  // 카드 자체는 GestureDetector 로 감싸지 않아도 외곽 overlay 의
-  // GestureDetector 가 모든 탭을 받아 onCloseInfo 를 호출한다.
-  Widget _buildBagInfoCard(_BagItem item) {
-    final theme = Theme.of(context);
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 32,
-              backgroundColor:
-                  theme.colorScheme.primaryContainer.withValues(alpha: 0.8),
-              child: Icon(
-                item.icon,
-                size: 36,
-                color: theme.colorScheme.onPrimaryContainer,
+  /// 가방 아이템 설명창: 176×222 글래스 패널, 하늘빛 그라데이션 텍스트 「사용하기」는 분양권만.
+  Widget _buildBagDetailPreviewIcon(_BagItem item) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+          width: 0.9,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        item.icon,
+        size: 22,
+        color: const Color(0xFF5C5C5C),
+      ),
+    );
+  }
+
+  Widget _buildBagTicketGradientUseButton() {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: _isUsingRandomTicket
+            ? null
+            : () => unawaited(_onBagPanelUseTicketPressed()),
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          height: 30,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFFF1F1F1),
+              width: 0.8,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Center(
+            child: _isUsingRandomTicket
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : _buildPastelBlueGradientButtonText(
+                    '사용하기',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBagItemDetailGlassPanel(_BagItem item) {
+    final isTicket = item.category == 'ticket';
+    final showUseInPanel =
+        isTicket && _effectiveRandomTicketCountForBag() > 0;
+    const nameStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
+    );
+    const descStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.35,
+    );
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: _kBagItemDetailW,
+            height: _kBagItemDetailH,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: _buildBagDetailPreviewIcon(item),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    item.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: nameStyle,
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Text(
+                        item.description,
+                        textAlign: TextAlign.left,
+                        style: descStyle,
+                      ),
+                    ),
+                  ),
+                  if (showUseInPanel) ...[
+                    const SizedBox(height: 8),
+                    _buildBagTicketGradientUseButton(),
+                  ],
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              item.name,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              item.description,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '아무 곳이나 터치하면 닫혀요',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -3428,7 +3569,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _BagItem(
         category: 'toy',
         name: '뼈다귀 인형',
-        description: '강아지 베지펫이 좋아할 것 같은 기본 장난감입니다. 추후 놀이 기능과 연결될 예정입니다.',
+        description: '강아지 베지펫이 좋아하는 장난감',
         quantity: 1,
         icon: Icons.cruelty_free_outlined,
         usable: false,
@@ -3437,7 +3578,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _BagItem(
         category: 'toy',
         name: '실뭉치',
-        description: '고양이 베지펫이 좋아할 것 같은 기본 장난감입니다. 추후 놀이 기능과 연결될 예정입니다.',
+        description: '고양이 베지펫이 좋아하는 장난감',
         quantity: 1,
         icon: Icons.sports_baseball_outlined,
         usable: false,
@@ -3786,38 +3927,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  /// "분양권(랜덤)을 사용할까요?" 확인 다이얼로그.
+  /// 랜덤 분양권 사용 확인 다이얼로그.
   /// 확인을 누르면 true, 취소/dismiss 면 false.
   Future<bool> _confirmUseRandomTicket() async {
     if (!mounted) return false;
-    final result = await showDialog<bool>(
-      context: context,
+    return _showVegePetConfirmDialog(
+      message: "'분양권(랜덤)'을 사용하시겠습니까?",
+      description: '사용된 아이템은 되돌릴 수 없습니다.',
+      primaryLabel: '사용',
+      secondaryLabel: '취소',
       barrierDismissible: true,
-      builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text('분양권(랜덤)을 사용할까요?'),
-          content: const Text('도감에 등록되지 않은 베지펫 중 1마리가 랜덤으로 분양돼요.'),
-          actions: [
-            TextButton(
-              onPressed: _isUsingRandomTicket
-                  ? null
-                  : () => Navigator.of(ctx).pop(false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: _isUsingRandomTicket
-                  ? null
-                  : () => Navigator.of(ctx).pop(true),
-              child: const Text('사용하기'),
-            ),
-          ],
-        );
-      },
+      dimBarrier: false,
     );
-    return result == true;
   }
 
   /// 가방에서 랜덤 분양권을 실제로 사용해 새 베지펫을 분양받는다.
@@ -3839,7 +3960,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _showSnack('로그인이 필요해요.');
       return;
     }
-    if (_randomTicketCount <= 0) {
+    if (_effectiveRandomTicketCountForBag() <= 0) {
       _showSnack('보유 중인 랜덤 분양권이 없어요.');
       return;
     }
@@ -3960,7 +4081,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       _showSnack('새 베지펫이 분양되었어요!');
 
+      // 성공 분기만: 게임메뉴 바깥 탭 가방 닫기와 동일하게 중앙 scale/fade → 마당
+      await _dismissBagPanelAfterTicketAdoptSuccessLikeBackdrop();
       if (!mounted) return;
+
       await _showNicknameDialog();
     } finally {
       if (mounted) {
@@ -4003,6 +4127,292 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _safeSetState(VoidCallback fn) {
     if (!mounted) return;
     setState(fn);
+  }
+
+  // --------------------------------------------------------------------------
+  // VegePet 공통 확인창 (240×116 · Glassmorphism · 844×390 좌표계)
+  // TODO(vegepet): 동일 양식의 1버튼(확인만) 알림창 — 필요 시 primary 전용 래퍼 추가.
+  // --------------------------------------------------------------------------
+
+  Widget _buildVegePetPastelRedGradientButtonText(
+    String text, {
+    double fontSize = 11,
+    FontWeight fontWeight = FontWeight.w600,
+  }) {
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0xFFFF6B6B),
+          Color(0xFFFFD0D0),
+        ],
+      ).createShader(bounds),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: fontWeight,
+          color: Colors.white,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVegePetConfirmDialogShell({
+    required Widget child,
+    required double width,
+    required double height,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.10),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  /// [primaryLabel] = A(하늘빛 그라데이션) → `true`, [secondaryLabel] = B(빨강 그라데이션) → `false`.
+  /// [dimBarrier] 가 false 이면 배경 어둡게 처리 없음(분양권 확인 등).
+  Future<bool> _showVegePetConfirmDialog({
+    required String message,
+    String? description,
+    required String primaryLabel,
+    required String secondaryLabel,
+    bool barrierDismissible = true,
+    bool dimBarrier = true,
+  }) async {
+    if (!mounted) return false;
+    final desc = description?.trim();
+    final hasDesc = desc != null && desc.isNotEmpty;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.transparent,
+      builder: (dialogCtx) {
+        final mq = MediaQuery.of(dialogCtx);
+        final sw = mq.size.width;
+        final sh = mq.size.height;
+        final scale = min(
+          sw / _kGameCanvasWidth,
+          sh / _kGameCanvasHeight,
+        );
+        final ox = (sw - _kGameCanvasWidth * scale) / 2;
+        final oy = (sh - _kGameCanvasHeight * scale) / 2;
+        final dlgLeft = ox + _kVegePetConfirmDialogLeft * scale;
+        final dlgTop = oy + _kVegePetConfirmDialogTop * scale;
+        final dlgW = _kVegePetConfirmDialogW * scale;
+        final dlgH = _kVegePetConfirmDialogH * scale;
+
+        return Dialog(
+          insetPadding: EdgeInsets.zero,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: SizedBox(
+            width: sw,
+            height: sh,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: barrierDismissible
+                        ? () => Navigator.of(dialogCtx).pop(false)
+                        : null,
+                    child: ColoredBox(
+                      color: dimBarrier
+                          ? Colors.black.withValues(alpha: 0.30)
+                          : Colors.transparent,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: dlgLeft,
+                  top: dlgTop,
+                  width: dlgW,
+                  height: dlgH,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {},
+                    child: FittedBox(
+                      fit: BoxFit.fill,
+                      child: SizedBox(
+                        width: _kVegePetConfirmDialogW,
+                        height: _kVegePetConfirmDialogH,
+                        child: _buildVegePetConfirmDialogShell(
+                          width: _kVegePetConfirmDialogW,
+                          height: _kVegePetConfirmDialogH,
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: Padding(
+                                    padding:
+                                        const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                                    child: SingleChildScrollView(
+                                      physics: const BouncingScrollPhysics(),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            message,
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFF000000),
+                                              height: 1.25,
+                                            ),
+                                          ),
+                                          if (hasDesc) ...[
+                                            const SizedBox(height: 5),
+                                            Text(
+                                              desc!,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xFF4A4A4A),
+                                                height: 1.25,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                                  child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                        child: InkWell(
+                                          onTap: () => Navigator.of(dialogCtx)
+                                              .pop(true),
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                          child: Ink(
+                                            height: 30,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: const Color(0xFFF1F1F1),
+                                                width: 0.8,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.03),
+                                                  blurRadius: 4,
+                                                  offset: const Offset(0, 1),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Center(
+                                              child:
+                                                  _buildPastelBlueGradientButtonText(
+                                                primaryLabel,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                        child: InkWell(
+                                          onTap: () => Navigator.of(dialogCtx)
+                                              .pop(false),
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                          child: Ink(
+                                            height: 30,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: const Color(0xFFF1F1F1),
+                                                width: 0.8,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.03),
+                                                  blurRadius: 4,
+                                                  offset: const Offset(0, 1),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Center(
+                                              child:
+                                                  _buildVegePetPastelRedGradientButtonText(
+                                                secondaryLabel,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    return result == true;
   }
 
   @override
@@ -4085,6 +4495,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
+        _buildBagItemDetailGlobalOverlay(),
       ],
     );
   }
@@ -4219,6 +4630,74 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _buildMealPanelLayer(),
           _buildGameMenuOverlayLayer(),
         ],
+      ),
+    );
+  }
+
+  /// 가방 아이템 설명창 오픈 시: 844×390 전역 터치로 설명만 닫음.
+  /// 가방 패널과 동일한 스케일·페이드로 동기화(닫을 때 설명창이 함께 중앙 기준으로 사라짐).
+  Widget _buildBagItemDetailGlobalOverlay() {
+    final detail = _bagPanelDetailItem;
+    if (detail == null || !_isBagPanelOpen) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: Listenable.merge([
+          _gameMenuPanelController,
+          _gameBagSwapController,
+        ]),
+        builder: (context, _) {
+          final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
+          final slide = _kGameMenuPanelOffLeft +
+              (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+          final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
+          final showBagLayer =
+              _isBagPanelOpen || _bagPanelSwapInProgress;
+          final bagOpacity = showBagLayer ? bagSwapT : 0.0;
+          final bagScale = 0.92 + 0.08 * bagSwapT;
+          final o = bagOpacity.clamp(0.0, 1.0);
+          final s = bagScale.clamp(0.0, 1.0);
+
+          return Stack(
+            clipBehavior: Clip.none,
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: o < 0.05,
+                  child: Opacity(
+                    opacity: o,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () =>
+                          _safeSetState(() => _bagPanelDetailItem = null),
+                      child: const ColoredBox(color: Colors.transparent),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: slide + _kBagItemDetailLeft,
+                top: _kGameMenuPanelTop + _kBagItemDetailTop,
+                width: _kBagItemDetailW,
+                height: _kBagItemDetailH,
+                child: IgnorePointer(
+                  ignoring: o < 0.05,
+                  child: Opacity(
+                    opacity: o,
+                    child: Transform.scale(
+                      scale: s,
+                      alignment: Alignment.center,
+                      child: _buildBagItemDetailGlassPanel(detail),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -7045,6 +7524,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameMenuPanelController,
         _gameProfileSwapController,
         _gameDietDiarySwapController,
+        _gameBagSwapController,
+        _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
         final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
@@ -7052,19 +7533,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _kGameMenuPanelOffLeft + (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
         final profileSwapT = _gameProfileSwapCurve.value.clamp(0.0, 1.0);
         final dietSwapT = _gameDietDiarySwapCurve.value.clamp(0.0, 1.0);
+        final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
+        final subExitRaw = _gameMenuSubOutsideDismissCurve.value.clamp(0.0, 1.0);
+        final profileSubExit = _gameMenuSubOutsideDismissKind ==
+                _GameMenuSubOutsideDismissKind.profile
+            ? subExitRaw
+            : 0.0;
+        final dietSubExit =
+            _gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.dietDiary
+                ? subExitRaw
+                : 0.0;
+        final bagSubExit =
+            _gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.bag
+                ? subExitRaw
+                : 0.0;
+        final subExitFadeProfile = (1.0 - profileSubExit).clamp(0.0, 1.0);
+        final subExitScaleProfile = (1.0 - 0.06 * profileSubExit).clamp(0.92, 1.0);
+        final subExitFadeDiet = (1.0 - dietSubExit).clamp(0.0, 1.0);
+        final subExitScaleDietMultiplier = (1.0 - 0.06 * dietSubExit).clamp(0.92, 1.0);
+        final subExitFadeBag = (1.0 - bagSubExit).clamp(0.0, 1.0);
+        final subExitScaleBagMultiplier = (1.0 - 0.06 * bagSubExit).clamp(0.92, 1.0);
         final showProfileLayer =
             _isProfilePanelOpen || _profilePanelSwapInProgress;
         final showDietLayer =
             _isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress;
+        final showBagLayer = _isBagPanelOpen || _bagPanelSwapInProgress;
         final showMenuLayer =
             (!_isProfilePanelOpen || _profilePanelSwapInProgress) &&
-                (!_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress);
+                (!_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress) &&
+                (!_isBagPanelOpen || _bagPanelSwapInProgress);
         var menuOpacity = 1.0;
         if (showProfileLayer) {
           menuOpacity *= (1.0 - profileSwapT);
         }
         if (showDietLayer) {
           menuOpacity *= (1.0 - dietSwapT);
+        }
+        if (showBagLayer) {
+          menuOpacity *= (1.0 - bagSwapT);
         }
         var menuScale = 1.0;
         if (showProfileLayer) {
@@ -7073,9 +7579,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (showDietLayer) {
           menuScale *= (1.0 - 0.04 * dietSwapT);
         }
+        if (showBagLayer) {
+          menuScale *= (1.0 - 0.04 * bagSwapT);
+        }
         final profileOpacity = showProfileLayer ? profileSwapT : 0.0;
-        final dietOpacity = showDietLayer ? dietSwapT : 0.0;
-        final dietScale = 0.92 + 0.08 * dietSwapT;
+        var dietOpacity = showDietLayer ? dietSwapT : 0.0;
+        var dietScale = 0.92 + 0.08 * dietSwapT;
+        var bagOpacity = showBagLayer ? bagSwapT : 0.0;
+        var bagScale = 0.92 + 0.08 * bagSwapT;
+        dietOpacity *= subExitFadeDiet;
+        dietScale *= subExitScaleDietMultiplier;
+        bagOpacity *= subExitFadeBag;
+        bagScale *= subExitScaleBagMultiplier;
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -7114,10 +7629,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         ),
                       if (showProfileLayer)
                         IgnorePointer(
-                          ignoring: profileOpacity < 0.05,
+                          ignoring:
+                              profileOpacity.clamp(0.0, 1.0) *
+                                      subExitFadeProfile <
+                                  0.05,
                           child: Opacity(
-                            opacity: profileOpacity.clamp(0.0, 1.0),
-                            child: _buildGameMenuProfileGlassPanel(),
+                            opacity: profileOpacity.clamp(0.0, 1.0) *
+                                subExitFadeProfile,
+                            child: Transform.scale(
+                              scale: subExitScaleProfile,
+                              alignment: Alignment.center,
+                              child: _buildGameMenuProfileGlassPanel(),
+                            ),
                           ),
                         ),
                       if (showDietLayer)
@@ -7129,6 +7652,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               scale: dietScale.clamp(0.0, 1.0),
                               alignment: Alignment.center,
                               child: _buildDietDiaryGameMenuGlassPanel(),
+                            ),
+                          ),
+                        ),
+                      if (showBagLayer)
+                        IgnorePointer(
+                          ignoring: bagOpacity < 0.05,
+                          child: Opacity(
+                            opacity: bagOpacity.clamp(0.0, 1.0),
+                            child: Transform.scale(
+                              scale: bagScale.clamp(0.0, 1.0),
+                              alignment: Alignment.center,
+                              child: _buildBagGameMenuGlassPanel(),
                             ),
                           ),
                         ),
@@ -7673,6 +8208,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _openDietDiaryFromGameMenu();
       return;
     }
+    if (label == '가방') {
+      await _openBagPanelFromGameMenu();
+      return;
+    }
     await _closeGameMenuPanel();
     if (!mounted) return;
     await _onMenuTap(label);
@@ -7742,6 +8281,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _dietDiaryPanelSwapInProgress = false;
       });
     }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (_isBagPanelOpen) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _syncProfileFormFromFetched();
@@ -7787,29 +8335,125 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameDietDiarySwapController.value = 0;
     _isDietDiaryPanelOpen = false;
     _dietDiaryPanelSwapInProgress = false;
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0;
+    _isBagPanelOpen = false;
+    _bagPanelSwapInProgress = false;
+    _bagPanelDetailItem = null;
   }
 
+  /// 게임 메뉴 **하위 기능창**(프로필/식단일지/가방)을 외부 탭만으로 내린다.
+  ///
+  /// 베지펫 정보창 → 먹이·놀이 전환처럼 중앙 기준 scale+fade 로 닫은 뒤,
+  /// 슬라이드(reverse) 없이 마당 상태로 되돌린다. (`_gameMenuPanelOpen == false`)
+  Future<void> _dismissGameSubPanelWithCenterExit(
+    _GameMenuSubOutsideDismissKind kind,
+  ) async {
+    if (!mounted) return;
+    if (_gameMenuSubOutsideDismissController.isAnimating) return;
+    if (kind == _GameMenuSubOutsideDismissKind.none) return;
+
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    if (!mounted) return;
+
+    _safeSetState(() => _gameMenuSubOutsideDismissKind = kind);
+    await _gameMenuSubOutsideDismissController.forward(from: 0.0);
+    if (!mounted) return;
+
+    _safeSetState(() {
+      switch (kind) {
+        case _GameMenuSubOutsideDismissKind.profile:
+          _gameProfileSwapController.stop();
+          _gameProfileSwapController.value = 0;
+          _isProfilePanelOpen = false;
+          _profilePanelSwapInProgress = false;
+          _profileOpenedFromGameMenu = false;
+          break;
+        case _GameMenuSubOutsideDismissKind.dietDiary:
+          _gameDietDiarySwapController.stop();
+          _gameDietDiarySwapController.value = 0;
+          _isDietDiaryPanelOpen = false;
+          _dietDiaryPanelSwapInProgress = false;
+          break;
+        case _GameMenuSubOutsideDismissKind.bag:
+          _gameBagSwapController.stop();
+          _gameBagSwapController.value = 0;
+          _isBagPanelOpen = false;
+          _bagPanelSwapInProgress = false;
+          _bagPanelDetailItem = null;
+          break;
+        case _GameMenuSubOutsideDismissKind.none:
+          break;
+      }
+      _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
+      _gameMenuPanelOpen = false;
+      _gameMenuPanelController.value = 0;
+    });
+    _gameMenuSubOutsideDismissController.value = 0.0;
+  }
+
+  /// 게임 메뉴 슬라이드 패널 전체를 닫는다.
+  ///
+  /// 서브 패널(프로필/식단일지/가방) 상태를 **슬라이드 아웃 전에** 지우면
+  /// `showMenuLayer` 가 잠깐 true 가 되어 메뉴 그리드가 재등장하는 깜빡임이 생긴다.
+  /// 그래서 먼저 [_gameMenuPanelController] reverse 로 통째로 밀어낸 뒤,
+  /// 애니메이션 종료 후 swap 플래그·컨트롤러를 [_resetGameProfilePanelStateForMenuClose] 로 정리한다.
   Future<void> _closeGameMenuPanel() async {
     if (!_gameMenuPanelOpen) return;
     await _closeProfileSelectOverlay(notify: false, animated: false);
-    if (mounted) {
-      _safeSetState(_resetGameProfilePanelStateForMenuClose);
-    }
     await _gameMenuPanelController.reverse();
     if (!mounted) return;
     _safeSetState(() {
+      _resetGameProfilePanelStateForMenuClose();
       _gameMenuPanelOpen = false;
     });
   }
 
-  Future<void> _handleGameMenuBackdropTap() async {
+  /// 기능창(프로필/식단/가방)이 포함된 우측 슬라브 바깥(마당 영역) 터치.
+  /// 식단일지 내 상세(day) 패널이 열려 있으면 먼저 달력으로만 복귀한다.
+  /// 가방 설명창 오버레이가 터치를 못 받는 경우에 한해 여기서 설명창만 닫는다.
+  /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 슬라이드 없이 마당까지 닫는다.
+  Future<void> _closeActiveGameMenuFromOutsideBackdropTap() async {
+    if (_gameMenuSubOutsideDismissController.isAnimating) return;
+
     if (_isDietDiaryPanelOpen) {
       final handled =
           await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??
-          false;
+              false;
       if (handled) return;
     }
+    if (_bagPanelDetailItem != null && _isBagPanelOpen) {
+      _safeSetState(() => _bagPanelDetailItem = null);
+      return;
+    }
+
+    if (_isProfilePanelOpen &&
+        !_profilePanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.profile,
+      );
+      return;
+    }
+    if (_isDietDiaryPanelOpen &&
+        !_dietDiaryPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.dietDiary,
+      );
+      return;
+    }
+    if (_isBagPanelOpen && !_bagPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.bag,
+      );
+      return;
+    }
+
     await _closeGameMenuPanel();
+  }
+
+  Future<void> _handleGameMenuBackdropTap() async {
+    await _closeActiveGameMenuFromOutsideBackdropTap();
   }
 
   /// 식단일지 상단 우측 "May. 26" 형식 (MVP 와이어 기준, 월 약어 + 연도 2자리).
@@ -7923,6 +8567,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _profileOpenedFromGameMenu = false;
       });
     }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
 
     _diaryVisibleMonth = _todayDiaryMonth();
     final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
@@ -7981,8 +8634,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _onMenuTap(String label) async {
     if (label == '설정') {
       await _openSettingsSheet();
-    } else if (label == '가방') {
-      await _openBagSheet();
     } else if (label == '도감') {
       await _openPokedexSheet();
     } else if (label == '식단일지') {
@@ -9411,6 +10062,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _profileOpenedFromGameMenu = false;
         _isDietDiaryPanelOpen = false;
         _dietDiaryPanelSwapInProgress = false;
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
         _nicknameController.clear();
         _selectedGender = null;
         _selectedAgeRange = null;
@@ -9432,6 +10086,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameMenuPanelController.value = 0;
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
+      _gameBagSwapController.value = 0;
 
       await _waitForUiSettle();
       if (!mounted) return;
@@ -10643,7 +11298,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _debugBlock(
         title: 'user_items',
         children: [
-          _kv('random_adoption_ticket', '$_randomTicketCount장'),
+          _kv('random_adoption_ticket (DB)', '$_randomTicketCount장'),
+          _kv(
+            'random_adoption_ticket (가방 UI)',
+            '${_effectiveRandomTicketCountForBag()}장',
+          ),
         ],
       ),
       const SizedBox(height: 12),
@@ -10986,10 +11645,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 //
 // 이 분리 덕분에 Dialog dispose(TextField/Focus/TextEditingController)와
 // HomePage 의 DB 재조회/상태 갱신/SnackBar 가 같은 프레임에 겹치지 않는다.
-// 가방 BottomSheet 안에서 카드/오버레이로 표시할 아이템 정보를 담는 작은 모델.
+// 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
 //
-// 가방 UX 는 현재 BottomSheet 내부에서만 다뤄지므로 외부 노출이 필요 없어
-// private 클래스로 둔다. category 는 'ticket' | 'furniture' | 'toy' 중 하나.
+// category 는 'ticket' | 'furniture' | 'toy' 중 하나.
 class _BagItem {
   final String category;
   final String name;
