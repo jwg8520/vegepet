@@ -2079,6 +2079,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _pokedexEntries = entries;
       if (mounted) {
         _invalidatePokedexPanelSelectedEntryIfStale();
+        // 이전 캐시가 화면에 남지 않도록 목록 갱신을 반드시 반영한다.
+        _safeSetState(() {});
       }
     } catch (e, st) {
       debugPrint('fetch pokedex merge/sort failed: $e\n$st');
@@ -2918,14 +2920,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // 현재 로그인된 익명 유저 기준으로 테스트 데이터를 싹 비우고,
   // 앱이 처음 시작된 것처럼 "프로필 입력 화면"부터 다시 흐름이 시작되게 만든다.
   //
-  // 동작 순서 (FK 안전):
+  // 동작 순서 (FK 안전, supabase.auth.currentUser.id 기준):
   //   1) meal_logs
-  //   2) meal_diary_notes — 테이블 없을 수 있음 → 개별 try/catch
+  //   2) meal_diary_notes — 테이블 없을 수 있음 → 개별 try/catch (선행 삭제)
   //   3) pokedex_entries — **반드시 user_pets 보다 먼저** (source_user_pet_id FK)
+  //      삭제 직후 select 로 잔여 row 검증 → RLS 로 delete 가 무시되면 debugPrint + Snack
+  //      ※ 그래도 DB 에 row 가 남으면 Supabase 쪽 대응이 필요함. 예시:
+  //        (A) RLS: create policy "Users can delete own pokedex entries"
+  //            on public.pokedex_entries for delete to authenticated
+  //            using (auth.uid() = user_id);
+  //        (B) 개발 전용 security definer RPC 예: debug_reset_user_data — 배포 전 접근 제한 검토
   //   4) user_items
   //   5) user_pets
   //   6) profiles 프로필 필드만 초기화 (개발용이므로 email/account_type/linked_at 은 유지)
-  //   7) 로컬 상태·플래그·애니메이션 컨트롤러 정리
+  //   7) 로컬 상태·플래그·애니메이션 컨트롤러 정리 (도감 캐시·선택 상태 포함)
   //   8) _bootstrap() 재호출
   //
   // Storage bucket(meal-photos) 의 사진 파일 삭제는 이번 단계에서 다루지 않는다.
@@ -2936,7 +2944,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return _showVegePetConfirmDialog(
       message: '개발용 전체 초기화를 진행할까요?',
       description:
-          '현재 계정의 펫, 식단 기록, 프로필 입력값이 초기화됩니다.',
+          '현재 계정의 펫, 식단·도감 기록, 보유 아이템/분양권, 프로필 입력값이 초기화됩니다.',
       primaryLabel: '초기화',
       secondaryLabel: '취소',
       barrierDismissible: false,
@@ -2969,6 +2977,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         debugPrint('meal_diary_notes delete skipped (reset): $e');
       }
       await supabase.from('pokedex_entries').delete().eq('user_id', user.id);
+
+      var remainingPokedexCount = 0;
+      try {
+        final remains = await supabase
+            .from('pokedex_entries')
+            .select('id')
+            .eq('user_id', user.id);
+        remainingPokedexCount = (remains as List).length;
+      } catch (e) {
+        debugPrint(
+          'developer reset warning: pokedex_entries verify select failed: $e',
+        );
+      }
+      if (remainingPokedexCount > 0) {
+        debugPrint(
+          'developer reset warning: pokedex_entries still remain after delete. '
+          'count=$remainingPokedexCount',
+        );
+        _showSnack(
+          '도감 초기화가 완전히 처리되지 않았어요. Supabase RLS/RPC 확인 필요 '
+          '(pokedex_entries remain=$remainingPokedexCount)',
+        );
+      }
+
       await supabase.from('user_items').delete().eq('user_id', user.id);
       await supabase.from('user_pets').delete().eq('user_id', user.id);
       // 개발용 초기화: 동일 Supabase 유저·세션 유지 — 이메일 연동 필드는 건드리지 않음.
@@ -2980,22 +3012,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         'gold_balance': 1000,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user.id);
-
-      try {
-        final remains = await supabase
-            .from('pokedex_entries')
-            .select('id')
-            .eq('user_id', user.id);
-        final remainList = remains as List;
-        if (remainList.isNotEmpty) {
-          debugPrint(
-            'reset warning: pokedex_entries still remain after delete (${remainList.length})',
-          );
-          await supabase.from('pokedex_entries').delete().eq('user_id', user.id);
-        }
-      } catch (e) {
-        debugPrint('reset pokedex verify skipped/failed: $e');
-      }
 
       if (!mounted) return;
       _safeSetState(() {
@@ -3424,7 +3440,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       category: 'ticket',
       name: '분양권(랜덤)',
       description:
-          ' 성숙기를 달성하면 주는 베지펫 분양권 랜덤 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!',
+          ' 성숙기를 달성하면 주는 베지펫 랜덤 분양양 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!',
       quantity: _effectiveRandomTicketCountForBag() > 0
           ? _effectiveRandomTicketCountForBag()
           : 1,
@@ -8737,7 +8753,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   style: _yardGameMenuTitleTextStyle(),
                 ),
                 const SizedBox(height: _kYardGameMenuTitleBelowGap),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 SizedBox(
                   height: _kYardGameMenuRowCellH,
                   child: _yardGameMenuIconRow(items.sublist(0, 3)),
