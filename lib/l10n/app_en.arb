@@ -101,5 +101,18 @@
   "profilePanelFootnoteAi": "• Meal feedback is based on gender, age range, and diet goals.",
   "dietDiaryPanelTitle": "Diet diary",
   "dietDiaryMonthPickerTitle": "Choose month",
-  "dietDiarySavedSnackbar": "Diet diary saved."
+  "dietDiarySavedSnackbar": "Diet diary saved.",
+  "settingsSectionAccountBullet": "• Account",
+  "settingsSectionLanguageBullet": "• Language",
+  "settingsSectionPushBullet": "• Push Notifications",
+  "settingsSectionSoundBullet": "• Sound",
+  "settingsSectionSupportBullet": "• Customer Support",
+  "settingsGuestUserIdLine": "Guest : {userIdPrefix}",
+  "@settingsGuestUserIdLine": {
+    "placeholders": {
+      "userIdPrefix": {
+        "type": "String"
+      }
+    }
+  }
 }

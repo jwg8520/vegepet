@@ -101,5 +101,18 @@
   "profilePanelFootnoteAi": "• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!",
   "dietDiaryPanelTitle": "식단일지",
   "dietDiaryMonthPickerTitle": "월 선택",
-  "dietDiarySavedSnackbar": "식단일지가 저장되었어요."
+  "dietDiarySavedSnackbar": "식단일지가 저장되었어요.",
+  "settingsSectionAccountBullet": "• 계정",
+  "settingsSectionLanguageBullet": "• Language",
+  "settingsSectionPushBullet": "• 푸쉬 알림",
+  "settingsSectionSoundBullet": "• 사운드",
+  "settingsSectionSupportBullet": "• 고객지원",
+  "settingsGuestUserIdLine": "Guest : {userIdPrefix}",
+  "@settingsGuestUserIdLine": {
+    "placeholders": {
+      "userIdPrefix": {
+        "type": "String"
+      }
+    }
+  }
 }

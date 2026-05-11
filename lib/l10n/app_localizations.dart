@@ -709,6 +709,42 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'식단일지가 저장되었어요.'**
   String get dietDiarySavedSnackbar;
+
+  /// No description provided for @settingsSectionAccountBullet.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 계정'**
+  String get settingsSectionAccountBullet;
+
+  /// No description provided for @settingsSectionLanguageBullet.
+  ///
+  /// In ko, this message translates to:
+  /// **'• Language'**
+  String get settingsSectionLanguageBullet;
+
+  /// No description provided for @settingsSectionPushBullet.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 푸쉬 알림'**
+  String get settingsSectionPushBullet;
+
+  /// No description provided for @settingsSectionSoundBullet.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 사운드'**
+  String get settingsSectionSoundBullet;
+
+  /// No description provided for @settingsSectionSupportBullet.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 고객지원'**
+  String get settingsSectionSupportBullet;
+
+  /// No description provided for @settingsGuestUserIdLine.
+  ///
+  /// In ko, this message translates to:
+  /// **'Guest : {userIdPrefix}'**
+  String settingsGuestUserIdLine(String userIdPrefix);
 }
 
 class _AppLocalizationsDelegate

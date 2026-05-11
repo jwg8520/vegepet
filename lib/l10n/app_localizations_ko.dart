@@ -315,4 +315,24 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get dietDiarySavedSnackbar => '식단일지가 저장되었어요.';
+
+  @override
+  String get settingsSectionAccountBullet => '• 계정';
+
+  @override
+  String get settingsSectionLanguageBullet => '• Language';
+
+  @override
+  String get settingsSectionPushBullet => '• 푸쉬 알림';
+
+  @override
+  String get settingsSectionSoundBullet => '• 사운드';
+
+  @override
+  String get settingsSectionSupportBullet => '• 고객지원';
+
+  @override
+  String settingsGuestUserIdLine(String userIdPrefix) {
+    return 'Guest : $userIdPrefix';
+  }
 }

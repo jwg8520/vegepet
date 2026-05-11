@@ -328,4 +328,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dietDiarySavedSnackbar => 'Diet diary saved.';
+
+  @override
+  String get settingsSectionAccountBullet => '• Account';
+
+  @override
+  String get settingsSectionLanguageBullet => '• Language';
+
+  @override
+  String get settingsSectionPushBullet => '• Push Notifications';
+
+  @override
+  String get settingsSectionSoundBullet => '• Sound';
+
+  @override
+  String get settingsSectionSupportBullet => '• Customer Support';
+
+  @override
+  String settingsGuestUserIdLine(String userIdPrefix) {
+    return 'Guest : $userIdPrefix';
+  }
 }
