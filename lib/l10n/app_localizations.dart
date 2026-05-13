@@ -745,6 +745,42 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'Guest : {userIdPrefix}'**
   String settingsGuestUserIdLine(String userIdPrefix);
+
+  /// No description provided for @emailLinkSendOtpButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드 받기'**
+  String get emailLinkSendOtpButton;
+
+  /// No description provided for @emailLinkEmailRowLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 이메일'**
+  String get emailLinkEmailRowLabel;
+
+  /// No description provided for @emailLinkOtpRowLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 인증 코드'**
+  String get emailLinkOtpRowLabel;
+
+  /// No description provided for @emailLinkResendCodeButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드 다시 받기'**
+  String get emailLinkResendCodeButton;
+
+  /// No description provided for @emailLinkVerifyCompleteButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 완료'**
+  String get emailLinkVerifyCompleteButton;
+
+  /// No description provided for @emailOtpRetryAfterSeconds.
+  ///
+  /// In ko, this message translates to:
+  /// **'{seconds}초 후에 재전송 가능'**
+  String emailOtpRetryAfterSeconds(int seconds);
 }
 
 class _AppLocalizationsDelegate

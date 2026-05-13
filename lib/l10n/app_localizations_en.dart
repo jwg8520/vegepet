@@ -348,4 +348,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String settingsGuestUserIdLine(String userIdPrefix) {
     return 'Guest : $userIdPrefix';
   }
+
+  @override
+  String get emailLinkSendOtpButton => 'Send verification code';
+
+  @override
+  String get emailLinkEmailRowLabel => '• Email';
+
+  @override
+  String get emailLinkOtpRowLabel => '• Code';
+
+  @override
+  String get emailLinkResendCodeButton => 'Resend verification code';
+
+  @override
+  String get emailLinkVerifyCompleteButton => 'Complete verification';
+
+  @override
+  String emailOtpRetryAfterSeconds(int seconds) {
+    return 'Resend available in ${seconds}s';
+  }
 }

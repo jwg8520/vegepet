@@ -114,5 +114,18 @@
         "type": "String"
       }
     }
+  },
+  "emailLinkSendOtpButton": "인증 코드 받기",
+  "emailLinkEmailRowLabel": "• 이메일",
+  "emailLinkOtpRowLabel": "• 인증 코드",
+  "emailLinkResendCodeButton": "인증 코드 다시 받기",
+  "emailLinkVerifyCompleteButton": "인증 완료",
+  "emailOtpRetryAfterSeconds": "{seconds}초 후에 재전송 가능",
+  "@emailOtpRetryAfterSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
   }
 }

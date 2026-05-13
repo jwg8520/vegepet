@@ -474,6 +474,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _settingsBgmBusy = false;
   bool _settingsSfxBusy = false;
 
+  /// 설정 위 마당 오버레이: 이메일 OTP 발송(인증 코드 받기) 전용 글래스 패널.
+  bool _isEmailLinkPanelOpen = false;
+  bool _emailLinkPanelSendBusy = false;
+  bool _emailLinkPanelVerifyBusy = false;
+  bool _emailLinkPanelResendBusy = false;
+  bool _emailLinkOtpSent = false;
+  String _emailLinkOtpSentForEmail = '';
+  final TextEditingController _emailLinkController = TextEditingController();
+  final TextEditingController _emailLinkOtpController = TextEditingController();
+
   /// 베지펫 정보창 ↔ 먹이·놀이 패널 닫기와 유사한 중앙 페이드 (게임 메뉴 하위 외부 탭 전용).
   late AnimationController _gameMenuSubOutsideDismissController;
   late Animation<double> _gameMenuSubOutsideDismissCurve;
@@ -555,6 +565,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kYardGameMenuTitleBelowGap = 8;
   static const double _kSettingsGrayRowW = 212;
   static const double _kSettingsGrayRowH = 22;
+
+  /// 이메일 계정 연동 글래스 패널 (844×390 마당 기준).
+  static const double _kEmailLinkPanelLeft = 567;
+  static const double _kEmailLinkPanelTop = 88;
+  static const double _kEmailLinkPanelW = 230;
+  static const double _kEmailLinkPanelH = 220;
 
   @override
   void initState() {
@@ -665,6 +681,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
     _nicknameController.dispose();
+    _emailLinkController.dispose();
+    _emailLinkOtpController.dispose();
     _petToySwapController.dispose();
     _petMealSwapController.dispose();
     _dragHintPulseController.dispose();
@@ -1283,9 +1301,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return _emailOtpCooldownSeconds > 0;
   }
 
-  String _emailOtpCooldownLabel({required String normalLabel}) {
-    if (_emailOtpCooldownSeconds <= 0) return normalLabel;
-    return '$_emailOtpCooldownSeconds초 후 다시 시도';
+  void _resetEmailLinkPanelOtpFlow() {
+    _emailLinkOtpSent = false;
+    _emailLinkOtpSentForEmail = '';
+    _emailLinkOtpController.clear();
+    _emailLinkPanelSendBusy = false;
+    _emailLinkPanelVerifyBusy = false;
+    _emailLinkPanelResendBusy = false;
   }
 
   _MealNotificationTexts _mealNotificationTextsForLocaleCode(
@@ -2665,6 +2687,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     String text, {
     double fontSize = 14,
     FontWeight fontWeight = FontWeight.w600,
+    TextAlign textAlign = TextAlign.center,
+    int? maxLines,
+    TextOverflow? overflow,
   }) {
     return ShaderMask(
       blendMode: BlendMode.srcIn,
@@ -2675,7 +2700,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ).createShader(bounds),
       child: Text(
         text,
-        textAlign: TextAlign.center,
+        textAlign: textAlign,
+        maxLines: maxLines,
+        overflow: overflow,
         style: TextStyle(
           fontSize: fontSize,
           fontWeight: fontWeight,
@@ -5145,6 +5172,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
         _buildBagItemDetailGlobalOverlay(),
         _buildPokedexMaturePetDetailGlobalOverlay(),
+        _buildEmailLinkPanelGlobalOverlay(),
       ],
     );
   }
@@ -5208,6 +5236,421 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildEmailLinkPanelGlobalOverlay() {
+    if (!_isEmailLinkPanelOpen) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                _dismissFocus();
+                _safeSetState(() {
+                  _resetEmailLinkPanelOtpFlow();
+                  _isEmailLinkPanelOpen = false;
+                });
+              },
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned(
+            left: _kEmailLinkPanelLeft,
+            top: _kEmailLinkPanelTop,
+            width: _kEmailLinkPanelW,
+            height: _kEmailLinkPanelH,
+            child: _buildEmailLinkGlassPanel(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _onEmailLinkPanelPrimaryTap() async {
+    if (_emailLinkPanelSendBusy || _emailLinkPanelVerifyBusy) return;
+
+    if (!_emailLinkOtpSent) {
+      if (_isEmailOtpCooldownActive()) return;
+      final raw = _emailLinkController.text.trim();
+      if (raw.isEmpty) {
+        _showSnack('이메일을 입력해주세요.');
+        return;
+      }
+      if (!_looksLikeEmail(raw)) {
+        _showSnack('올바른 이메일 형식으로 입력해주세요.');
+        return;
+      }
+      _safeSetState(() => _emailLinkPanelSendBusy = true);
+      final ok = await _sendEmailLinkOtp(raw);
+      if (!mounted) return;
+      _safeSetState(() {
+        _emailLinkPanelSendBusy = false;
+        if (ok) {
+          _emailLinkOtpSent = true;
+          _emailLinkOtpSentForEmail = raw;
+        }
+      });
+      if (ok) {
+        _startEmailOtpCooldown();
+      }
+    } else {
+      if (_hasEffectiveEmailLink()) {
+        _showSnack('이미 이메일 계정으로 연동되어 있어요.');
+        return;
+      }
+      final raw = _emailLinkController.text.trim();
+      if (raw.isEmpty || !_looksLikeEmail(raw)) {
+        _showSnack('올바른 이메일 형식으로 입력해주세요.');
+        return;
+      }
+      final code = _emailLinkOtpController.text.trim();
+      if (code.isEmpty) {
+        _showSnack('인증 코드를 입력해주세요.');
+        return;
+      }
+      _safeSetState(() => _emailLinkPanelVerifyBusy = true);
+      final ok = await _verifyEmailLinkOtp(email: raw, token: code);
+      if (!mounted) return;
+      _safeSetState(() => _emailLinkPanelVerifyBusy = false);
+      if (ok) {
+        await _fetchProfileAndRefreshSettingsUi();
+        if (!mounted) return;
+        _dismissFocus();
+        _safeSetState(() {
+          _resetEmailLinkPanelOtpFlow();
+          _isEmailLinkPanelOpen = false;
+        });
+        _showSnack('이메일 계정 연동이 완료되었어요.');
+      }
+    }
+  }
+
+  Future<void> _onEmailLinkPanelResendOtp() async {
+    if (_emailLinkPanelResendBusy || _isEmailOtpCooldownActive()) return;
+    final raw = _emailLinkController.text.trim();
+    if (raw.isEmpty || !_looksLikeEmail(raw)) {
+      _showSnack('올바른 이메일 형식으로 입력해주세요.');
+      return;
+    }
+    _safeSetState(() => _emailLinkPanelResendBusy = true);
+    final ok = await _sendEmailLinkOtp(raw);
+    if (!mounted) return;
+    _safeSetState(() => _emailLinkPanelResendBusy = false);
+    if (ok) {
+      _startEmailOtpCooldown();
+    }
+  }
+
+  Widget _buildEmailLinkGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    final cooldownActive = _emailOtpCooldownSeconds > 0;
+    final otpEnabled = _emailLinkOtpSent;
+    final fieldTextStyle = _settingsPanelTextStyle(
+      11,
+      FontWeight.w600,
+      const Color(0xFF4A4A4A),
+      height: 1.1,
+    );
+    const labelStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.15,
+    );
+
+    Widget labeledSection({
+      required String label,
+      required Widget field,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: labelStyle,
+              ),
+            ),
+            const SizedBox(height: 4),
+            field,
+          ],
+        ),
+      );
+    }
+
+    Widget shellTextField({
+      required TextEditingController controller,
+      required bool enabled,
+      required TextInputType keyboardType,
+      required List<TextInputFormatter> formatters,
+      ValueChanged<String>? onChanged,
+    }) {
+      return Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: enabled
+              ? Colors.white.withValues(alpha: 0.92)
+              : const Color(0xFFEFEFEF),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: enabled
+                ? const Color(0xFFE6E6E6)
+                : const Color(0xFFDADADA),
+            width: 1,
+          ),
+        ),
+        alignment: Alignment.centerLeft,
+        child: TextField(
+          controller: controller,
+          enabled: enabled,
+          keyboardType: keyboardType,
+          inputFormatters: formatters,
+          onChanged: onChanged,
+          style: fieldTextStyle,
+          textAlign: TextAlign.left,
+          maxLines: 1,
+          decoration: const InputDecoration(
+            isDense: true,
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      );
+    }
+
+    final primaryDisabled = !_emailLinkOtpSent
+        ? (_emailLinkPanelSendBusy || cooldownActive)
+        : _emailLinkPanelVerifyBusy;
+    final primaryLabel = !_emailLinkOtpSent
+        ? l10n.emailLinkSendOtpButton
+        : l10n.emailLinkVerifyCompleteButton;
+    final primaryBusy = !_emailLinkOtpSent
+        ? _emailLinkPanelSendBusy
+        : _emailLinkPanelVerifyBusy;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: _kEmailLinkPanelW,
+            height: _kEmailLinkPanelH,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.max,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      l10n.emailAccountLink,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _settingsPanelTextStyle(
+                        13,
+                        FontWeight.w600,
+                        const Color(0xFF000000),
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  labeledSection(
+                    label: l10n.emailLinkEmailRowLabel,
+                    field: shellTextField(
+                      controller: _emailLinkController,
+                      enabled: true,
+                      keyboardType: TextInputType.emailAddress,
+                      formatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[a-zA-Z0-9@.]'),
+                        ),
+                      ],
+                      onChanged: (_) {
+                        if (!_emailLinkOtpSent) return;
+                        final cur = _emailLinkController.text.trim();
+                        if (cur != _emailLinkOtpSentForEmail.trim()) {
+                          _safeSetState(() {
+                            _emailLinkOtpSent = false;
+                            _emailLinkOtpSentForEmail = '';
+                            _emailLinkOtpController.clear();
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  labeledSection(
+                    label: l10n.emailLinkOtpRowLabel,
+                    field: shellTextField(
+                      controller: _emailLinkOtpController,
+                      enabled: otpEnabled,
+                      keyboardType: TextInputType.number,
+                      formatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(8),
+                      ],
+                    ),
+                  ),
+                  if (cooldownActive && !_emailLinkOtpSent) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        l10n.emailOtpRetryAfterSeconds(_emailOtpCooldownSeconds),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _settingsPanelTextStyle(
+                          10,
+                          FontWeight.w600,
+                          const Color(0xFF4A4A4A),
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_emailLinkOtpSent) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: SizedBox(
+                        height: 22,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: (cooldownActive || _emailLinkPanelResendBusy)
+                                ? null
+                                : () => unawaited(_onEmailLinkPanelResendOtp()),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Align(
+                              alignment: Alignment.center,
+                              child: _emailLinkPanelResendBusy
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFF6B6B6B),
+                                      ),
+                                    )
+                                  : _buildPastelBlueGradientButtonText(
+                                      cooldownActive
+                                          ? l10n.emailOtpRetryAfterSeconds(
+                                              _emailOtpCooldownSeconds,
+                                            )
+                                          : l10n.emailLinkResendCodeButton,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: SizedBox(
+                      height: 28,
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                        child: InkWell(
+                          onTap: primaryDisabled
+                              ? null
+                              : () =>
+                                  unawaited(_onEmailLinkPanelPrimaryTap()),
+                          borderRadius: BorderRadius.circular(18),
+                          child: Ink(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Opacity(
+                                  opacity: primaryBusy ? 0.35 : 1,
+                                  child: _buildPastelBlueGradientButtonText(
+                                    primaryLabel,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (primaryBusy)
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF6B6B6B),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -9003,6 +9446,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameSettingsSwapController.value = 0;
     _isSettingsPanelOpen = false;
     _settingsPanelSwapInProgress = false;
+    _isEmailLinkPanelOpen = false;
+    _resetEmailLinkPanelOtpFlow();
   }
 
   void _instantResetSettingsPanelIfOpen() {
@@ -9012,6 +9457,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() {
       _isSettingsPanelOpen = false;
       _settingsPanelSwapInProgress = false;
+      _isEmailLinkPanelOpen = false;
+      _resetEmailLinkPanelOtpFlow();
     });
   }
 
@@ -9105,6 +9552,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     if (_bagPanelDetailItem != null && _isBagPanelOpen) {
       _safeSetState(() => _bagPanelDetailItem = null);
+      return;
+    }
+
+    if (_isEmailLinkPanelOpen) {
+      _dismissFocus();
+      _safeSetState(() {
+        _isEmailLinkPanelOpen = false;
+        _resetEmailLinkPanelOtpFlow();
+      });
       return;
     }
 
@@ -9473,6 +9929,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() {
       _settingsPanelSwapInProgress = false;
       _isSettingsPanelOpen = false;
+      _isEmailLinkPanelOpen = false;
+      _resetEmailLinkPanelOtpFlow();
     });
   }
 
@@ -9497,7 +9955,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: Container(
         width: _kSettingsGrayRowW,
         height: _kSettingsGrayRowH,
-        color: const Color(0xFFD9D9D9),
+        color: const Color(0xFFEFEFEF),
         padding: const EdgeInsets.symmetric(horizontal: 8),
         alignment: Alignment.center,
         child: child,
@@ -9593,7 +10051,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return _resolvedDisplayEmailLine(l10n);
     }
     final uid = supabase.auth.currentUser?.id ?? '';
-    final prefix = uid.length <= 13 ? uid : uid.substring(0, 13);
+    final prefix = uid.length <= 23 ? uid : uid.substring(0, 23);
     return l10n.settingsGuestUserIdLine(prefix);
   }
 
@@ -9771,7 +10229,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         children: [
                           const SizedBox(height: 4),
                           sectionTitle(l10n.settingsSectionAccountBullet),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           _buildSettingsGrayRow(
                             child: Align(
                               alignment: Alignment.centerLeft,
@@ -9783,7 +10241,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           if (linked)
                             _buildSettingsGrayRow(
                               onTap: () {
@@ -9791,18 +10249,32 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               },
                               child: Row(
                                 children: [
-                                  Icon(
-                                    Icons.check_circle_outline,
-                                    size: 14,
-                                    color: const Color(0xFF4A4A4A),
+                                  ShaderMask(
+                                    blendMode: BlendMode.srcIn,
+                                    shaderCallback: (bounds) =>
+                                        const LinearGradient(
+                                          begin: Alignment.topCenter,
+                                          end: Alignment.bottomCenter,
+                                          colors: [
+                                            Color(0xFFA9C9FF),
+                                            Color(0xFFBFD9FF),
+                                          ],
+                                        ).createShader(bounds),
+                                    child: const Icon(
+                                      Icons.check_circle_outline,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                   Expanded(
-                                    child: Text(
+                                    child: _buildPastelBlueGradientButtonText(
                                       l10n.emailLinkCompleted,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      textAlign: TextAlign.start,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: rowLabelStyle,
                                     ),
                                   ),
                                 ],
@@ -9810,31 +10282,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             )
                           else
                             _buildSettingsGrayRow(
-                              onTap: () async {
-                                await _openEmailOtpLinkSheet(
-                                  onLinked: _fetchProfileAndRefreshSettingsUi,
-                                );
+                              onTap: () {
+                                if (_hasEffectiveEmailLink()) return;
+                                _dismissFocus();
+                                _safeSetState(() {
+                                  _resetEmailLinkPanelOtpFlow();
+                                  _isEmailLinkPanelOpen = true;
+                                });
                               },
                               child: Row(
                                 children: [
-                                  Icon(
-                                    Icons.link_rounded,
-                                    size: 14,
-                                    color: const Color(0xFF4A4A4A),
+                                  ShaderMask(
+                                    blendMode: BlendMode.srcIn,
+                                    shaderCallback: (bounds) =>
+                                        const LinearGradient(
+                                          begin: Alignment.topCenter,
+                                          end: Alignment.bottomCenter,
+                                          colors: [
+                                            Color(0xFFA9C9FF),
+                                            Color(0xFFBFD9FF),
+                                          ],
+                                        ).createShader(bounds),
+                                    child: const Icon(
+                                      Icons.link_rounded,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                   Expanded(
-                                    child: Text(
+                                    child: _buildPastelBlueGradientButtonText(
                                       l10n.emailAccountLink,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      textAlign: TextAlign.start,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: rowLabelStyle,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           _buildSettingsGrayRow(
                             onTap: () async {
                               final ok = await _confirmWithdrawAccount();
@@ -9865,7 +10354,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionLanguageBullet),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           _buildSettingsGrayRow(
                             onTap: () async {
                               await _openLanguageSelectorSheet(context);
@@ -9892,14 +10381,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionPushBullet),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           pushSwitchRow(
                             l10n.pushNoticeEvent,
                             _noticeEventPushEnabled,
                             _settingsNoticePushBusy,
                             (v) => unawaited(_onSettingsNoticeToggle(v)),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           pushSwitchRow(
                             l10n.pushMealReminder,
                             _mealReminderPushEnabled,
@@ -9908,14 +10397,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionSoundBullet),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           pushSwitchRow(
                             l10n.backgroundMusic,
                             _backgroundMusicEnabled,
                             _settingsBgmBusy,
                             (v) => unawaited(_onSettingsBgmToggle(v)),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           pushSwitchRow(
                             l10n.soundEffects,
                             _soundEffectsEnabled,
@@ -9924,12 +10413,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionSupportBullet),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.supportCenter,
                             () async => _openSupportCenterSheet(context),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.termsOfService,
                             () async => _openPolicyDocumentSheet(
@@ -9937,7 +10426,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               sheetCtx: context,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.privacyPolicy,
                             () async => _openPolicyDocumentSheet(
@@ -9945,7 +10434,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               sheetCtx: context,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.operationPolicy,
                             () async => _openPolicyDocumentSheet(
@@ -9953,7 +10442,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               sheetCtx: context,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.guardianGuide,
                             () async => _openPolicyDocumentSheet(
@@ -9961,7 +10450,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               sheetCtx: context,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           supportNavRow(
                             l10n.accountDataDeletionGuide,
                             () async => _openPolicyDocumentSheet(
@@ -10548,207 +11037,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _openEmailOtpLinkSheet({
-    required Future<void> Function() onLinked,
-  }) async {
-    if (_hasEffectiveEmailLink()) {
-      _showSnack('이미 이메일 계정으로 연동되어 있어요.');
-      return;
-    }
-
-    _dismissFocus();
-    await _waitForUiSettle();
-    if (!mounted) return;
-
-    final emailCtrl = TextEditingController();
-    final otpCtrl = TextEditingController();
-    Timer? sheetCooldownUiTimer;
-
-    var otpSent = false;
-    var isSending = false;
-    var isVerifying = false;
-
-    try {
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (modalCtx) {
-          final inset = MediaQuery.of(modalCtx).viewInsets.bottom;
-          final theme = Theme.of(modalCtx);
-
-          return StatefulBuilder(
-            builder: (ctx, setModal) {
-              sheetCooldownUiTimer ??= Timer.periodic(
-                const Duration(seconds: 1),
-                (_) {
-                  if (!modalCtx.mounted) return;
-                  setModal(() {});
-                },
-              );
-
-              Future<void> sendOtp() async {
-                final isCooldown = _isEmailOtpCooldownActive();
-                if (isSending || isVerifying || isCooldown) return;
-                final raw = emailCtrl.text.trim();
-                if (raw.isEmpty) {
-                  _showSnack('이메일을 입력해주세요.');
-                  return;
-                }
-                if (!_looksLikeEmail(raw)) {
-                  _showSnack('올바른 이메일 형식으로 입력해주세요.');
-                  return;
-                }
-
-                setModal(() => isSending = true);
-                _startEmailOtpCooldown();
-                final ok = await _sendEmailLinkOtp(raw);
-                if (!modalCtx.mounted) return;
-                setModal(() {
-                  isSending = false;
-                  if (ok) otpSent = true;
-                });
-              }
-
-              Future<void> verify() async {
-                if (isVerifying) return;
-                final em = emailCtrl.text.trim();
-                final code = otpCtrl.text.trim();
-                if (em.isEmpty) {
-                  _showSnack('이메일을 입력해주세요.');
-                  return;
-                }
-                if (code.isEmpty) {
-                  _showSnack('인증 코드를 입력해주세요.');
-                  return;
-                }
-
-                setModal(() => isVerifying = true);
-                final ok = await _verifyEmailLinkOtp(email: em, token: code);
-                if (!modalCtx.mounted) return;
-                setModal(() => isVerifying = false);
-
-                if (ok) {
-                  await _fetchProfile();
-                  await _syncAuthEmailToProfileIfNeeded();
-                  if (mounted) {
-                    _safeSetState(() {});
-                  }
-                  await onLinked();
-                  if (modalCtx.mounted) {
-                    Navigator.of(modalCtx).pop();
-                  }
-                  _showSnack('이메일 계정 연동이 완료되었어요.');
-                }
-              }
-
-              final busy = isSending || isVerifying;
-              final isCooldown = _isEmailOtpCooldownActive();
-
-              return Padding(
-                padding: EdgeInsets.only(bottom: inset),
-                child: SafeArea(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          '이메일 계정 연동',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          '이메일을 연동하면 기기를 바꾸거나 앱을 다시 설치해도 베지펫 데이터를 이어갈 수 있어요.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: emailCtrl,
-                          enabled: !busy,
-                          keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [AutofillHints.email],
-                          decoration: const InputDecoration(
-                            labelText: '이메일',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: (busy || otpSent || isCooldown)
-                              ? null
-                              : sendOtp,
-                          child: Text(
-                            isCooldown
-                                ? _emailOtpCooldownLabel(
-                                    normalLabel: '인증 코드 받기',
-                                  )
-                                : isSending
-                                ? '발송 중...'
-                                : '인증 코드 받기',
-                          ),
-                        ),
-                        if (otpSent) ...[
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: otpCtrl,
-                            enabled: !busy,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: '인증 코드',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: (busy || isCooldown) ? null : sendOtp,
-                            child: Text(
-                              isCooldown
-                                  ? _emailOtpCooldownLabel(
-                                      normalLabel: '인증 코드 다시 받기',
-                                    )
-                                  : isSending
-                                  ? '발송 중...'
-                                  : '인증 코드 다시 받기',
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          FilledButton(
-                            onPressed: busy ? null : verify,
-                            child: const Text('인증 완료'),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: busy
-                              ? null
-                              : () => Navigator.of(modalCtx).pop(),
-                          child: const Text('취소'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      sheetCooldownUiTimer?.cancel();
-      emailCtrl.dispose();
-      otpCtrl.dispose();
-    }
-  }
-
   Future<bool> _confirmWithdrawAccount() async {
     final ctx = _rootNavigatorKey.currentContext ?? context;
     final confirmed = await showDialog<bool>(
@@ -10929,6 +11217,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
+        _isEmailLinkPanelOpen = false;
+        _resetEmailLinkPanelOtpFlow();
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
         _nicknameController.clear();
         _selectedGender = null;

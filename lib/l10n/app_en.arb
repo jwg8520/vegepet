@@ -114,5 +114,18 @@
         "type": "String"
       }
     }
+  },
+  "emailLinkSendOtpButton": "Send verification code",
+  "emailLinkEmailRowLabel": "• Email",
+  "emailLinkOtpRowLabel": "• Code",
+  "emailLinkResendCodeButton": "Resend verification code",
+  "emailLinkVerifyCompleteButton": "Complete verification",
+  "emailOtpRetryAfterSeconds": "Resend available in {seconds}s",
+  "@emailOtpRetryAfterSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
   }
 }

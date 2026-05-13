@@ -335,4 +335,24 @@ class AppLocalizationsKo extends AppLocalizations {
   String settingsGuestUserIdLine(String userIdPrefix) {
     return 'Guest : $userIdPrefix';
   }
+
+  @override
+  String get emailLinkSendOtpButton => '인증 코드 받기';
+
+  @override
+  String get emailLinkEmailRowLabel => '• 이메일';
+
+  @override
+  String get emailLinkOtpRowLabel => '• 인증 코드';
+
+  @override
+  String get emailLinkResendCodeButton => '인증 코드 다시 받기';
+
+  @override
+  String get emailLinkVerifyCompleteButton => '인증 완료';
+
+  @override
+  String emailOtpRetryAfterSeconds(int seconds) {
+    return '$seconds초 후에 재전송 가능';
+  }
 }
