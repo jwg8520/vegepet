@@ -349,6 +349,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _isNamingDialogOpen = false;
   bool _canShowActivePetDuringNaming = false;
 
+  static const List<String> _languageDisplayOptions = ['한국어', 'English'];
+
   static const List<String> _genderOptions = ['여자', '남자'];
   static const List<String> _ageRangeOptions = [
     '10대',
@@ -463,12 +465,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late AnimationController _gamePokedexSwapController;
   late Animation<double> _gamePokedexSwapCurve;
 
+  /// 게임 메뉴 ↔ 스토리 창 전환 (도감창과 동일 계열).
+  bool _isStoryPanelOpen = false;
+  bool _storyPanelSwapInProgress = false;
+  int _storyPageIndex = 0;
+  late AnimationController _gameStorySwapController;
+  late Animation<double> _gameStorySwapCurve;
+
   /// 게임 메뉴 ↔ 설정 패널 전환 (프로필/식단일지와 동일 계열).
   bool _isSettingsPanelOpen = false;
   bool _settingsPanelSwapInProgress = false;
   late AnimationController _gameSettingsSwapController;
   late Animation<double> _gameSettingsSwapCurve;
   final ScrollController _settingsScrollController = ScrollController();
+  _SupportDocType? _activeSettingsSupportDoc;
+  bool _settingsSupportDocSwapInProgress = false;
+  final ScrollController _settingsSupportDocScrollController =
+      ScrollController();
   bool _settingsNoticePushBusy = false;
   bool _settingsMealPushBusy = false;
   bool _settingsBgmBusy = false;
@@ -476,6 +489,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 설정 위 마당 오버레이: 이메일 OTP 발송(인증 코드 받기) 전용 글래스 패널.
   bool _isEmailLinkPanelOpen = false;
+
+  /// 설정 위 마당 오버레이: 고객센터(문의 이메일·복사) 글래스 패널.
+  bool _isCustomerCenterPanelOpen = false;
+
+  /// 마당 공통 알림창: 상점 MVP 준비중 안내.
+  bool _isShopNoticeOpen = false;
   bool _emailLinkPanelSendBusy = false;
   bool _emailLinkPanelVerifyBusy = false;
   bool _emailLinkPanelResendBusy = false;
@@ -546,6 +565,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
   static const double _kGameMenuPanelOffLeft = 844;
 
+  /// 스토리 글래스 패널 (844×390 마당 기준).
+  static const double _kStoryPanelLeft = 40;
+  static const double _kStoryPanelTop = 40;
+  static const double _kStoryPanelW = 766;
+  static const double _kStoryPanelH = 310;
+  static const double _kStoryIllustrationLeft = 36;
+  static const double _kStoryIllustrationTop = 15;
+  static const double _kStoryIllustrationW = 691;
+  static const double _kStoryIllustrationH = 280;
+
+  /// 추후 story png 삽입 시 경로 추가.
+  static const List<String> _storyPageAssetPaths = <String>[
+    // 'assets/images/story/story_01.png',
+  ];
+
   /// 가방 아이템 설명창 (844×390 기준 593,84) — 가방 글래스 패널 내부 상대좌표.
   static const double _kBagItemDetailLeft = 593 - _kGameMenuPanelLeft;
   static const double _kBagItemDetailTop = 84 - _kGameMenuPanelTop;
@@ -570,7 +604,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kEmailLinkPanelLeft = 567;
   static const double _kEmailLinkPanelTop = 88;
   static const double _kEmailLinkPanelW = 230;
-  static const double _kEmailLinkPanelH = 220;
+  static const double _kEmailLinkPanelH = 212;
+
+  static const String _kCustomerCenterEmail = 'acoustic.jwg@gmail.com';
+  static const double _kCustomerCenterPanelLeft = 567;
+  static const double _kCustomerCenterPanelTop = 130;
+  static const double _kCustomerCenterPanelW = 230;
+  static const double _kCustomerCenterPanelH = 130;
 
   @override
   void initState() {
@@ -653,6 +693,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _gamePokedexSwapController,
       curve: Curves.easeInOutCubic,
     );
+    _gameStorySwapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    );
+    _gameStorySwapCurve = CurvedAnimation(
+      parent: _gameStorySwapController,
+      curve: Curves.easeInOutCubic,
+    );
     _gameSettingsSwapController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 340),
@@ -691,8 +739,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameDietDiarySwapController.dispose();
     _gameBagSwapController.dispose();
     _gamePokedexSwapController.dispose();
+    _gameStorySwapController.dispose();
     _gameSettingsSwapController.dispose();
     _settingsScrollController.dispose();
+    _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
     super.dispose();
   }
@@ -864,6 +914,49 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  String _currentLanguageDisplayLabel() {
+    final code = _LocaleControllerScope.of(context).locale.languageCode;
+    return code == 'en' ? 'English' : '한국어';
+  }
+
+  Locale _localeFromLanguageLabel(String label) {
+    return label == 'English' ? const Locale('en') : const Locale('ko');
+  }
+
+  Future<void> _onSettingsLanguageSelected(String label) async {
+    try {
+      await _applyAppLocaleFromLanguageLabel(label);
+    } catch (e, st) {
+      debugPrint('settings language change failed: $e\n$st');
+      if (!mounted) return;
+      _showSnack('언어 변경에 실패했어요. 다시 시도해주세요.');
+    }
+  }
+
+  Future<void> _applyAppLocaleFromLanguageLabel(String label) async {
+    final targetCode = _localeFromLanguageLabel(label).languageCode;
+    final localeScope = _LocaleControllerScope.of(context);
+    final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
+    final changedMessage = targetCode == 'en'
+        ? 'Language has been changed.'
+        : '언어가 변경되었어요.';
+    await localeScope.setLocale(Locale(targetCode));
+    if (!mounted) return;
+    _showSnack(changedMessage);
+
+    if (_mealReminderPushEnabled) {
+      try {
+        await _scheduleMealReminderNotifications(
+          notificationTitle: notificationTexts.title,
+          notificationMessages: notificationTexts.messages,
+          revertToggleWhenDenied: false,
+        );
+      } catch (e) {
+        debugPrint('meal reminder reschedule on locale change failed: $e');
+      }
+    }
+  }
+
   void _openProfileSelectOverlay({
     required String selectKey,
     required LayerLink link,
@@ -871,6 +964,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required String? selectedValue,
     required ValueChanged<String> onChanged,
     double dropdownWidth = 176,
+    double dropdownVerticalOffset = 30,
+    Color menuBackgroundColor = Colors.white,
+    Color selectedBackgroundColor = const Color(0xFFEFF6FF),
+    bool menuBorderEnabled = true,
+    Color menuBorderColor = const Color(0xFFEAEAEA),
+    Color splashColor = const Color(0xFFF4F8FF),
   }) {
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     _openProfileSelectKey = selectKey;
@@ -895,7 +994,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               CompositedTransformFollower(
                 link: link,
                 showWhenUnlinked: false,
-                offset: const Offset(0, 30),
+                offset: Offset(0, dropdownVerticalOffset),
                 child: Material(
                   color: Colors.transparent,
                   child: IgnorePointer(
@@ -919,11 +1018,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             width: dropdownWidth,
                             child: Container(
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: menuBackgroundColor,
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: const Color(0xFFEAEAEA),
-                                ),
+                                border: menuBorderEnabled
+                                    ? Border.all(color: menuBorderColor)
+                                    : null,
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.12),
@@ -940,6 +1039,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     options: options,
                                     selectedValue: selectedValue,
                                     onChanged: onChanged,
+                                    selectedBackgroundColor:
+                                        selectedBackgroundColor,
+                                    splashColor: splashColor,
                                   ),
                                 ),
                               ),
@@ -1042,6 +1144,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required String? selectedValue,
     required ValueChanged<String> onChanged,
+    Color selectedBackgroundColor = const Color(0xFFEFF6FF),
+    Color splashColor = const Color(0xFFF4F8FF),
   }) {
     final listView = ListView.builder(
       controller: _profileSelectScrollController,
@@ -1054,9 +1158,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final isFirst = index == 0;
         final isLast = index == options.length - 1;
         return InkWell(
-          splashColor: const Color(0xFFF4F8FF).withValues(alpha: 0.45),
-          highlightColor: const Color(0xFFF4F8FF).withValues(alpha: 0.35),
-          hoverColor: const Color(0xFFF4F8FF).withValues(alpha: 0.25),
+          splashColor: splashColor.withValues(alpha: 0.45),
+          highlightColor: splashColor.withValues(alpha: 0.35),
+          hoverColor: splashColor.withValues(alpha: 0.25),
           onTap: () {
             onChanged(option);
             unawaited(_closeProfileSelectOverlay());
@@ -1067,7 +1171,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0xFFEFF6FF) : Colors.transparent,
+              color: isSelected ? selectedBackgroundColor : Colors.transparent,
               borderRadius: BorderRadius.vertical(
                 top: isFirst ? const Radius.circular(12) : Radius.zero,
                 bottom: isLast ? const Radius.circular(12) : Radius.zero,
@@ -3350,6 +3454,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_bagPanelSwapInProgress) return;
     if (_gameBagSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -3418,6 +3523,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_pokedexPanelSwapInProgress) return;
     if (_gamePokedexSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -3490,6 +3596,289 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _pokedexPanelSwapInProgress = false;
       _isPokedexPanelOpen = false;
     });
+  }
+
+  void _instantResetStoryPanelIfOpen() {
+    _gameStorySwapController.stop();
+    _gameStorySwapController.value = 0.0;
+    if (!_isStoryPanelOpen && !_storyPanelSwapInProgress) return;
+    _safeSetState(() {
+      _isStoryPanelOpen = false;
+      _storyPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _openStoryPanelFromGameMenu() async {
+    if (_storyPanelSwapInProgress) return;
+    if (_gameStorySwapController.isAnimating) return;
+    _instantResetSettingsPanelIfOpen();
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+      });
+    }
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    await _waitForUiSettle();
+    if (!mounted) return;
+    _gameStorySwapController.stop();
+    _gameStorySwapController.value = 0.0;
+    _safeSetState(() {
+      _storyPageIndex = 0;
+      _storyPanelSwapInProgress = true;
+      _isStoryPanelOpen = true;
+    });
+    await _gameStorySwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _storyPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closeStoryPanelToGameMenu() async {
+    if (_storyPanelSwapInProgress) return;
+    _dismissFocus();
+    _gameStorySwapController.value = 1.0;
+    _safeSetState(() {
+      _storyPanelSwapInProgress = true;
+    });
+    await _gameStorySwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _storyPanelSwapInProgress = false;
+      _isStoryPanelOpen = false;
+    });
+  }
+
+  void _goStoryPrevPage() {
+    if (_storyPageAssetPaths.isEmpty) return;
+    if (_storyPageIndex <= 0) return;
+    _safeSetState(() => _storyPageIndex--);
+  }
+
+  void _goStoryNextPage() {
+    if (_storyPageAssetPaths.isEmpty) return;
+    if (_storyPageIndex >= _storyPageAssetPaths.length - 1) return;
+    _safeSetState(() => _storyPageIndex++);
+  }
+
+  Widget _buildStoryIllustrationArea() {
+    final paths = _storyPageAssetPaths;
+    final hasAssets = paths.isNotEmpty;
+    final index = hasAssets
+        ? _storyPageIndex.clamp(0, paths.length - 1)
+        : 0;
+
+    Widget illustrationChild;
+    if (!hasAssets) {
+      illustrationChild = const SizedBox.expand();
+    } else {
+      illustrationChild = Image.asset(
+        paths[index],
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const SizedBox.expand(),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: _kStoryIllustrationW,
+        height: _kStoryIllustrationH,
+        color: Colors.white.withValues(alpha: 0.15),
+        child: illustrationChild,
+      ),
+    );
+  }
+
+  Widget _buildStoryPageNavButton({
+    required IconData icon,
+    required VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(
+            icon,
+            size: 16,
+            color: onTap == null
+                ? const Color(0xFF000000).withValues(alpha: 0.25)
+                : const Color(0xFF000000),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStoryGameMenuGlassPanel() {
+    final paths = _storyPageAssetPaths;
+    final canPage = paths.length > 1;
+    final canPrev = canPage && _storyPageIndex > 0;
+    final canNext = canPage && _storyPageIndex < paths.length - 1;
+    const navButtonTop =
+        _kStoryIllustrationTop + (_kStoryIllustrationH - 28) / 2;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: _kStoryPanelW,
+            height: _kStoryPanelH,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  width: 24,
+                  height: 24,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => unawaited(_closeStoryPanelToGameMenu()),
+                      borderRadius: BorderRadius.circular(12),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        size: 18,
+                        color: Color(0xFF4A4A4A),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: _kStoryIllustrationLeft,
+                  top: _kStoryIllustrationTop,
+                  child: _buildStoryIllustrationArea(),
+                ),
+                Positioned(
+                  left: 8,
+                  top: navButtonTop,
+                  child: _buildStoryPageNavButton(
+                    icon: Icons.chevron_left,
+                    onTap: canPrev ? _goStoryPrevPage : null,
+                  ),
+                ),
+                Positioned(
+                  left: _kStoryIllustrationLeft + _kStoryIllustrationW + 8,
+                  top: navButtonTop,
+                  child: _buildStoryPageNavButton(
+                    icon: Icons.chevron_right,
+                    onTap: canNext ? _goStoryNextPage : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStoryPanelLayer() {
+    if (!_gameMenuPanelOpen &&
+        _gameMenuPanelController.value == 0 &&
+        !_isStoryPanelOpen &&
+        !_storyPanelSwapInProgress) {
+      return const SizedBox.shrink();
+    }
+    if (!_isStoryPanelOpen && !_storyPanelSwapInProgress) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _gameMenuPanelController,
+        _gameStorySwapController,
+      ]),
+      builder: (context, _) {
+        final menuT = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
+        if (menuT < 0.05) {
+          return const SizedBox.shrink();
+        }
+        final storyT = _gameStorySwapCurve.value.clamp(0.0, 1.0);
+
+        return Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => unawaited(_closeStoryPanelToGameMenu()),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kStoryPanelLeft,
+              top: _kStoryPanelTop,
+              width: _kStoryPanelW,
+              height: _kStoryPanelH,
+              child: IgnorePointer(
+                ignoring: storyT < 0.05,
+                child: Opacity(
+                  opacity: storyT,
+                  child: _buildStoryGameMenuGlassPanel(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   /// 가방 설명창의 「사용하기」에서 호출. 확인 후 RPC·분양까지 진행하고,
@@ -5122,7 +5511,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final shouldMountInitialAdoption =
         showInitialAdoption || _isInitialAdoptionPanelClosing;
     final profileSelectOwnerActive =
-        showProfileSetup || _isProfilePanelOpen || _profilePanelSwapInProgress;
+        showProfileSetup ||
+        _isProfilePanelOpen ||
+        _profilePanelSwapInProgress ||
+        _isSettingsPanelOpen ||
+        _settingsPanelSwapInProgress;
     if (!profileSelectOwnerActive && _openProfileSelectKey != null) {
       unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     }
@@ -5173,7 +5566,124 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildBagItemDetailGlobalOverlay(),
         _buildPokedexMaturePetDetailGlobalOverlay(),
         _buildEmailLinkPanelGlobalOverlay(),
+        _buildCustomerCenterPanelGlobalOverlay(),
+        _buildShopNoticeGlobalOverlay(),
       ],
+    );
+  }
+
+  Widget _buildShopNoticeGlobalOverlay() {
+    if (!_isShopNoticeOpen) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                _safeSetState(() => _isShopNoticeOpen = false);
+              },
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned(
+            left: _kVegePetConfirmDialogLeft,
+            top: _kVegePetConfirmDialogTop,
+            width: _kVegePetConfirmDialogW,
+            height: _kVegePetConfirmDialogH,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: _buildVegePetConfirmDialogShell(
+                width: _kVegePetConfirmDialogW,
+                height: _kVegePetConfirmDialogH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              '오픈 준비중...',
+                              textAlign: TextAlign.left,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF000000),
+                                height: 1.25,
+                              ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              '조금만 기다려주세요!',
+                              textAlign: TextAlign.left,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A4A4A),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        child: InkWell(
+                          onTap: () {
+                            _safeSetState(() => _isShopNoticeOpen = false);
+                          },
+                          borderRadius: BorderRadius.circular(14),
+                          child: Ink(
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: _buildPastelBlueGradientButtonText(
+                                '확인',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -5270,6 +5780,207 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: _buildEmailLinkGlassPanel(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCustomerCenterPanelGlobalOverlay() {
+    if (!_isCustomerCenterPanelOpen) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                _safeSetState(() => _isCustomerCenterPanelOpen = false);
+              },
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned(
+            left: _kCustomerCenterPanelLeft,
+            top: _kCustomerCenterPanelTop,
+            width: _kCustomerCenterPanelW,
+            height: _kCustomerCenterPanelH,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: _buildCustomerCenterGlassPanel(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomerCenterGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    const titleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const labelStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.15,
+    );
+    const emailStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+
+    Widget gradientIcon(IconData icon, {double size = 14}) {
+      return ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (bounds) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
+        ).createShader(bounds),
+        child: Icon(icon, size: size, color: Colors.white),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kCustomerCenterPanelW,
+          height: _kCustomerCenterPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: 16,
+                left: 16,
+                right: 16,
+                child: Text(
+                  l10n.supportCenter,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: titleStyle,
+                ),
+              ),
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 8,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    onTap: () async {
+                      await Clipboard.setData(
+                        const ClipboardData(text: _kCustomerCenterEmail),
+                      );
+                      if (!mounted) return;
+                      _showSnack('이메일이 복사되었어요.');
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: const Color(0xFFF1F1F1),
+                          width: 0.8,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.03),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          gradientIcon(Icons.copy_rounded),
+                          const SizedBox(width: 4),
+                          _buildPastelBlueGradientButtonText(
+                            l10n.copyEmail,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 16 + 13,
+                left: 16,
+                right: 16,
+                bottom: 8 + 28,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      '• 문의 및 건의',
+                      textAlign: TextAlign.left,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: labelStyle,
+                    ),
+                    Container(
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFEFEF),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _kCustomerCenterEmail,
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          style: emailStyle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5444,6 +6155,129 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final primaryBusy = !_emailLinkOtpSent
         ? _emailLinkPanelSendBusy
         : _emailLinkPanelVerifyBusy;
+    final resendEnabled =
+        _emailLinkOtpSent && !cooldownActive && !_emailLinkPanelResendBusy;
+    const actionButtonDecoration = BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.all(Radius.circular(18)),
+      border: Border.fromBorderSide(
+        BorderSide(color: Color(0xFFF1F1F1), width: 0.8),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Color(0x08000000),
+          blurRadius: 4,
+          offset: Offset(0, 1),
+        ),
+      ],
+    );
+    final middleSections = <Widget>[
+      labeledSection(
+        label: l10n.emailLinkEmailRowLabel,
+        field: shellTextField(
+          controller: _emailLinkController,
+          enabled: true,
+          keyboardType: TextInputType.emailAddress,
+          formatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
+          ],
+          onChanged: (_) {
+            if (!_emailLinkOtpSent) return;
+            final cur = _emailLinkController.text.trim();
+            if (cur != _emailLinkOtpSentForEmail.trim()) {
+              _safeSetState(() {
+                _emailLinkOtpSent = false;
+                _emailLinkOtpSentForEmail = '';
+                _emailLinkOtpController.clear();
+              });
+            }
+          },
+        ),
+      ),
+      labeledSection(
+        label: l10n.emailLinkOtpRowLabel,
+        field: shellTextField(
+          controller: _emailLinkOtpController,
+          enabled: otpEnabled,
+          keyboardType: TextInputType.number,
+          formatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(8),
+          ],
+        ),
+      ),
+      if (cooldownActive && !_emailLinkOtpSent)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            l10n.emailOtpRetryAfterSeconds(_emailOtpCooldownSeconds),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _settingsPanelTextStyle(
+              10,
+              FontWeight.w600,
+              const Color(0xFFB92020),
+              height: 1.0,
+            ),
+          ),
+        ),
+      if (_emailLinkOtpSent)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: SizedBox(
+            height: 22,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: (cooldownActive || _emailLinkPanelResendBusy)
+                    ? null
+                    : () => unawaited(_onEmailLinkPanelResendOtp()),
+                borderRadius: BorderRadius.circular(18),
+                child: Ink(
+                  decoration: resendEnabled
+                      ? actionButtonDecoration
+                      : const BoxDecoration(color: Colors.transparent),
+                  child: Center(
+                    child: _emailLinkPanelResendBusy
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF6B6B6B),
+                            ),
+                          )
+                        : cooldownActive
+                            ? Text(
+                                l10n.emailOtpRetryAfterSeconds(
+                                  _emailOtpCooldownSeconds,
+                                ),
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: _settingsPanelTextStyle(
+                                  11,
+                                  FontWeight.w600,
+                                  const Color(0xFFB92020),
+                                  height: 1.0,
+                                ),
+                              )
+                            : _buildPastelBlueGradientButtonText(
+                                l10n.emailLinkResendCodeButton,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+    ];
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -5470,184 +6304,93 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      l10n.emailAccountLink,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _settingsPanelTextStyle(
-                        13,
-                        FontWeight.w600,
-                        const Color(0xFF000000),
-                        height: 1.0,
-                      ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: Text(
+                    l10n.emailAccountLink,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _settingsPanelTextStyle(
+                      13,
+                      FontWeight.w600,
+                      const Color(0xFF000000),
+                      height: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  labeledSection(
-                    label: l10n.emailLinkEmailRowLabel,
-                    field: shellTextField(
-                      controller: _emailLinkController,
-                      enabled: true,
-                      keyboardType: TextInputType.emailAddress,
-                      formatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[a-zA-Z0-9@.]'),
-                        ),
-                      ],
-                      onChanged: (_) {
-                        if (!_emailLinkOtpSent) return;
-                        final cur = _emailLinkController.text.trim();
-                        if (cur != _emailLinkOtpSentForEmail.trim()) {
-                          _safeSetState(() {
-                            _emailLinkOtpSent = false;
-                            _emailLinkOtpSentForEmail = '';
-                            _emailLinkOtpController.clear();
-                          });
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  labeledSection(
-                    label: l10n.emailLinkOtpRowLabel,
-                    field: shellTextField(
-                      controller: _emailLinkOtpController,
-                      enabled: otpEnabled,
-                      keyboardType: TextInputType.number,
-                      formatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(8),
-                      ],
-                    ),
-                  ),
-                  if (cooldownActive && !_emailLinkOtpSent) ...[
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        l10n.emailOtpRetryAfterSeconds(_emailOtpCooldownSeconds),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _settingsPanelTextStyle(
-                          10,
-                          FontWeight.w600,
-                          const Color(0xFF4A4A4A),
-                          height: 1.0,
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (_emailLinkOtpSent) ...[
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: SizedBox(
-                        height: 22,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: (cooldownActive || _emailLinkPanelResendBusy)
-                                ? null
-                                : () => unawaited(_onEmailLinkPanelResendOtp()),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Align(
-                              alignment: Alignment.center,
-                              child: _emailLinkPanelResendBusy
-                                  ? const SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Color(0xFF6B6B6B),
-                                      ),
-                                    )
-                                  : _buildPastelBlueGradientButtonText(
-                                      cooldownActive
-                                          ? l10n.emailOtpRetryAfterSeconds(
-                                              _emailOtpCooldownSeconds,
-                                            )
-                                          : l10n.emailLinkResendCodeButton,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: SizedBox(
-                      height: 28,
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(18),
-                        child: InkWell(
-                          onTap: primaryDisabled
-                              ? null
-                              : () =>
-                                  unawaited(_onEmailLinkPanelPrimaryTap()),
+                ),
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                  height: 28,
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(18),
+                    child: InkWell(
+                      onTap: primaryDisabled
+                          ? null
+                          : () => unawaited(_onEmailLinkPanelPrimaryTap()),
+                      borderRadius: BorderRadius.circular(18),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(18),
-                          child: Ink(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Opacity(
-                                  opacity: primaryBusy ? 0.35 : 1,
-                                  child: _buildPastelBlueGradientButtonText(
-                                    primaryLabel,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (primaryBusy)
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Color(0xFF6B6B6B),
-                                    ),
-                                  ),
-                              ],
-                            ),
+                          border: Border.all(
+                            color: const Color(0xFFF1F1F1),
+                            width: 0.8,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Opacity(
+                              opacity: primaryBusy ? 0.35 : 1,
+                              child: _buildPastelBlueGradientButtonText(
+                                primaryLabel,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (primaryBusy)
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF6B6B6B),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  top: 16 + 13,
+                  left: 0,
+                  right: 0,
+                  bottom: 8 + 28,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: middleSections,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -5783,6 +6526,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _buildToyMenuLayer(),
           _buildMealPanelLayer(),
           _buildGameMenuOverlayLayer(),
+          _buildStoryPanelLayer(),
         ],
       ),
     );
@@ -8599,6 +9343,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameDietDiarySwapController,
         _gameBagSwapController,
         _gamePokedexSwapController,
+        _gameStorySwapController,
         _gameSettingsSwapController,
         _gameMenuSubOutsideDismissController,
       ]),
@@ -8611,6 +9356,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final dietSwapT = _gameDietDiarySwapCurve.value.clamp(0.0, 1.0);
         final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
         final pokedexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
+        final storySwapT = _gameStorySwapCurve.value.clamp(0.0, 1.0);
         final settingsSwapT = _gameSettingsSwapCurve.value.clamp(0.0, 1.0);
         final subExitRaw = _gameMenuSubOutsideDismissCurve.value.clamp(
           0.0,
@@ -8648,12 +9394,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
         final showSettingsLayer =
             _isSettingsPanelOpen || _settingsPanelSwapInProgress;
+        final showStoryLayer = _isStoryPanelOpen || _storyPanelSwapInProgress;
         final showMenuLayer =
             (!_isProfilePanelOpen || _profilePanelSwapInProgress) &&
             (!_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress) &&
             (!_isBagPanelOpen || _bagPanelSwapInProgress) &&
             (!_isPokedexPanelOpen || _pokedexPanelSwapInProgress) &&
-            (!_isSettingsPanelOpen || _settingsPanelSwapInProgress);
+            (!_isSettingsPanelOpen || _settingsPanelSwapInProgress) &&
+            (!_isStoryPanelOpen || _storyPanelSwapInProgress);
         var menuOpacity = 1.0;
         if (showProfileLayer) {
           menuOpacity *= (1.0 - profileSwapT);
@@ -8669,6 +9417,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
         if (showSettingsLayer) {
           menuOpacity *= (1.0 - settingsSwapT);
+        }
+        if (showStoryLayer) {
+          menuOpacity *= (1.0 - storySwapT);
         }
         final profileOpacity = showProfileLayer ? profileSwapT : 0.0;
         var dietOpacity = showDietLayer ? dietSwapT : 0.0;
@@ -9295,8 +10046,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _openPokedexPanelFromGameMenu();
       return;
     }
+    if (label == '스토리') {
+      await _openStoryPanelFromGameMenu();
+      return;
+    }
     if (label == '설정') {
       await _openSettingsFromGameMenu();
+      return;
+    }
+    if (label == '상점') {
+      if (_isShopNoticeOpen) return;
+      _safeSetState(() => _isShopNoticeOpen = true);
       return;
     }
     await _closeGameMenuPanel();
@@ -9447,17 +10207,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isSettingsPanelOpen = false;
     _settingsPanelSwapInProgress = false;
     _isEmailLinkPanelOpen = false;
+    _isCustomerCenterPanelOpen = false;
+    _isShopNoticeOpen = false;
+    _isStoryPanelOpen = false;
+    _storyPanelSwapInProgress = false;
+    _activeSettingsSupportDoc = null;
     _resetEmailLinkPanelOtpFlow();
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
   }
 
   void _instantResetSettingsPanelIfOpen() {
     _gameSettingsSwapController.stop();
     _gameSettingsSwapController.value = 0.0;
     if (!_isSettingsPanelOpen && !_settingsPanelSwapInProgress) return;
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     _safeSetState(() {
       _isSettingsPanelOpen = false;
       _settingsPanelSwapInProgress = false;
       _isEmailLinkPanelOpen = false;
+      _isCustomerCenterPanelOpen = false;
+      _activeSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -9552,6 +10321,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     if (_bagPanelDetailItem != null && _isBagPanelOpen) {
       _safeSetState(() => _bagPanelDetailItem = null);
+      return;
+    }
+
+    if (_isShopNoticeOpen) {
+      _safeSetState(() => _isShopNoticeOpen = false);
+      return;
+    }
+
+    if (_isStoryPanelOpen && !_storyPanelSwapInProgress) {
+      await _closeStoryPanelToGameMenu();
+      return;
+    }
+
+    if (_isCustomerCenterPanelOpen) {
+      _safeSetState(() => _isCustomerCenterPanelOpen = false);
+      return;
+    }
+
+    if (_activeSettingsSupportDoc != null) {
+      await _closeSettingsSupportDocFromOutsideTap();
       return;
     }
 
@@ -9840,8 +10629,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _onMenuTap(String label) async {
     if (label == '식단일지') {
       await _openDietDiaryFromGameMenu();
-    } else if (label == '상점') {
-      _showSnack('오픈 준비중');
     } else {
       _showSnack('나중에 구현 예정: $label');
     }
@@ -9856,6 +10643,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _openSettingsFromGameMenu() async {
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
+    _instantResetStoryPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -9903,6 +10691,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsSfxBusy = false;
       _settingsPanelSwapInProgress = true;
       _isSettingsPanelOpen = true;
+      _activeSettingsSupportDoc = null;
     });
 
     unawaited(
@@ -9920,6 +10709,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _closeSettingsPanelToGameMenu() async {
     if (_settingsPanelSwapInProgress) return;
     _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
     _gameSettingsSwapController.value = 1.0;
     _safeSetState(() {
       _settingsPanelSwapInProgress = true;
@@ -9930,8 +10720,116 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsPanelSwapInProgress = false;
       _isSettingsPanelOpen = false;
       _isEmailLinkPanelOpen = false;
+      _isCustomerCenterPanelOpen = false;
+      _activeSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
+  }
+
+  void _openSettingsSupportDocPanel(_SupportDocType type) {
+    _dismissFocus();
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _safeSetState(() {
+      _isCustomerCenterPanelOpen = false;
+      _isEmailLinkPanelOpen = false;
+      _resetEmailLinkPanelOtpFlow();
+      _settingsSupportDocSwapInProgress = true;
+      _activeSettingsSupportDoc = type;
+    });
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _safeSetState(() => _settingsSupportDocSwapInProgress = false);
+    });
+  }
+
+  void _closeSettingsSupportDocToSettings() {
+    if (_activeSettingsSupportDoc == null) return;
+    _safeSetState(() {
+      _settingsSupportDocSwapInProgress = true;
+      _activeSettingsSupportDoc = null;
+    });
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _safeSetState(() => _settingsSupportDocSwapInProgress = false);
+    });
+  }
+
+  Future<void> _closeSettingsSupportDocFromOutsideTap() async {
+    _dismissFocus();
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _gameSettingsSwapController.stop();
+    _gameSettingsSwapController.value = 0;
+    _safeSetState(() {
+      _activeSettingsSupportDoc = null;
+      _isSettingsPanelOpen = false;
+      _settingsPanelSwapInProgress = false;
+      _isEmailLinkPanelOpen = false;
+      _isCustomerCenterPanelOpen = false;
+      _resetEmailLinkPanelOtpFlow();
+    });
+    await _closeGameMenuPanel();
+  }
+
+  Widget _buildSettingsSupportDocScrollBody(_SupportDocument doc) {
+    const sectionTitleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.35,
+    );
+    const bodyStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w500,
+      color: Color(0xFF4A4A4A),
+      height: 1.4,
+    );
+
+    return RepaintBoundary(
+      child: Scrollbar(
+        controller: _settingsSupportDocScrollController,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          controller: _settingsSupportDocScrollController,
+          physics: const ClampingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                doc.title,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF000000),
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final section in doc.sections) ...[
+                Text(
+                  section.title,
+                  textAlign: TextAlign.left,
+                  style: sectionTitleStyle,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  section.body,
+                  textAlign: TextAlign.left,
+                  style: bodyStyle,
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   TextStyle _settingsPanelTextStyle(
@@ -9946,6 +10844,83 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       fontWeight: weight,
       color: color,
       height: height,
+    );
+  }
+
+  Widget _buildSettingsLanguageSelectRow() {
+    const selectKey = 'settings_language';
+    final link = _profileSelectLinks.putIfAbsent(selectKey, LayerLink.new);
+    final isOpen = _openProfileSelectKey == selectKey;
+    final currentLabel = _currentLanguageDisplayLabel();
+    const rowTextStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+
+    return Center(
+      child: CompositedTransformTarget(
+        link: link,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              _dismissFocus();
+              if (isOpen) {
+                unawaited(_closeProfileSelectOverlay());
+                return;
+              }
+              _openProfileSelectOverlay(
+                selectKey: selectKey,
+                link: link,
+                options: _languageDisplayOptions,
+                selectedValue: currentLabel,
+                onChanged: (label) {
+                  unawaited(_onSettingsLanguageSelected(label));
+                },
+                dropdownWidth: _kSettingsGrayRowW,
+                dropdownVerticalOffset: _kSettingsGrayRowH,
+                menuBackgroundColor: const Color(0xFFEFEFEF),
+                selectedBackgroundColor: const Color(0xFFE6E6E6),
+                menuBorderEnabled: false,
+                splashColor: const Color(0xFFE6E6E6),
+              );
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                width: _kSettingsGrayRowW,
+                height: _kSettingsGrayRowH,
+                color: const Color(0xFFEFEFEF),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.center,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        currentLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: rowTextStyle,
+                      ),
+                    ),
+                    Icon(
+                      isOpen
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                      color: const Color(0xFF4A4A4A).withValues(alpha: 0.65),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -10057,12 +11032,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildSettingsGameMenuGlassPanel() {
     final l10n = AppLocalizations.of(context);
-    final localeScope = _LocaleControllerScope.of(context);
     final linked = _hasEffectiveEmailLink();
     final accountPrimary = _settingsAccountPrimaryLine(l10n);
-    final currentLanguageLabel = localeScope.locale.languageCode == 'en'
-        ? l10n.languageEnglish
-        : l10n.languageKorean;
 
     final rowLabelStyle = _settingsPanelTextStyle(
       11,
@@ -10144,11 +11115,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
+    final supportDocBlur = _activeSettingsSupportDoc != null ? 10.0 : 6.0;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: BackdropFilter(
-        // 식단일지/설정 글래스만 blur 완화(10→6). 다른 패널은 기존 값 유지.
-        filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+        filter: ui.ImageFilter.blur(
+          sigmaX: supportDocBlur,
+          sigmaY: supportDocBlur,
+        ),
         child: Container(
           width: _kGameMenuPanelW,
           height: _kGameMenuPanelH,
@@ -10178,7 +11153,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => unawaited(_closeSettingsPanelToGameMenu()),
+                    onTap: () {
+                      if (_activeSettingsSupportDoc != null) {
+                        _closeSettingsSupportDocToSettings();
+                        return;
+                      }
+                      unawaited(_closeSettingsPanelToGameMenu());
+                    },
                     borderRadius: BorderRadius.circular(10),
                     child: const SizedBox(
                       width: 28,
@@ -10193,13 +11174,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
               Positioned(
-                left: 9,
+                left: 37,
                 top: 14,
                 right: 8,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 28),
-                  child: Text(
-                    l10n.settings,
+                child: Text(
+                  l10n.settings,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: _settingsPanelTextStyle(
@@ -10208,7 +11187,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       const Color(0xFF000000),
                       height: 1.0,
                     ),
-                  ),
                 ),
               ),
               Positioned(
@@ -10216,17 +11194,32 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 right: 0,
                 top: 48,
                 bottom: 8,
-                child: RepaintBoundary(
-                  child: Scrollbar(
-                    controller: _settingsScrollController,
-                    thumbVisibility: true,
-                    child: SingleChildScrollView(
-                      controller: _settingsScrollController,
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
-                      physics: const ClampingScrollPhysics(),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
+                child: Stack(
+                  fit: StackFit.expand,
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Offstage(
+                      offstage: _activeSettingsSupportDoc != null,
+                      child: IgnorePointer(
+                        ignoring: _activeSettingsSupportDoc != null,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          opacity: _activeSettingsSupportDoc == null ? 1 : 0,
+                          child: RepaintBoundary(
+                            key: const ValueKey('settings-panel-main'),
+                            child: Scrollbar(
+                              controller: _settingsScrollController,
+                              thumbVisibility: true,
+                              child: SingleChildScrollView(
+                                controller: _settingsScrollController,
+                                padding:
+                                    const EdgeInsets.fromLTRB(8, 0, 8, 14),
+                                physics: const ClampingScrollPhysics(),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
                           const SizedBox(height: 4),
                           sectionTitle(l10n.settingsSectionAccountBullet),
                           const SizedBox(height: 6),
@@ -10287,6 +11280,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 _dismissFocus();
                                 _safeSetState(() {
                                   _resetEmailLinkPanelOtpFlow();
+                                  _isCustomerCenterPanelOpen = false;
                                   _isEmailLinkPanelOpen = true;
                                 });
                               },
@@ -10355,30 +11349,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionLanguageBullet),
                           const SizedBox(height: 6),
-                          _buildSettingsGrayRow(
-                            onTap: () async {
-                              await _openLanguageSelectorSheet(context);
-                            },
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    currentLanguageLabel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: rowLabelStyle,
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.expand_more_rounded,
-                                  size: 18,
-                                  color: const Color(
-                                    0xFF4A4A4A,
-                                  ).withValues(alpha: 0.65),
-                                ),
-                              ],
-                            ),
-                          ),
+                          _buildSettingsLanguageSelectRow(),
                           const SizedBox(height: 10),
                           sectionTitle(l10n.settingsSectionPushBullet),
                           const SizedBox(height: 6),
@@ -10416,215 +11387,85 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.supportCenter,
-                            () async => _openSupportCenterSheet(context),
+                            () {
+                              _safeSetState(
+                                () => _isCustomerCenterPanelOpen = true,
+                              );
+                            },
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.termsOfService,
-                            () async => _openPolicyDocumentSheet(
-                              type: _SupportDocType.terms,
-                              sheetCtx: context,
+                            () => _openSettingsSupportDocPanel(
+                              _SupportDocType.terms,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.privacyPolicy,
-                            () async => _openPolicyDocumentSheet(
-                              type: _SupportDocType.privacy,
-                              sheetCtx: context,
+                            () => _openSettingsSupportDocPanel(
+                              _SupportDocType.privacy,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.operationPolicy,
-                            () async => _openPolicyDocumentSheet(
-                              type: _SupportDocType.operation,
-                              sheetCtx: context,
+                            () => _openSettingsSupportDocPanel(
+                              _SupportDocType.operation,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.guardianGuide,
-                            () async => _openPolicyDocumentSheet(
-                              type: _SupportDocType.guardian,
-                              sheetCtx: context,
+                            () => _openSettingsSupportDocPanel(
+                              _SupportDocType.guardian,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.accountDataDeletionGuide,
-                            () async => _openPolicyDocumentSheet(
-                              type: _SupportDocType.dataDeletion,
-                              sheetCtx: context,
+                            () => _openSettingsSupportDocPanel(
+                              _SupportDocType.dataDeletion,
                             ),
                           ),
                           const SizedBox(height: 14),
-                        ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    if (_activeSettingsSupportDoc != null)
+                      IgnorePointer(
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          opacity: 1,
+                          child: RepaintBoundary(
+                            key: ValueKey(
+                              'settings-support-doc-${_activeSettingsSupportDoc!.name}',
+                            ),
+                            child: _buildSettingsSupportDocScrollBody(
+                              _buildSupportDocument(
+                                _activeSettingsSupportDoc!,
+                                _LocaleControllerScope.of(context)
+                                    .locale
+                                    .languageCode,
+                                l10n,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _openLanguageSelectorSheet(BuildContext sheetCtx) async {
-    final l10n = AppLocalizations.of(sheetCtx);
-    final scope = _LocaleControllerScope.of(sheetCtx);
-    final currentCode = scope.locale.languageCode == 'en' ? 'en' : 'ko';
-
-    final selectedCode = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        Widget item({required String code, required String label}) {
-          final selected = currentCode == code;
-          return ListTile(
-            title: Text(label),
-            trailing: selected
-                ? Icon(Icons.check, color: Theme.of(ctx).colorScheme.primary)
-                : null,
-            onTap: () => Navigator.of(ctx).pop(code),
-          );
-        }
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  l10n.selectLanguage,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  l10n.languageDescription,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(ctx).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 12),
-                item(code: 'ko', label: l10n.languageKorean),
-                item(code: 'en', label: l10n.languageEnglish),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (selectedCode == null) return;
-    final targetCode = selectedCode == 'en' ? 'en' : 'ko';
-    final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
-    final changedMessage = targetCode == 'en'
-        ? 'Language has been changed.'
-        : '언어가 변경되었어요.';
-    await scope.setLocale(Locale(targetCode));
-    if (!mounted) return;
-    _showSnack(changedMessage);
-
-    if (_mealReminderPushEnabled) {
-      try {
-        await _scheduleMealReminderNotifications(
-          notificationTitle: notificationTexts.title,
-          notificationMessages: notificationTexts.messages,
-          revertToggleWhenDenied: false,
-        );
-      } catch (e) {
-        debugPrint('meal reminder reschedule on locale change failed: $e');
-      }
-    }
-  }
-
-  Future<void> _openSupportCenterSheet(BuildContext sheetCtx) async {
-    final l10n = AppLocalizations.of(sheetCtx);
-    final localeCode = _LocaleControllerScope.of(sheetCtx).locale.languageCode;
-    final isEn = localeCode == 'en';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  l10n.supportCenter,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  isEn
-                      ? 'If you have questions, bug reports, or feedback about VegePet, please contact us at the email below.'
-                      : '베지펫 이용 중 문의, 오류 신고, 건의사항이 있다면 아래 이메일로 연락해주세요.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    height: 1.45,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.7,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    l10n.supportEmail,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: 'acoustic.jwg@gmail.com'),
-                    );
-                    _showSnack(l10n.emailCopied);
-                  },
-                  icon: const Icon(Icons.copy_rounded),
-                  label: Text(l10n.copyEmail),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text(l10n.close),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -10937,106 +11778,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _openPolicyDocumentSheet({
-    required _SupportDocType type,
-    required BuildContext sheetCtx,
-  }) async {
-    final l10n = AppLocalizations.of(sheetCtx);
-    final localeCode = _LocaleControllerScope.of(sheetCtx).locale.languageCode;
-    final doc = _buildSupportDocument(type, localeCode, l10n);
-    final isEn = localeCode == 'en';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.9,
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    doc.title,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    '${l10n.lastUpdated}: 2026-04-27',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  Text(
-                    '${l10n.effectiveDate}: 2026-04-27',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      l10n.legalNoticeDraft,
-                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  for (final section in doc.sections) ...[
-                    Text(
-                      section.title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      section.body,
-                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                  const SizedBox(height: 4),
-                  Text(
-                    isEn
-                        ? 'TODO: Before release, prepare public web URLs for privacy policy and account/data deletion requests. Also complete App Store Connect App Privacy and Google Play Data Safety.'
-                        : 'TODO: 출시 전 개인정보처리방침 웹 URL, 계정/데이터 삭제 요청 웹 URL 준비가 필요합니다. App Store Connect App Privacy 및 Google Play Data Safety Form도 반드시 작성해야 합니다.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    child: Text(l10n.close),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<bool> _confirmWithdrawAccount() async {
     final ctx = _rootNavigatorKey.currentContext ?? context;
     final confirmed = await showDialog<bool>(
@@ -11217,7 +11958,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
+        _activeSettingsSupportDoc = null;
         _isEmailLinkPanelOpen = false;
+        _isCustomerCenterPanelOpen = false;
+        _isShopNoticeOpen = false;
+        _isStoryPanelOpen = false;
+        _storyPanelSwapInProgress = false;
         _resetEmailLinkPanelOtpFlow();
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
         _nicknameController.clear();
