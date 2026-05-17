@@ -116,7 +116,15 @@ const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요.
 final Random _mealMessageRandom = Random();
 
 /// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 페이드 퇴장 모션을 적용할 대상.
-enum _GameMenuSubOutsideDismissKind { none, profile, dietDiary, bag, pokedex }
+enum _GameMenuSubOutsideDismissKind {
+  none,
+  profile,
+  dietDiary,
+  bag,
+  pokedex,
+  story,
+  settings,
+}
 
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
 ///
@@ -432,8 +440,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 먹이주기를 베지펫 정보창에서 연 경우, 뒤로가기 시 정보창 복귀.
   bool _mealOpenedFromPetBanner = false;
+
+  /// 놀아주기/먹이주기 외부 탭으로 마당 복귀 중(우측 메뉴 아이콘 [_hideGameMenuHudIcon] 과 동일).
+  bool _petChildPanelDismissingToYard = false;
+
   bool _isMealPanelOpen = false;
   bool _gameMenuPanelOpen = false;
+
+  /// 메뉴창 슬라이드 아웃 중(베지펫 정보창 [_isPetInfoBannerOpen] 토글과 동일 패턴).
+  bool _gameMenuPanelRetracting = false;
 
   /// 게임 메뉴 패널 내부에서 열리는 프로필 수정 창.
   bool _isProfilePanelOpen = false;
@@ -495,6 +510,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 마당 공통 알림창: 상점 MVP 준비중 안내.
   bool _isShopNoticeOpen = false;
+
+  /// 설정 > 회원 탈퇴 1차 확인 (240×116 · 마당 좌표계).
+  bool _isWithdrawConfirmOpen = false;
+
+  /// 설정 > 회원 탈퇴 2차 최종 확인 (240×116 · 마당 좌표계).
+  bool _isWithdrawFinalConfirmOpen = false;
+  bool _isDeletingAccount = false;
   bool _emailLinkPanelSendBusy = false;
   bool _emailLinkPanelVerifyBusy = false;
   bool _emailLinkPanelResendBusy = false;
@@ -503,9 +525,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final TextEditingController _emailLinkController = TextEditingController();
   final TextEditingController _emailLinkOtpController = TextEditingController();
 
-  /// 베지펫 정보창 ↔ 먹이·놀이 패널 닫기와 유사한 중앙 페이드 (게임 메뉴 하위 외부 탭 전용).
+  /// 게임 메뉴 하위 패널 외부 탭 → 마당: 슬라이드 없이 전체 페이드 아웃.
   late AnimationController _gameMenuSubOutsideDismissController;
   late Animation<double> _gameMenuSubOutsideDismissCurve;
+
+  /// 마당 공통 알림창(상점/회원탈퇴) 등장 — scale 1.0 유지 fade.
+  late AnimationController _yardConfirmOverlayFadeController;
+  late Animation<double> _yardConfirmOverlayFadeCurve;
   _GameMenuSubOutsideDismissKind _gameMenuSubOutsideDismissKind =
       _GameMenuSubOutsideDismissKind.none;
   late AnimationController _petToySwapController;
@@ -565,6 +591,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
   static const double _kGameMenuPanelOffLeft = 844;
 
+  /// 좌측 베지펫 정보창 슬라이드·우측 게임 메뉴 슬라이드 공통.
+  static const Duration _kYardSidePanelSlideDuration = Duration(
+    milliseconds: 240,
+  );
+  static const Curve _kYardSidePanelSlideCurve = Curves.easeOutCubic;
+
+  /// 좌측 먹이·놀이 ↔ 우측 게임 메뉴 하위 패널 크로스페이드 공통.
+  static const Duration _kYardSidePanelSwapDuration = Duration(
+    milliseconds: 340,
+  );
+  static const Curve _kYardSidePanelSwapCurve = Curves.easeInOutCubic;
+
   /// 스토리 글래스 패널 (844×390 마당 기준).
   static const double _kStoryPanelLeft = 40;
   static const double _kStoryPanelTop = 40;
@@ -618,19 +656,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
     _petToySwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _petToySwapCurve = CurvedAnimation(
       parent: _petToySwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _petMealSwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _petMealSwapCurve = CurvedAnimation(
       parent: _petMealSwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _dragHintPulseController = AnimationController(
       vsync: this,
@@ -654,68 +692,77 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ]).animate(_dragHintPulseController);
     _gameMenuPanelController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: _kYardSidePanelSlideDuration,
     );
     _gameMenuPanelCurve = CurvedAnimation(
       parent: _gameMenuPanelController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: _kYardSidePanelSlideCurve,
+      reverseCurve: _kYardSidePanelSlideCurve,
     );
     _gameProfileSwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameProfileSwapCurve = CurvedAnimation(
       parent: _gameProfileSwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gameDietDiarySwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameDietDiarySwapCurve = CurvedAnimation(
       parent: _gameDietDiarySwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gameBagSwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameBagSwapCurve = CurvedAnimation(
       parent: _gameBagSwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gamePokedexSwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gamePokedexSwapCurve = CurvedAnimation(
       parent: _gamePokedexSwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gameStorySwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameStorySwapCurve = CurvedAnimation(
       parent: _gameStorySwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gameSettingsSwapController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameSettingsSwapCurve = CurvedAnimation(
       parent: _gameSettingsSwapController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
     );
     _gameMenuSubOutsideDismissController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: _kYardSidePanelSwapDuration,
     );
     _gameMenuSubOutsideDismissCurve = CurvedAnimation(
       parent: _gameMenuSubOutsideDismissController,
-      curve: Curves.easeInOutCubic,
+      curve: _kYardSidePanelSwapCurve,
+    );
+    _yardConfirmOverlayFadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    );
+    _yardConfirmOverlayFadeCurve = CurvedAnimation(
+      parent: _yardConfirmOverlayFadeController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
     );
     _bootstrap();
   }
@@ -744,6 +791,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _settingsScrollController.dispose();
     _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
+    _yardConfirmOverlayFadeController.dispose();
     super.dispose();
   }
 
@@ -3054,7 +3102,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isMealPanelOpen = false;
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
+        _petChildPanelDismissingToYard = false;
         _gameMenuPanelOpen = false;
+        _gameMenuPanelRetracting = false;
         _isProfilePanelOpen = false;
         _profilePanelSwapInProgress = false;
         _profileOpenedFromGameMenu = false;
@@ -3234,7 +3284,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isMealPanelOpen = false;
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
+        _petChildPanelDismissingToYard = false;
         _gameMenuPanelOpen = false;
+        _gameMenuPanelRetracting = false;
         _isProfilePanelOpen = false;
         _profilePanelSwapInProgress = false;
         _profileOpenedFromGameMenu = false;
@@ -3829,27 +3881,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildStoryPanelLayer() {
-    if (!_gameMenuPanelOpen &&
-        _gameMenuPanelController.value == 0 &&
-        !_isStoryPanelOpen &&
-        !_storyPanelSwapInProgress) {
-      return const SizedBox.shrink();
-    }
-    if (!_isStoryPanelOpen && !_storyPanelSwapInProgress) {
+    final yardExitFade =
+        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none;
+    if (!_isStoryPanelOpen &&
+        !_storyPanelSwapInProgress &&
+        !yardExitFade) {
       return const SizedBox.shrink();
     }
 
     return AnimatedBuilder(
       animation: Listenable.merge([
-        _gameMenuPanelController,
         _gameStorySwapController,
+        _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
-        final menuT = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
-        if (menuT < 0.05) {
-          return const SizedBox.shrink();
-        }
-        final storyT = _gameStorySwapCurve.value.clamp(0.0, 1.0);
+        final storyT =
+            _gameStorySwapCurve.value.clamp(0.0, 1.0) *
+            _gameMenuYardExitFadeMultiplier;
 
         return Stack(
           clipBehavior: Clip.none,
@@ -3858,7 +3906,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onTap: () => unawaited(_closeStoryPanelToGameMenu()),
+                onTap: () => unawaited(
+                  _dismissGameSubPanelWithCenterExit(
+                    _GameMenuSubOutsideDismissKind.story,
+                  ),
+                ),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -5229,6 +5281,90 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  void _playYardConfirmOverlayEnter() {
+    if (!mounted) return;
+    _yardConfirmOverlayFadeController.stop();
+    _yardConfirmOverlayFadeController.value = 0;
+    unawaited(_yardConfirmOverlayFadeController.forward());
+  }
+
+  void _instantCloseYardConfirmOverlays() {
+    _yardConfirmOverlayFadeController.stop();
+    _yardConfirmOverlayFadeController.value = 0;
+    _isShopNoticeOpen = false;
+    _isWithdrawConfirmOpen = false;
+    _isWithdrawFinalConfirmOpen = false;
+  }
+
+  bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
+    return isOpen;
+  }
+
+  Future<void> _dismissYardConfirmOverlayAnimated(
+    void Function() setClosed,
+  ) async {
+    if (_yardConfirmOverlayFadeController.value <= 0) {
+      if (mounted) {
+        _safeSetState(setClosed);
+      } else {
+        setClosed();
+      }
+      return;
+    }
+    if (_yardConfirmOverlayFadeController.status == AnimationStatus.reverse) {
+      return;
+    }
+    await _yardConfirmOverlayFadeController.reverse();
+    if (!mounted) return;
+    _safeSetState(setClosed);
+  }
+
+  void _closeShopNoticeOverlay() {
+    if (!_isShopNoticeOpen) return;
+    unawaited(
+      _dismissYardConfirmOverlayAnimated(() => _isShopNoticeOpen = false),
+    );
+  }
+
+  void _closeWithdrawConfirmOverlay() {
+    if (!_isWithdrawConfirmOpen) return;
+    unawaited(
+      _dismissYardConfirmOverlayAnimated(() => _isWithdrawConfirmOpen = false),
+    );
+  }
+
+  void _closeWithdrawFinalConfirmOverlay() {
+    if (!_isWithdrawFinalConfirmOpen) return;
+    unawaited(
+      _dismissYardConfirmOverlayAnimated(
+        () => _isWithdrawFinalConfirmOpen = false,
+      ),
+    );
+  }
+
+  void _openWithdrawFinalConfirmFromFirst() {
+    _safeSetState(() {
+      _isShopNoticeOpen = false;
+      _isWithdrawConfirmOpen = false;
+      _isWithdrawFinalConfirmOpen = true;
+    });
+    _yardConfirmOverlayFadeController.stop();
+    _yardConfirmOverlayFadeController.value = 1;
+  }
+
+  Widget _buildVegePetYardConfirmOverlayFade({required Widget child}) {
+    return AnimatedBuilder(
+      animation: _yardConfirmOverlayFadeCurve,
+      builder: (context, fadedChild) {
+        return Opacity(
+          opacity: _yardConfirmOverlayFadeCurve.value.clamp(0.0, 1.0),
+          child: fadedChild,
+        );
+      },
+      child: child,
+    );
+  }
+
   Widget _buildVegePetConfirmDialogShell({
     required Widget child,
     required double width,
@@ -5568,51 +5704,52 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
         _buildShopNoticeGlobalOverlay(),
+        _buildWithdrawConfirmGlobalOverlay(),
+        _buildWithdrawFinalConfirmGlobalOverlay(),
       ],
     );
   }
 
   Widget _buildShopNoticeGlobalOverlay() {
-    if (!_isShopNoticeOpen) {
+    if (!_isYardConfirmOverlayFadeVisible(_isShopNoticeOpen)) {
       return const SizedBox.shrink();
     }
 
     return Positioned.fill(
-      child: Stack(
-        clipBehavior: Clip.none,
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () {
-                _safeSetState(() => _isShopNoticeOpen = false);
-              },
-              child: const SizedBox.expand(),
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeShopNoticeOverlay,
+                child: const SizedBox.expand(),
+              ),
             ),
-          ),
-          Positioned(
-            left: _kVegePetConfirmDialogLeft,
-            top: _kVegePetConfirmDialogTop,
-            width: _kVegePetConfirmDialogW,
-            height: _kVegePetConfirmDialogH,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {},
-              child: _buildVegePetConfirmDialogShell(
-                width: _kVegePetConfirmDialogW,
-                height: _kVegePetConfirmDialogH,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text(
-                              '오픈 준비중...',
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildVegePetConfirmDialogShell(
+                  width: _kVegePetConfirmDialogW,
+                  height: _kVegePetConfirmDialogH,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                '오픈 준비중...',
                               textAlign: TextAlign.left,
                               style: TextStyle(
                                 fontFamily: 'Pretendard',
@@ -5645,9 +5782,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         color: Colors.transparent,
                         borderRadius: BorderRadius.circular(14),
                         child: InkWell(
-                          onTap: () {
-                            _safeSetState(() => _isShopNoticeOpen = false);
-                          },
+                          onTap: _closeShopNoticeOverlay,
                           borderRadius: BorderRadius.circular(14),
                           child: Ink(
                             height: 30,
@@ -5683,6 +5818,364 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ),
         ],
+        ),
+      ),
+    );
+  }
+
+  void _openWithdrawConfirmPanel() {
+    _dismissFocus();
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _safeSetState(() {
+      _resetEmailLinkPanelOtpFlow();
+      _isEmailLinkPanelOpen = false;
+      _isCustomerCenterPanelOpen = false;
+      _isShopNoticeOpen = false;
+      _activeSettingsSupportDoc = null;
+      _isWithdrawFinalConfirmOpen = false;
+      _isWithdrawConfirmOpen = true;
+    });
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _onWithdrawFinalConfirmDeleteTap() async {
+    if (_isDeletingAccount) return;
+    _safeSetState(() => _isDeletingAccount = true);
+    await _dismissYardConfirmOverlayAnimated(() {
+      _isWithdrawFinalConfirmOpen = false;
+      _isWithdrawConfirmOpen = false;
+    });
+    if (!mounted) return;
+    try {
+      await _withdrawAccount();
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isDeletingAccount = false);
+      } else {
+        _isDeletingAccount = false;
+      }
+    }
+  }
+
+  Widget _buildWithdrawConfirmGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isWithdrawConfirmOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    const titleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
+    );
+    const descStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 10,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.2,
+    );
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _isDeletingAccount ? null : _closeWithdrawConfirmOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildVegePetConfirmDialogShell(
+                  width: _kVegePetConfirmDialogW,
+                  height: _kVegePetConfirmDialogH,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SizedBox(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: const [
+                                  Text(
+                                    '회원 탈퇴',
+                                    textAlign: TextAlign.left,
+                                    style: titleStyle,
+                                  ),
+                                SizedBox(height: 4),
+                                Text(
+                                  '현재 계정의 펫, 식단 일지 등 모든 기록이 초기화 되며, 되돌릴 수 없어요. 정말 탈퇴할까요?',
+                                  textAlign: TextAlign.left,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: descStyle,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                onTap: _isDeletingAccount
+                                    ? null
+                                    : _closeWithdrawConfirmOverlay,
+                                borderRadius: BorderRadius.circular(14),
+                                child: Ink(
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(0xFFF1F1F1),
+                                      width: 0.8,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.03,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: _buildPastelBlueGradientButtonText(
+                                      '취소',
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                onTap: _isDeletingAccount
+                                    ? null
+                                    : _openWithdrawFinalConfirmFromFirst,
+                                borderRadius: BorderRadius.circular(14),
+                                child: Ink(
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(0xFFF1F1F1),
+                                      width: 0.8,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.03,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      '탈퇴',
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFFB92020),
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWithdrawFinalConfirmGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isWithdrawFinalConfirmOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    const titleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
+    );
+    const descStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 10,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.2,
+    );
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _isDeletingAccount
+                    ? null
+                    : _closeWithdrawFinalConfirmOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildVegePetConfirmDialogShell(
+                  width: _kVegePetConfirmDialogW,
+                  height: _kVegePetConfirmDialogH,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SizedBox(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: const [
+                                  Text(
+                                    '탈퇴 확인',
+                                    textAlign: TextAlign.left,
+                                    style: titleStyle,
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    '아래 버튼을 누르면 회원 탈퇴가 최종 완료됩니다.',
+                                  textAlign: TextAlign.left,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: descStyle,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        child: InkWell(
+                          onTap: _isDeletingAccount
+                              ? null
+                              : () {
+                                  unawaited(_onWithdrawFinalConfirmDeleteTap());
+                                },
+                          borderRadius: BorderRadius.circular(14),
+                          child: Ink(
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: const Center(
+                              child: Text(
+                                '최종 탈퇴',
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFB92020),
+                                  height: 1.0,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+        ),
       ),
     );
   }
@@ -5701,10 +6194,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _gamePokedexSwapController,
         ]),
         builder: (context, _) {
-          final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
-          final slide =
-              _kGameMenuPanelOffLeft +
-              (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+          final slide = _gameMenuPanelSlideLeft;
           final dexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
           final showDexLayer =
               _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
@@ -6447,19 +6937,119 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTopHudLayer() {
-    final l10n = AppLocalizations.of(context);
-    final hidePetInfoCornerIcon =
-        _isPetInfoBannerOpen ||
+  bool _isAnyGameMenuSubPanelOpenOrSwapping() {
+    return _isProfilePanelOpen ||
+        _profilePanelSwapInProgress ||
+        _isDietDiaryPanelOpen ||
+        _dietDiaryPanelSwapInProgress ||
+        _isBagPanelOpen ||
+        _bagPanelSwapInProgress ||
+        _isPokedexPanelOpen ||
+        _pokedexPanelSwapInProgress ||
+        _isStoryPanelOpen ||
+        _storyPanelSwapInProgress ||
+        _isSettingsPanelOpen ||
+        _settingsPanelSwapInProgress ||
+        _settingsSupportDocSwapInProgress ||
+        _activeSettingsSupportDoc != null;
+  }
+
+  bool _isAnyGameMenuSurfaceActiveOrTransitioning() {
+    return _gameMenuPanelOpen ||
+        _gameMenuPanelRetracting ||
+        _isAnyGameMenuSubPanelOpenOrSwapping() ||
+        _gameMenuSubOutsideDismissController.isAnimating ||
+        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none ||
+        _gameProfileSwapController.isAnimating ||
+        _gameDietDiarySwapController.isAnimating ||
+        _gameBagSwapController.isAnimating ||
+        _gamePokedexSwapController.isAnimating ||
+        _gameStorySwapController.isAnimating ||
+        _gameSettingsSwapController.isAnimating ||
+        _isShopNoticeOpen ||
+        _isWithdrawConfirmOpen ||
+        _isWithdrawFinalConfirmOpen;
+  }
+
+  /// 우측 메뉴 아이콘: 패널이 닫히는 동안(슬라이드/마당 페이드) 배경에 유지.
+  bool get _hidePetInfoHudIcon {
+    if (_petChildPanelDismissingToYard) {
+      return false;
+    }
+    return _isPetInfoBannerOpen ||
         _isToyMenuOpen ||
         _petToySwapInProgress ||
         _isMealPanelOpen ||
         _petMealSwapInProgress;
+  }
+
+  /// 좌측 베지펫 정보 아이콘과 동일: 패널이 닫히는 동안(슬라이드/마당 페이드) 아이콘은 배경에 유지.
+  bool get _hideGameMenuHudIcon {
+    if (_gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none) {
+      return false;
+    }
+    return _gameMenuPanelOpen ||
+        _isAnyGameMenuSubPanelOpenOrSwapping() ||
+        _isShopNoticeOpen ||
+        _isWithdrawConfirmOpen ||
+        _isWithdrawFinalConfirmOpen;
+  }
+
+  double get _gameMenuYardExitFadeMultiplier {
+    if (_gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.none) {
+      return 1.0;
+    }
+    return (1.0 - _gameMenuSubOutsideDismissCurve.value).clamp(0.0, 1.0);
+  }
+
+  bool get _gameMenuPanelAtSlideOpen {
+    return _gameMenuPanelOpen || _isAnyGameMenuSubPanelOpenOrSwapping();
+  }
+
+  double get _gameMenuPanelSlideLeft {
+    return _gameMenuPanelAtSlideOpen
+        ? _kGameMenuPanelLeft
+        : _kGameMenuPanelOffLeft;
+  }
+
+  bool get _shouldMountGameMenuSlidePanel {
+    return _gameMenuPanelOpen ||
+        _gameMenuPanelRetracting ||
+        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none;
+  }
+
+  double _gameMenuGridCrossfadeOpacity() {
+    var opacity = 1.0;
+    if (_isProfilePanelOpen || _profilePanelSwapInProgress) {
+      opacity *= 1.0 - _gameProfileSwapCurve.value;
+    }
+    if (_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress) {
+      opacity *= 1.0 - _gameDietDiarySwapCurve.value;
+    }
+    if (_isBagPanelOpen || _bagPanelSwapInProgress) {
+      opacity *= 1.0 - _gameBagSwapCurve.value;
+    }
+    if (_isPokedexPanelOpen || _pokedexPanelSwapInProgress) {
+      opacity *= 1.0 - _gamePokedexSwapCurve.value;
+    }
+    if (_isSettingsPanelOpen || _settingsPanelSwapInProgress) {
+      opacity *= 1.0 - _gameSettingsSwapCurve.value;
+    }
+    if (_isStoryPanelOpen || _storyPanelSwapInProgress) {
+      opacity *= 1.0 - _gameStorySwapCurve.value;
+    }
+    return opacity.clamp(0.0, 1.0);
+  }
+
+  Widget _buildTopHudLayer() {
+    final l10n = AppLocalizations.of(context);
+    final hidePetInfoCornerIcon = _hidePetInfoHudIcon;
+    final hideGameMenuHudIcon = _hideGameMenuHudIcon;
     final blockHudByInitialOnboarding = _isInitialOnboardingHudBlocked();
     final isPetInfoCornerTouchBlocked =
         hidePetInfoCornerIcon || blockHudByInitialOnboarding;
     final isGameMenuCornerTouchBlocked =
-        hidePetInfoCornerIcon || blockHudByInitialOnboarding;
+        hideGameMenuHudIcon || blockHudByInitialOnboarding;
     return Positioned.fill(
       child: Stack(
         children: [
@@ -6508,15 +7098,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             height: 64,
             child: IgnorePointer(
               ignoring: isGameMenuCornerTouchBlocked,
-              child: SizedBox(
-                width: 64,
-                height: 64,
-                child: _cornerIconButton(
-                  icon: Icons.apps_rounded,
-                  tooltip: l10n.gameMenuTooltip,
-                  iconSize: 28,
-                  padding: 18,
-                  onTap: _openMenuSheet,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                opacity: hideGameMenuHudIcon ? 0 : 1,
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: _cornerIconButton(
+                    icon: Icons.apps_rounded,
+                    tooltip: l10n.gameMenuTooltip,
+                    iconSize: 28,
+                    padding: 18,
+                    onTap: _openMenuSheet,
+                  ),
                 ),
               ),
             ),
@@ -6547,10 +7142,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _gameBagSwapController,
         ]),
         builder: (context, _) {
-          final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
-          final slide =
-              _kGameMenuPanelOffLeft +
-              (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
+          final slide = _gameMenuPanelSlideLeft;
           final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
           final showBagLayer = _isBagPanelOpen || _bagPanelSwapInProgress;
           final bagOpacity = showBagLayer ? bagSwapT : 0.0;
@@ -7162,13 +7754,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final opening = !_isPetInfoBannerOpen;
 
     // 게임 메뉴 열림 ↔ 베지펫 정보창 상호 배타: 펫창을 켤 때 메뉴는 즉시 닫고 슬라이드 아웃과 동시 진행.
-    if (opening && (_gameMenuPanelOpen || _gameMenuPanelController.value > 0)) {
+    if (opening &&
+        (_gameMenuPanelOpen ||
+            _gameMenuPanelRetracting ||
+            _isAnyGameMenuSubPanelOpenOrSwapping())) {
       _safeSetState(() {
         _isPetInfoBannerOpen = true;
         _gameMenuPanelOpen = false;
+        _gameMenuPanelRetracting = true;
         _resetGameProfilePanelStateForMenuClose();
       });
-      unawaited(_gameMenuPanelController.reverse());
+      unawaited(_finishGameMenuPanelRetract());
       return;
     }
 
@@ -7252,8 +7848,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           );
         } else {
           inner = AnimatedOpacity(
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOutCubic,
+            duration: _kYardSidePanelSlideDuration,
+            curve: _kYardSidePanelSlideCurve,
             opacity: slideOutOpen ? 1 : 0,
             child: _buildPetInfoBannerContent(),
           );
@@ -7262,8 +7858,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return AnimatedPositioned(
           duration: showPetInSwap
               ? Duration.zero
-              : const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
+              : _kYardSidePanelSlideDuration,
+          curve: _kYardSidePanelSlideCurve,
           left: targetLeft,
           top: 40,
           width: panelW,
@@ -7521,7 +8117,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 Positioned(
                   left: 18,
                   right: 18,
-                  top: 194,
+                  top: 195,
                   child: Text(
                     '💕 ${affectionInfo.label}',
                     textAlign: TextAlign.center,
@@ -8403,54 +8999,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? Map<String, dynamic>.from(pet['pet_species'] as Map)
         : <String, dynamic>{};
     final family = species['family']?.toString() ?? '';
-    final speciesName = species['name_ko']?.toString() ?? '펫';
-    final nickname = pet['nickname']?.toString();
-    final displayName = (nickname == null || nickname.isEmpty)
-        ? speciesName
-        : nickname;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(_onYardPetTapped()),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.9),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
             ),
-            child: Icon(
-              family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
-              size: 40,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Text(
-              '$displayName이(가) 마당에서 기다리고 있어요',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
+        child: Icon(
+          family == 'cat' ? Icons.pets : Icons.cruelty_free_outlined,
+          size: 40,
+          color: theme.colorScheme.primary,
+        ),
       ),
     );
   }
@@ -9290,6 +9860,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
 
+    _safeSetState(() => _petChildPanelDismissingToYard = true);
+
     if (closingToy) {
       _petToySwapController.value = 1.0;
       _safeSetState(() {
@@ -9307,6 +9879,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petToySwapInProgress = false;
         _toyOpenedFromPetBanner = false;
         _isPetInfoBannerOpen = false;
+        _petChildPanelDismissingToYard = false;
       });
     } else if (closingMeal) {
       _petMealSwapController.value = 1.0;
@@ -9323,7 +9896,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
         _isPetInfoBannerOpen = false;
+        _petChildPanelDismissingToYard = false;
       });
+    } else if (mounted) {
+      _safeSetState(() => _petChildPanelDismissingToYard = false);
     }
   }
 
@@ -9332,13 +9908,84 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // --------------------------------------------------------------------------
 
   Widget _buildGameMenuOverlayLayer() {
-    if (!_gameMenuPanelOpen && _gameMenuPanelController.value == 0) {
+    final mountSubs = _isAnyGameMenuSubPanelOpenOrSwapping();
+    final yardExitFade =
+        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none;
+    if (!_shouldMountGameMenuSlidePanel && !mountSubs && !yardExitFade) {
       return const SizedBox.shrink();
     }
 
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => unawaited(_handleGameMenuBackdropTap()),
+            child: const ColoredBox(color: Colors.transparent),
+          ),
+        ),
+        if (_shouldMountGameMenuSlidePanel || mountSubs)
+          _buildGameMenuPanelSlideHost(),
+      ],
+    );
+  }
+
+  /// [AnimatedPositioned]는 [Stack] 직계 자식이어야 슬라이드가 동작한다.
+  Widget _buildGameMenuPanelSlideHost() {
+    final yardExit = _gameMenuYardExitFadeMultiplier;
+    final subSwapInProgress =
+        _profilePanelSwapInProgress ||
+        _dietDiaryPanelSwapInProgress ||
+        _bagPanelSwapInProgress ||
+        _pokedexPanelSwapInProgress ||
+        _settingsPanelSwapInProgress;
+    final atSlideOpen = _gameMenuPanelAtSlideOpen;
+    final targetLeft = yardExit < 0.999
+        ? _kGameMenuPanelLeft
+        : (atSlideOpen ? _kGameMenuPanelLeft : _kGameMenuPanelOffLeft);
+    final slideDuration = subSwapInProgress
+        ? Duration.zero
+        : _kYardSidePanelSlideDuration;
+
+    final slideMenuPanelOpen = _gameMenuPanelOpen;
+    final panelShellOpen =
+        slideMenuPanelOpen || _isAnyGameMenuSubPanelOpenOrSwapping();
+
+    return AnimatedPositioned(
+      duration: slideDuration,
+      curve: _kYardSidePanelSlideCurve,
+      left: targetLeft,
+      top: _kGameMenuPanelTop,
+      width: _kGameMenuPanelW,
+      height: _kGameMenuPanelH,
+      child: yardExit < 0.999
+          ? _buildGameMenuPanelCrossfadeStack()
+          : AnimatedOpacity(
+              duration: slideDuration,
+              curve: _kYardSidePanelSlideCurve,
+              opacity: panelShellOpen ? 1.0 : 0.0,
+              child: IgnorePointer(
+                ignoring: !panelShellOpen,
+                child: _buildGameMenuPanelCrossfadeStack(),
+              ),
+            ),
+    );
+  }
+
+  Future<void> _finishGameMenuPanelRetract() async {
+    await Future<void>.delayed(_kYardSidePanelSlideDuration);
+    if (!mounted) return;
+    _safeSetState(() {
+      _gameMenuPanelRetracting = false;
+      _gameMenuPanelController.value = 0;
+    });
+  }
+
+  /// 메뉴 그리드 ↔ 하위 패널: 같은 좌표·같은 스택에서 동시 크로스페이드 (베지펫 정보창 ↔ 먹이·놀이).
+  Widget _buildGameMenuPanelCrossfadeStack() {
     return AnimatedBuilder(
       animation: Listenable.merge([
-        _gameMenuPanelController,
         _gameProfileSwapController,
         _gameDietDiarySwapController,
         _gameBagSwapController,
@@ -9348,170 +9995,98 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
-        final t = _gameMenuPanelCurve.value.clamp(0.0, 1.0);
-        final slide =
-            _kGameMenuPanelOffLeft +
-            (_kGameMenuPanelLeft - _kGameMenuPanelOffLeft) * t;
-        final profileSwapT = _gameProfileSwapCurve.value.clamp(0.0, 1.0);
-        final dietSwapT = _gameDietDiarySwapCurve.value.clamp(0.0, 1.0);
-        final bagSwapT = _gameBagSwapCurve.value.clamp(0.0, 1.0);
-        final pokedexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
-        final storySwapT = _gameStorySwapCurve.value.clamp(0.0, 1.0);
-        final settingsSwapT = _gameSettingsSwapCurve.value.clamp(0.0, 1.0);
-        final subExitRaw = _gameMenuSubOutsideDismissCurve.value.clamp(
-          0.0,
-          1.0,
-        );
-        final profileSubExit =
-            _gameMenuSubOutsideDismissKind ==
-                _GameMenuSubOutsideDismissKind.profile
-            ? subExitRaw
-            : 0.0;
-        final dietSubExit =
-            _gameMenuSubOutsideDismissKind ==
-                _GameMenuSubOutsideDismissKind.dietDiary
-            ? subExitRaw
-            : 0.0;
-        final bagSubExit =
-            _gameMenuSubOutsideDismissKind == _GameMenuSubOutsideDismissKind.bag
-            ? subExitRaw
-            : 0.0;
-        final pokedexSubExit =
-            _gameMenuSubOutsideDismissKind ==
-                _GameMenuSubOutsideDismissKind.pokedex
-            ? subExitRaw
-            : 0.0;
-        final subExitFadeProfile = (1.0 - profileSubExit).clamp(0.0, 1.0);
-        final subExitFadeDiet = (1.0 - dietSubExit).clamp(0.0, 1.0);
-        final subExitFadeBag = (1.0 - bagSubExit).clamp(0.0, 1.0);
-        final subExitFadePokedex = (1.0 - pokedexSubExit).clamp(0.0, 1.0);
-        final showProfileLayer =
-            _isProfilePanelOpen || _profilePanelSwapInProgress;
-        final showDietLayer =
-            _isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress;
-        final showBagLayer = _isBagPanelOpen || _bagPanelSwapInProgress;
-        final showPokedexLayer =
-            _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
-        final showSettingsLayer =
-            _isSettingsPanelOpen || _settingsPanelSwapInProgress;
-        final showStoryLayer = _isStoryPanelOpen || _storyPanelSwapInProgress;
-        final showMenuLayer =
-            (!_isProfilePanelOpen || _profilePanelSwapInProgress) &&
-            (!_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress) &&
-            (!_isBagPanelOpen || _bagPanelSwapInProgress) &&
-            (!_isPokedexPanelOpen || _pokedexPanelSwapInProgress) &&
-            (!_isSettingsPanelOpen || _settingsPanelSwapInProgress) &&
-            (!_isStoryPanelOpen || _storyPanelSwapInProgress);
-        var menuOpacity = 1.0;
-        if (showProfileLayer) {
-          menuOpacity *= (1.0 - profileSwapT);
-        }
-        if (showDietLayer) {
-          menuOpacity *= (1.0 - dietSwapT);
-        }
-        if (showBagLayer) {
-          menuOpacity *= (1.0 - bagSwapT);
-        }
-        if (showPokedexLayer) {
-          menuOpacity *= (1.0 - pokedexSwapT);
-        }
-        if (showSettingsLayer) {
-          menuOpacity *= (1.0 - settingsSwapT);
-        }
-        if (showStoryLayer) {
-          menuOpacity *= (1.0 - storySwapT);
-        }
-        final profileOpacity = showProfileLayer ? profileSwapT : 0.0;
-        var dietOpacity = showDietLayer ? dietSwapT : 0.0;
-        var bagOpacity = showBagLayer ? bagSwapT : 0.0;
-        var pokedexOpacity = showPokedexLayer ? pokedexSwapT : 0.0;
-        var settingsOpacity = showSettingsLayer ? settingsSwapT : 0.0;
-        dietOpacity *= subExitFadeDiet;
-        bagOpacity *= subExitFadeBag;
-        pokedexOpacity *= subExitFadePokedex;
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => unawaited(_handleGameMenuBackdropTap()),
-                child: const ColoredBox(color: Colors.transparent),
-              ),
-            ),
-            Positioned(
-              left: slide,
-              top: _kGameMenuPanelTop,
-              width: _kGameMenuPanelW,
-              height: _kGameMenuPanelH,
-              child: Opacity(
-                opacity: t,
-                child: SizedBox(
-                  width: _kGameMenuPanelW,
-                  height: _kGameMenuPanelH,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.none,
-                    children: [
-                      if (showMenuLayer)
-                        IgnorePointer(
-                          ignoring: menuOpacity < 0.05,
-                          child: Opacity(
-                            opacity: menuOpacity.clamp(0.0, 1.0),
-                            child: _buildYardGameMenuGlassPanel(),
-                          ),
-                        ),
-                      if (showProfileLayer)
-                        IgnorePointer(
-                          ignoring:
-                              profileOpacity.clamp(0.0, 1.0) *
-                                  subExitFadeProfile <
-                              0.05,
-                          child: Opacity(
-                            opacity:
-                                profileOpacity.clamp(0.0, 1.0) *
-                                subExitFadeProfile,
-                            child: _buildGameMenuProfileGlassPanel(),
-                          ),
-                        ),
-                      if (showDietLayer)
-                        IgnorePointer(
-                          ignoring: dietOpacity < 0.05,
-                          child: Opacity(
-                            opacity: dietOpacity.clamp(0.0, 1.0),
-                            child: _buildDietDiaryGameMenuGlassPanel(),
-                          ),
-                        ),
-                      if (showBagLayer)
-                        IgnorePointer(
-                          ignoring: bagOpacity < 0.05,
-                          child: Opacity(
-                            opacity: bagOpacity.clamp(0.0, 1.0),
-                            child: _buildBagGameMenuGlassPanel(),
-                          ),
-                        ),
-                      if (showPokedexLayer)
-                        IgnorePointer(
-                          ignoring: pokedexOpacity < 0.05,
-                          child: Opacity(
-                            opacity: pokedexOpacity.clamp(0.0, 1.0),
-                            child: _buildPokedexGameMenuGlassPanel(),
-                          ),
-                        ),
-                      if (showSettingsLayer)
-                        IgnorePointer(
-                          ignoring: settingsOpacity < 0.05,
-                          child: Opacity(
-                            opacity: settingsOpacity.clamp(0.0, 1.0),
-                            child: _buildSettingsGameMenuGlassPanel(),
-                          ),
-                        ),
-                    ],
+        final yardExit = _gameMenuYardExitFadeMultiplier;
+        final slideMenuOpen = _gameMenuPanelOpen;
+        final anySubPanel = _isAnyGameMenuSubPanelOpenOrSwapping();
+        final menuGridSlidingOut =
+            _gameMenuPanelRetracting && !anySubPanel;
+
+        final menuFade = _gameMenuGridCrossfadeOpacity();
+        final showMenuGrid = slideMenuOpen || menuGridSlidingOut;
+        final menuOpacity =
+            (showMenuGrid ? (slideMenuOpen ? menuFade : 1.0) : 0.0) * yardExit;
+        final profileOpacity =
+            ((_isProfilePanelOpen || _profilePanelSwapInProgress)
+                ? _gameProfileSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final dietOpacity =
+            ((_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress)
+                ? _gameDietDiarySwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final bagOpacity =
+            ((_isBagPanelOpen || _bagPanelSwapInProgress)
+                ? _gameBagSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final pokedexOpacity =
+            ((_isPokedexPanelOpen || _pokedexPanelSwapInProgress)
+                ? _gamePokedexSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final settingsOpacity =
+            ((_isSettingsPanelOpen || _settingsPanelSwapInProgress)
+                ? _gameSettingsSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+
+        return IgnorePointer(
+          ignoring: !slideMenuOpen && !anySubPanel && !menuGridSlidingOut,
+          child: Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              if (menuOpacity > 0.01)
+                IgnorePointer(
+                  ignoring: menuOpacity < 0.05,
+                  child: Opacity(
+                    opacity: menuOpacity.clamp(0.0, 1.0),
+                    child: _buildYardGameMenuGlassPanel(),
                   ),
                 ),
-              ),
-            ),
-          ],
+              if (_isProfilePanelOpen || _profilePanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: profileOpacity < 0.05,
+                  child: Opacity(
+                    opacity: profileOpacity,
+                    child: _buildGameMenuProfileGlassPanel(),
+                  ),
+                ),
+              if (_isDietDiaryPanelOpen || _dietDiaryPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: dietOpacity < 0.05,
+                  child: Opacity(
+                    opacity: dietOpacity,
+                    child: _buildDietDiaryGameMenuGlassPanel(),
+                  ),
+                ),
+              if (_isBagPanelOpen || _bagPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: bagOpacity < 0.05,
+                  child: Opacity(
+                    opacity: bagOpacity,
+                    child: _buildBagGameMenuGlassPanel(),
+                  ),
+                ),
+              if (_isPokedexPanelOpen || _pokedexPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: pokedexOpacity < 0.05,
+                  child: Opacity(
+                    opacity: pokedexOpacity,
+                    child: _buildPokedexGameMenuGlassPanel(),
+                  ),
+                ),
+              if (_isSettingsPanelOpen || _settingsPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: settingsOpacity < 0.05,
+                  child: Opacity(
+                    opacity: settingsOpacity,
+                    child: _buildSettingsGameMenuGlassPanel(),
+                  ),
+                ),
+            ],
+          ),
         );
       },
     );
@@ -10057,6 +10632,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (label == '상점') {
       if (_isShopNoticeOpen) return;
       _safeSetState(() => _isShopNoticeOpen = true);
+      _playYardConfirmOverlayEnter();
       return;
     }
     await _closeGameMenuPanel();
@@ -10208,7 +10784,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _settingsPanelSwapInProgress = false;
     _isEmailLinkPanelOpen = false;
     _isCustomerCenterPanelOpen = false;
-    _isShopNoticeOpen = false;
+    _instantCloseYardConfirmOverlays();
     _isStoryPanelOpen = false;
     _storyPanelSwapInProgress = false;
     _activeSettingsSupportDoc = null;
@@ -10226,15 +10802,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsPanelSwapInProgress = false;
       _isEmailLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
+      _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
   }
 
-  /// 게임 메뉴 **하위 기능창**(프로필/식단일지/가방/도감)을 외부 탭만으로 내린다.
-  ///
-  /// 베지펫 정보창 → 먹이·놀이 전환처럼 중앙 기준 페이드로 닫은 뒤,
-  /// 슬라이드(reverse) 없이 마당 상태로 되돌린다. (`_gameMenuPanelOpen == false`)
+  /// 게임 메뉴 **하위 기능창** 외부 탭: 슬라이드 없이 현재 화면을 그대로 두고 마당으로 페이드 아웃.
   Future<void> _dismissGameSubPanelWithCenterExit(
     _GameMenuSubOutsideDismissKind kind,
   ) async {
@@ -10242,77 +10816,64 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_gameMenuSubOutsideDismissController.isAnimating) return;
     if (kind == _GameMenuSubOutsideDismissKind.none) return;
 
+    switch (kind) {
+      case _GameMenuSubOutsideDismissKind.profile:
+        if (_profilePanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.dietDiary:
+        if (_dietDiaryPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.bag:
+        if (_bagPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.pokedex:
+        if (_pokedexPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.story:
+        if (_storyPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.settings:
+        if (_settingsPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.none:
+        return;
+    }
+
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     if (!mounted) return;
 
-    _safeSetState(() => _gameMenuSubOutsideDismissKind = kind);
+    _safeSetState(() {
+      _gameMenuSubOutsideDismissKind = kind;
+      _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = false;
+    });
+
     await _gameMenuSubOutsideDismissController.forward(from: 0.0);
     if (!mounted) return;
 
     _safeSetState(() {
-      switch (kind) {
-        case _GameMenuSubOutsideDismissKind.profile:
-          _gameProfileSwapController.stop();
-          _gameProfileSwapController.value = 0;
-          _isProfilePanelOpen = false;
-          _profilePanelSwapInProgress = false;
-          _profileOpenedFromGameMenu = false;
-          break;
-        case _GameMenuSubOutsideDismissKind.dietDiary:
-          _gameDietDiarySwapController.stop();
-          _gameDietDiarySwapController.value = 0;
-          _isDietDiaryPanelOpen = false;
-          _dietDiaryPanelSwapInProgress = false;
-          break;
-        case _GameMenuSubOutsideDismissKind.bag:
-          _gameBagSwapController.stop();
-          _gameBagSwapController.value = 0;
-          _isBagPanelOpen = false;
-          _bagPanelSwapInProgress = false;
-          _bagPanelDetailItem = null;
-          break;
-        case _GameMenuSubOutsideDismissKind.pokedex:
-          _gamePokedexSwapController.stop();
-          _gamePokedexSwapController.value = 0;
-          _isPokedexPanelOpen = false;
-          _pokedexPanelSwapInProgress = false;
-          _pokedexPanelSelectedEntry = null;
-          break;
-        case _GameMenuSubOutsideDismissKind.none:
-          break;
-      }
-      _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
+      _resetGameProfilePanelStateForMenuClose();
       _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = false;
       _gameMenuPanelController.value = 0;
+      _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
     });
     _gameMenuSubOutsideDismissController.value = 0.0;
   }
 
-  /// 게임 메뉴 슬라이드 패널 전체를 닫는다.
-  ///
-  /// 서브 패널(프로필/식단일지/가방) 상태를 **슬라이드 아웃 전에** 지우면
-  /// `showMenuLayer` 가 잠깐 true 가 되어 메뉴 그리드가 재등장하는 깜빡임이 생긴다.
-  /// 그래서 먼저 [_gameMenuPanelController] reverse 로 통째로 밀어낸 뒤,
-  /// 애니메이션 종료 후 swap 플래그·컨트롤러를 [_resetGameProfilePanelStateForMenuClose] 로 정리한다.
+  /// 게임 메뉴 슬라이드 패널 전체를 닫는다. (베지펫 정보창 닫기와 동일: open=false → 우측 슬라이드)
   Future<void> _closeGameMenuPanel() async {
-    if (!_gameMenuPanelOpen) return;
+    if (!_gameMenuPanelOpen || _gameMenuPanelRetracting) return;
     await _closeProfileSelectOverlay(notify: false, animated: false);
-    await _gameMenuPanelController.reverse();
-    if (!mounted) return;
     _safeSetState(() {
-      _resetGameProfilePanelStateForMenuClose();
       _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = true;
     });
+    await _finishGameMenuPanelRetract();
+    if (!mounted) return;
+    _safeSetState(() => _resetGameProfilePanelStateForMenuClose());
   }
 
   /// 기능창(프로필/식단/가방)이 포함된 우측 슬라브 바깥(마당 영역) 터치.
   /// 식단일지 내 상세(day) 패널이 열려 있으면 먼저 달력으로만 복귀한다.
   /// 가방 설명창 오버레이가 터치를 못 받는 경우에 한해 여기서 설명창만 닫는다.
-  /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 슬라이드 없이 마당까지 닫는다.
+  /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 마당까지 닫는다.
   Future<void> _closeActiveGameMenuFromOutsideBackdropTap() async {
-    if (_gameMenuSubOutsideDismissController.isAnimating) return;
-
     if (_isDietDiaryPanelOpen) {
       final handled =
           await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??
@@ -10325,12 +10886,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_isShopNoticeOpen) {
-      _safeSetState(() => _isShopNoticeOpen = false);
+      _closeShopNoticeOverlay();
+      return;
+    }
+
+    if (_isWithdrawFinalConfirmOpen) {
+      _closeWithdrawFinalConfirmOverlay();
+      return;
+    }
+
+    if (_isWithdrawConfirmOpen) {
+      _closeWithdrawConfirmOverlay();
       return;
     }
 
     if (_isStoryPanelOpen && !_storyPanelSwapInProgress) {
-      await _closeStoryPanelToGameMenu();
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.story,
+      );
       return;
     }
 
@@ -10340,7 +10913,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_activeSettingsSupportDoc != null) {
-      await _closeSettingsSupportDocFromOutsideTap();
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.settings,
+      );
       return;
     }
 
@@ -10354,7 +10929,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_isSettingsPanelOpen && !_settingsPanelSwapInProgress) {
-      await _closeSettingsPanelToGameMenu();
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.settings,
+      );
       return;
     }
 
@@ -10609,20 +11186,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openMenuSheet() async {
-    if (_gameMenuPanelController.isAnimating) return;
+    if (_gameMenuPanelRetracting) return;
 
-    if (_gameMenuPanelOpen && _gameMenuPanelController.value >= 0.999) {
+    if (_gameMenuPanelOpen) {
       await _closeGameMenuPanel();
       return;
     }
 
     _safeSetState(() {
       _isPetInfoBannerOpen = false;
-      _gameMenuPanelOpen = true;
+      _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = true;
       _resetGameProfilePanelStateForMenuClose();
     });
-    _gameMenuPanelController.value = 0;
-    await _gameMenuPanelController.forward(from: 0);
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    _safeSetState(() {
+      _gameMenuPanelOpen = true;
+      _gameMenuPanelRetracting = false;
+    });
     unawaited(_preloadCurrentDiaryMonthIfNeeded());
   }
 
@@ -10721,6 +11303,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isSettingsPanelOpen = false;
       _isEmailLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
+      _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
@@ -10736,7 +11319,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsSupportDocSwapInProgress = true;
       _activeSettingsSupportDoc = type;
     });
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
+    Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
       _safeSetState(() => _settingsSupportDocSwapInProgress = false);
     });
@@ -10748,26 +11331,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsSupportDocSwapInProgress = true;
       _activeSettingsSupportDoc = null;
     });
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
+    Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
       _safeSetState(() => _settingsSupportDocSwapInProgress = false);
     });
   }
 
   Future<void> _closeSettingsSupportDocFromOutsideTap() async {
-    _dismissFocus();
-    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
-    _gameSettingsSwapController.stop();
-    _gameSettingsSwapController.value = 0;
-    _safeSetState(() {
-      _activeSettingsSupportDoc = null;
-      _isSettingsPanelOpen = false;
-      _settingsPanelSwapInProgress = false;
-      _isEmailLinkPanelOpen = false;
-      _isCustomerCenterPanelOpen = false;
-      _resetEmailLinkPanelOtpFlow();
-    });
-    await _closeGameMenuPanel();
+    await _dismissGameSubPanelWithCenterExit(
+      _GameMenuSubOutsideDismissKind.settings,
+    );
   }
 
   Widget _buildSettingsSupportDocScrollBody(_SupportDocument doc) {
@@ -11203,7 +11776,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       child: IgnorePointer(
                         ignoring: _activeSettingsSupportDoc != null,
                         child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 180),
+                          duration: const Duration(milliseconds: 240),
                           curve: Curves.easeOutCubic,
                           opacity: _activeSettingsSupportDoc == null ? 1 : 0,
                           child: RepaintBoundary(
@@ -11319,12 +11892,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             ),
                           const SizedBox(height: 6),
                           _buildSettingsGrayRow(
-                            onTap: () async {
-                              final ok = await _confirmWithdrawAccount();
-                              if (ok && mounted) {
-                                await _withdrawAccount();
-                              }
-                            },
+                            onTap: _isDeletingAccount
+                                ? null
+                                : _openWithdrawConfirmPanel,
                             child: Row(
                               children: [
                                 Icon(
@@ -11438,23 +12008,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       ),
                     ),
                     if (_activeSettingsSupportDoc != null)
-                      IgnorePointer(
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOutCubic,
-                          opacity: 1,
-                          child: RepaintBoundary(
-                            key: ValueKey(
-                              'settings-support-doc-${_activeSettingsSupportDoc!.name}',
-                            ),
-                            child: _buildSettingsSupportDocScrollBody(
-                              _buildSupportDocument(
-                                _activeSettingsSupportDoc!,
-                                _LocaleControllerScope.of(context)
-                                    .locale
-                                    .languageCode,
-                                l10n,
-                              ),
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 240),
+                        curve: Curves.easeOutCubic,
+                        opacity: 1,
+                        child: RepaintBoundary(
+                          key: ValueKey(
+                            'settings-support-doc-${_activeSettingsSupportDoc!.name}',
+                          ),
+                          child: _buildSettingsSupportDocScrollBody(
+                            _buildSupportDocument(
+                              _activeSettingsSupportDoc!,
+                              _LocaleControllerScope.of(context)
+                                  .locale
+                                  .languageCode,
+                              l10n,
                             ),
                           ),
                         ),
@@ -11778,42 +12346,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<bool> _confirmWithdrawAccount() async {
-    final ctx = _rootNavigatorKey.currentContext ?? context;
-    final confirmed = await showDialog<bool>(
-      context: ctx,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text('회원 탈퇴'),
-          content: const Text(
-            '회원 탈퇴를 진행하면 현재 계정의 펫, 식단 기록, 도감 기록, 보유 분양권, 프로필 정보가 모두 초기화됩니다.\n'
-            '이 작업은 되돌릴 수 없어요.\n'
-            '정말 탈퇴할까요?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error,
-                foregroundColor: Theme.of(ctx).colorScheme.onError,
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('탈퇴하기'),
-            ),
-          ],
-        );
-      },
-    );
-    return confirmed == true;
-  }
-
   /// 회원 탈퇴: 사용자 데이터 삭제 후 익명 세션으로 재시작.
   /// auth.users 행 완전 삭제는 클라이언트 단독으로 불가 → Edge Function `delete-auth-user` 필요.
   Future<void> _deleteCurrentAuthUserByEdgeFunction() async {
@@ -11944,7 +12476,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isMealPanelOpen = false;
         _petMealSwapInProgress = false;
         _mealOpenedFromPetBanner = false;
+        _petChildPanelDismissingToYard = false;
         _gameMenuPanelOpen = false;
+        _gameMenuPanelRetracting = false;
         _isProfilePanelOpen = false;
         _profilePanelSwapInProgress = false;
         _profileOpenedFromGameMenu = false;
@@ -11961,7 +12495,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _activeSettingsSupportDoc = null;
         _isEmailLinkPanelOpen = false;
         _isCustomerCenterPanelOpen = false;
-        _isShopNoticeOpen = false;
+        _instantCloseYardConfirmOverlays();
         _isStoryPanelOpen = false;
         _storyPanelSwapInProgress = false;
         _resetEmailLinkPanelOtpFlow();
