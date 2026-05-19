@@ -124,6 +124,7 @@ enum _GameMenuSubOutsideDismissKind {
   pokedex,
   story,
   settings,
+  help,
 }
 
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
@@ -292,6 +293,10 @@ class _SupportDocument {
   final List<_SupportDocumentSection> sections;
 }
 
+/// 게임 메뉴 하위 패널 대제목 top (한국어 14 · 영어 -1px, 뒤로가기 버튼은 9 고정).
+const double _kGameMenuSubPanelTitleTop = 14;
+const double _kGameMenuSubPanelTitleTopEnOffset = -1.0;
+
 enum _ViewStatus { loading, error, ready }
 
 class HomePage extends StatefulWidget {
@@ -312,6 +317,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kVegePetConfirmDialogH = 116;
 
   static const int _kProfileNicknameMaxLength = 8;
+  static final RegExp _nameAllowedRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
 
   _ViewStatus _status = _ViewStatus.loading;
   String? _errorMessage;
@@ -492,6 +498,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _settingsPanelSwapInProgress = false;
   late AnimationController _gameSettingsSwapController;
   late Animation<double> _gameSettingsSwapCurve;
+
+  /// 게임 메뉴 ↔ 도움말 창 전환 (가방/설정과 동일 계열 · fade only).
+  bool _isHelpPanelOpen = false;
+  bool _helpPanelSwapInProgress = false;
+  late AnimationController _gameHelpSwapController;
+  late Animation<double> _gameHelpSwapCurve;
   final ScrollController _settingsScrollController = ScrollController();
   _SupportDocType? _activeSettingsSupportDoc;
   bool _settingsSupportDocSwapInProgress = false;
@@ -510,6 +522,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 마당 공통 알림창: 상점 MVP 준비중 안내.
   bool _isShopNoticeOpen = false;
+  bool _isNameInterlockNoticeOpen = false;
 
   /// 설정 > 회원 탈퇴 1차 확인 (240×116 · 마당 좌표계).
   bool _isWithdrawConfirmOpen = false;
@@ -571,15 +584,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const String _kSoundEffectsPrefKey = 'vegepet_sound_effects_enabled';
   static const int _kMealReminderNotificationIdBase = 120000;
   static const int _kMealReminderDaysToSchedule = 14;
+  /// 우측 게임 메뉴 6셀 + 2셀. String 슬롯은 표시용 라벨이 아니라
+  /// **안정적인 key** 다. 실제 화면 라벨은 [_menuLabelForKey] 가 l10n 으로
+  /// 매핑하고, onTap 분기도 이 key 를 기준으로 한다.
   static const List<(IconData, String)> _menuSheetItems = [
-    (Icons.person_outline, '프로필'),
-    (Icons.event_note_outlined, '식단일지'),
-    (Icons.backpack_outlined, '가방'),
-    (Icons.storefront_outlined, '상점'),
-    (Icons.menu_book_outlined, '도감'),
-    (Icons.auto_stories_outlined, '스토리'),
-    (Icons.help_outline, '도움말'),
-    (Icons.settings_outlined, '설정'),
+    (Icons.person_outline, 'profile'),
+    (Icons.event_note_outlined, 'dietDiary'),
+    (Icons.backpack_outlined, 'bag'),
+    (Icons.storefront_outlined, 'shop'),
+    (Icons.menu_book_outlined, 'pokedex'),
+    (Icons.auto_stories_outlined, 'story'),
+    (Icons.help_outline, 'help'),
+    (Icons.settings_outlined, 'settings'),
   ];
 
   /// 844×390 마당 기준 우측 상단 게임 메뉴 글래스 패널.
@@ -747,6 +763,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _gameSettingsSwapController,
       curve: _kYardSidePanelSwapCurve,
     );
+    _gameHelpSwapController = AnimationController(
+      vsync: this,
+      duration: _kYardSidePanelSwapDuration,
+    );
+    _gameHelpSwapCurve = CurvedAnimation(
+      parent: _gameHelpSwapController,
+      curve: _kYardSidePanelSwapCurve,
+    );
     _gameMenuSubOutsideDismissController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -788,6 +812,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gamePokedexSwapController.dispose();
     _gameStorySwapController.dispose();
     _gameSettingsSwapController.dispose();
+    _gameHelpSwapController.dispose();
     _settingsScrollController.dispose();
     _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
@@ -847,7 +872,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  bool _isValidNicknameOrPetName(String raw) {
+    final value = raw.trim();
+    return _nameAllowedRegExp.hasMatch(value);
+  }
+
+  Future<void> _showNameInterlockNotice() async {
+    if (_isNameInterlockNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isNameInterlockNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideNameInterlockNotice() async {
+    if (!_isNameInterlockNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isNameInterlockNoticeOpen = false,
+    );
+  }
+
   Future<void> _saveProfile() async {
+    if (_isSavingProfile || _isNameInterlockNoticeOpen) return;
     // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
     _dismissFocus();
@@ -855,40 +901,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(AppLocalizations.of(context).snackLoginRequired);
       return;
     }
 
     _enforceProfileNicknameMaxLength();
     final nickname = _nicknameController.text.trim();
 
-    if (nickname.characters.length > _kProfileNicknameMaxLength) {
-      final fixed = nickname.characters
-          .take(_kProfileNicknameMaxLength)
-          .toString();
-      _nicknameController.value = TextEditingValue(
-        text: fixed,
-        selection: TextSelection.collapsed(offset: fixed.length),
-        composing: TextRange.empty,
-      );
-      _showSnack('닉네임은 8자까지만 입력할 수 있어요.');
+    if (!_isValidNicknameOrPetName(nickname)) {
+      await _showNameInterlockNotice();
       return;
     }
-
-    if (nickname.isEmpty) {
-      _showSnack('닉네임을 입력해주세요.');
-      return;
-    }
+    final l10n = AppLocalizations.of(context);
     if (_selectedGender == null) {
-      _showSnack('성별을 선택해주세요.');
+      _showSnack(l10n.snackSelectGender);
       return;
     }
     if (_selectedAgeRange == null) {
-      _showSnack('나이대를 선택해주세요.');
+      _showSnack(l10n.snackSelectAgeRange);
       return;
     }
     if (_selectedDietGoal == null) {
-      _showSnack('식단 목적을 선택해주세요.');
+      _showSnack(l10n.snackSelectDietGoal);
       return;
     }
 
@@ -928,7 +962,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isProfileSetupClosing = false;
         _isProfileSetupPanelVisible = true;
       });
-      _showSnack('프로필 저장 실패: $e');
+      _showSnack(
+        AppLocalizations.of(context).snackProfileSaveFailed(e.toString()),
+      );
     }
   }
 
@@ -977,7 +1013,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     } catch (e, st) {
       debugPrint('settings language change failed: $e\n$st');
       if (!mounted) return;
-      _showSnack('언어 변경에 실패했어요. 다시 시도해주세요.');
+      _showSnack(AppLocalizations.of(context).snackLanguageChangeFailed);
     }
   }
 
@@ -1402,16 +1438,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       context: ctx,
       barrierDismissible: true,
       builder: (dialogCtx) {
+        final l10n = AppLocalizations.of(dialogCtx);
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text('이메일 연동 불가'),
-          content: const Text('이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.'),
+          title: Text(l10n.emailAlreadyUsedTitle),
+          content: Text(l10n.emailAlreadyUsedBody),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('확인'),
+              child: Text(l10n.confirmLabel),
             ),
           ],
         );
@@ -1938,26 +1975,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<bool> _sendEmailLinkOtp(String email) async {
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return false;
     }
     final trimmed = email.trim();
     if (trimmed.isEmpty || !_looksLikeEmail(trimmed)) {
-      _showSnack('올바른 이메일 형식으로 입력해주세요.');
+      _showSnack(l10n.snackInvalidEmail);
       return false;
     }
     try {
       await supabase.auth.updateUser(UserAttributes(email: trimmed));
-      _showSnack('인증 코드가 이메일로 발송되었어요.');
+      _showSnack(l10n.snackOtpSent);
       return true;
     } catch (e) {
       if (_isEmailAlreadyUsedError(e)) {
         await _showEmailAlreadyUsedDialog();
         return false;
       }
-      _showSnack('인증 코드 발송에 실패했어요: ${_formatAuthError(e)}');
+      _showSnack(l10n.snackOtpSendFailed(_formatAuthError(e)));
       return false;
     }
   }
@@ -1966,10 +2004,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required String email,
     required String token,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final trimmedEmail = email.trim();
     final trimmedToken = token.trim();
     if (trimmedEmail.isEmpty || trimmedToken.isEmpty) {
-      _showSnack('이메일과 인증 코드를 입력해주세요.');
+      _showSnack(l10n.snackEmailOtpRequired);
       return false;
     }
     try {
@@ -1983,7 +2022,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         await _showEmailAlreadyUsedDialog();
         return false;
       }
-      _showSnack('인증 코드 확인에 실패했어요: ${_formatAuthError(e)}');
+      _showSnack(l10n.snackOtpVerifyFailed(_formatAuthError(e)));
       return false;
     }
 
@@ -1995,7 +2034,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       return true;
     } catch (e) {
-      _showSnack('이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.');
+      _showSnack(l10n.snackEmailLinkPartialSavedFailed);
       debugPrint('verify email otp profile sync failed: $e');
       return true;
     }
@@ -2369,7 +2408,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final n = species['name_ko']?.toString().trim();
       if (n != null && n.isNotEmpty) return n;
     }
-    return '베지펫';
+    return AppLocalizations.of(context).pokedexDefaultPetName;
   }
 
   // 도감 entry 에서 source_user_pet.nickname 을 안전하게 꺼낸다.
@@ -2555,13 +2594,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   String? _stageGrowthMessage(String? beforeStage, String afterStage) {
     if (beforeStage == null || beforeStage == afterStage) return null;
+    final l10n = AppLocalizations.of(context);
     switch (afterStage) {
       case 'child':
-        return '베지펫이 유년기로 성장했어요!';
+        return l10n.snackStageGrewToChild;
       case 'grown':
-        return '베지펫이 성장기로 자랐어요!';
+        return l10n.snackStageGrewToGrown;
       case 'adult':
-        return '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+        return l10n.snackStageGrewToAdult;
       default:
         return null;
     }
@@ -2633,7 +2673,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         params: {'p_user_pet_id': petId},
       );
     } catch (e) {
-      if (mounted) _showSnack('성숙기 전환 처리 실패: $e');
+      if (mounted) {
+        _showSnack(
+          AppLocalizations.of(context).snackGraduationFailed(e.toString()),
+        );
+      }
       return;
     }
 
@@ -2665,14 +2709,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? true
         : payload['ticket_granted'] != false;
 
+    final l10n = AppLocalizations.of(context);
     if (alreadyGraduatedFlag) {
-      _showSnack('이미 졸업 처리된 베지펫이에요.');
+      _showSnack(l10n.snackPetAlreadyGraduated);
       return;
     }
 
-    _showSnack('베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!');
+    _showSnack(l10n.snackStageReachedAdult);
     if (ticketGranted) {
-      _showSnack('랜덤 분양권을 획득했어요!');
+      _showSnack(l10n.snackRandomTicketGranted);
     }
   }
 
@@ -2681,25 +2726,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // 오늘 날짜(yyyy-mm-dd)와 비교해서 강제한다.
   // action: 'play' | 'pet'
   Future<void> _interactPet(String action) async {
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_activePet == null) {
-      _showSnack('먼저 펫을 분양받아주세요.');
+      _showSnack(l10n.snackAdoptFirst);
       return;
     }
     if (_isInteracting) return;
 
     final isPlay = action == 'play';
-    final label = isPlay ? '놀아주기' : '쓰다듬기';
+    final label = isPlay ? l10n.petActionPlay : l10n.petActionPet;
     final dateColumn = isPlay ? 'last_played_on' : 'last_petted_on';
 
     final today = _todayDateStr();
     final lastUsedOn = _activePet![dateColumn]?.toString();
     if (lastUsedOn == today) {
-      _showSnack(isPlay ? '오늘은 이미 놀아줬어요.' : '오늘은 이미 쓰다듬었어요.');
+      _showSnack(
+        isPlay ? l10n.snackPlayedTodayAlready : l10n.snackPettedTodayAlready,
+      );
       return;
     }
 
@@ -2726,13 +2774,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       if (!mounted) return;
       setState(() => _isInteracting = false);
-      _showSnack('$label 성공! 애정도 +1');
+      _showSnack(
+        AppLocalizations.of(context).snackPlayActionSuccess(label),
+      );
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isInteracting = false);
-      _showSnack('$label 실패: $e');
+      _showSnack(
+        AppLocalizations.of(context).snackPlayActionFailed(label, e.toString()),
+      );
     }
   }
 
@@ -2742,25 +2794,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
+        final l10n = AppLocalizations.of(ctx);
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Text('베지펫을 지켜주세요'),
-          content: const Text(
-            '헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?',
-          ),
+          title: Text(l10n.emailLinkInviteTitle),
+          content: Text(l10n.emailLinkInviteBody),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('나중에 할게요'),
+              child: Text(l10n.emailLinkInviteLater),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                _showSnack('나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.');
+                _showSnack(l10n.emailLinkInviteSnack);
               },
-              child: const Text('지금 연동하기'),
+              child: Text(l10n.emailLinkInviteNow),
             ),
           ],
         );
@@ -2835,6 +2886,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// 프로필 입력창 「시작하기!」와 동일 그라데이션 텍스트 (먹이주기/놀아주기 등 공통).
+  ///
+  /// 영어 locale 에서는 descender 가 있는 글자(y, g, p 등)가 height: 1.0 일 때
+  /// 그라데이션 클리핑 영역 밖으로 나가 흰색으로 보이는 문제가 있다.
+  /// → 그라데이션 텍스트는 line height 를 1.15 이상으로 키우고, gradient bounds 도
+  /// 텍스트 실제 높이를 그대로 채우도록 유지한다. 한국어는 descender 가 없어
+  /// 시각 차이가 거의 없고, height 1.15 도 줄 위치는 유지된다.
   Widget _buildPastelBlueGradientButtonText(
     String text, {
     double fontSize = 14,
@@ -2859,7 +2916,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           fontSize: fontSize,
           fontWeight: fontWeight,
           color: Colors.white,
-          height: 1.0,
+          height: 1.15,
         ),
       ),
     );
@@ -2893,20 +2950,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _adoptSelectedPet() async {
     _dismissFocus();
 
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_selectedSpeciesId == null) return;
     if (_activePet != null) {
-      _showSnack('이미 육성 중인 펫이 있어요.');
+      _showSnack(l10n.snackAlreadyRaising);
       return;
     }
 
     final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
     if (selectedSpeciesId == null) {
-      _showSnack('펫 선택값이 올바르지 않아요.');
+      _showSnack(l10n.snackPetSelectInvalid);
       return;
     }
 
@@ -2949,7 +3007,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionPanelVisible = true;
       });
-      _showSnack('분양 저장에 실패했어요: $e');
+      _showSnack(
+        AppLocalizations.of(context).snackAdoptSaveFailed(e.toString()),
+      );
     }
   }
 
@@ -3014,10 +3074,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       await _waitForUiSettle();
       if (!mounted) return;
-      _showSnack('이름이 저장되었어요!');
+      _showSnack(AppLocalizations.of(context).snackNameSaved);
     } catch (e) {
       if (!mounted) return;
-      _showSnack('이름 저장 실패: $e');
+      _showSnack(
+        AppLocalizations.of(context).snackNameSaveFailed(e.toString()),
+      );
 
       // 이름 저장에 실패하면 사용자가 다시 시도할 수 있도록 한 frame 양보 후
       // 같은 다이얼로그를 재호출한다.
@@ -3118,6 +3180,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
+        _isHelpPanelOpen = false;
+        _helpPanelSwapInProgress = false;
 
         _nicknameController.clear();
         _selectedGender = null;
@@ -3134,6 +3198,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameBagSwapController.value = 0;
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
+      _gameHelpSwapController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -3300,6 +3365,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
+        _isHelpPanelOpen = false;
+        _helpPanelSwapInProgress = false;
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
 
         _selectedSpeciesId = null;
@@ -3318,6 +3385,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameBagSwapController.value = 0;
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
+      _gameHelpSwapController.value = 0;
       _gameMenuSubOutsideDismissController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
@@ -3507,6 +3575,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_gameBagSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -3576,6 +3645,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_gamePokedexSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -3610,12 +3680,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await Future.wait(pending);
     } catch (e) {
       if (!mounted) return;
-      _showSnack('도감 정보를 불러오지 못했어요.');
+      _showSnack(AppLocalizations.of(context).snackPokedexFetchFailed);
       return;
     }
     if (!mounted) return;
     if (_petSpecies.isEmpty) {
-      _showSnack('펫 종류 정보를 불러오지 못했어요.');
+      _showSnack(AppLocalizations.of(context).snackSpeciesFetchFailed);
       return;
     }
     await _waitForUiSettle();
@@ -3664,6 +3734,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_storyPanelSwapInProgress) return;
     if (_gameStorySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -3730,6 +3801,169 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _storyPanelSwapInProgress = false;
       _isStoryPanelOpen = false;
     });
+  }
+
+  void _instantResetHelpPanelIfOpen() {
+    _gameHelpSwapController.stop();
+    _gameHelpSwapController.value = 0.0;
+    if (!_isHelpPanelOpen && !_helpPanelSwapInProgress) return;
+    _safeSetState(() {
+      _isHelpPanelOpen = false;
+      _helpPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _openHelpPanelFromGameMenu() async {
+    if (_helpPanelSwapInProgress) return;
+    if (_gameHelpSwapController.isAnimating) return;
+    _instantResetSettingsPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+      });
+    }
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    await _waitForUiSettle();
+    if (!mounted) return;
+    _gameHelpSwapController.stop();
+    _gameHelpSwapController.value = 0.0;
+    _safeSetState(() {
+      _helpPanelSwapInProgress = true;
+      _isHelpPanelOpen = true;
+    });
+    await _gameHelpSwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _helpPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closeHelpPanelToGameMenu() async {
+    if (_helpPanelSwapInProgress) return;
+    _dismissFocus();
+    _gameHelpSwapController.value = 1.0;
+    _safeSetState(() {
+      _helpPanelSwapInProgress = true;
+    });
+    await _gameHelpSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _helpPanelSwapInProgress = false;
+      _isHelpPanelOpen = false;
+    });
+  }
+
+  Widget _buildHelpGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _kGameMenuPanelW,
+          height: _kGameMenuPanelH,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 9,
+                top: 9,
+                width: 28,
+                height: 28,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => unawaited(_closeHelpPanelToGameMenu()),
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 16,
+                        color: Color(0xFF000000),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 37,
+                top: _gameMenuSubPanelTitleTop,
+                right: 8,
+                child: Text(
+                  l10n.helpPanelTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF000000),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              // 상세 내용은 추후 구축 예정 — 좌우 8px 여백만 유지.
+              const Positioned(
+                left: 8,
+                right: 8,
+                top: 48,
+                bottom: 8,
+                child: SizedBox.expand(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _goStoryPrevPage() {
@@ -3938,7 +4172,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _onBagPanelUseTicketPressed() async {
     if (_isUsingRandomTicket) return;
     if (_effectiveRandomTicketCountForBag() <= 0) {
-      _showSnack('보유 중인 랜덤 분양권이 없어요.');
+      _showSnack(AppLocalizations.of(context).snackTicketEmpty);
       return;
     }
     _dismissFocus();
@@ -3961,11 +4195,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   _BagItem _bagWireframeRandomTicketDef() {
+    // name 슬롯에는 안정적인 code 만 들어가고, 화면에 표시될 때
+    // [_localizedBagItemName] / [_localizedBagItemDescription] 가 l10n 으로 변환한다.
     return _BagItem(
       category: 'ticket',
-      name: '분양권(랜덤)',
-      description:
-          ' 성숙기를 달성하면 주는 베지펫 랜덤 분양양 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!',
+      name: 'random_adoption_ticket',
+      description: '',
       quantity: _effectiveRandomTicketCountForBag() > 0
           ? _effectiveRandomTicketCountForBag()
           : 1,
@@ -4021,16 +4256,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         const SizedBox(height: 4),
         SizedBox(
           width: 72,
-          child: Text(
-            item.name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF4A4A4A),
-              height: 1.15,
+          // 영어 "Random Adoption Ticket" 처럼 긴 이름은 fontSize 만 줄여도
+          // 폭을 못 채우므로, FittedBox 로 1줄 표시(혹은 2줄까지 허용)한다.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: Text(
+              _localizedBagItemName(item),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _isEnglishLocale ? 10 : 11,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF4A4A4A),
+                height: 1.15,
+              ),
             ),
           ),
         ),
@@ -4039,6 +4280,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildBagGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
     final toys = _defaultToyBagItems();
     final ticketDef = _effectiveRandomTicketCountForBag() > 0
         ? _bagWireframeRandomTicketDef()
@@ -4105,10 +4347,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               Positioned(
                 left: 37,
-                top: 14,
+                top: _gameMenuSubPanelTitleTop,
                 right: 8,
                 child: Text(
-                  '가방',
+                  l10n.bagPanelTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -4131,7 +4373,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('• 분양권', style: sectionTitleStyle),
+                        Text(l10n.bagSectionTickets, style: sectionTitleStyle),
                         const SizedBox(height: 8),
                         if (ticketDef != null)
                           Align(
@@ -4144,7 +4386,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             ),
                           ),
                         const SizedBox(height: 14),
-                        const Text('• 장난감', style: sectionTitleStyle),
+                        Text(l10n.bagSectionToys, style: sectionTitleStyle),
                         const SizedBox(height: 8),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4177,6 +4419,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildPokedexGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
     const sectionTitleStyle = TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w600,
@@ -4241,13 +4484,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               Positioned(
                 left: 37,
-                top: 14,
+                top: _gameMenuSubPanelTitleTop,
                 right: 8,
-                child: const Text(
-                  '도감',
+                child: Text(
+                  l10n.pokedexPanelTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                     color: Color(0xFF000000),
@@ -4267,11 +4510,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('• 강아지', style: sectionTitleStyle),
+                        Text(l10n.pokedexSectionDogs, style: sectionTitleStyle),
                         const SizedBox(height: 8),
                         _buildPokedexGameMenuThreeSpeciesRow(dogs, 'dog'),
                         const SizedBox(height: 12),
-                        const Text('• 고양이', style: sectionTitleStyle),
+                        Text(l10n.pokedexSectionCats, style: sectionTitleStyle),
                         const SizedBox(height: 8),
                         _buildPokedexGameMenuThreeSpeciesRow(cats, 'cat'),
                       ],
@@ -4414,6 +4657,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildPokedexGameMenuEmptySpeciesSlot() {
+    final l10n = AppLocalizations.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -4440,14 +4684,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ),
         const SizedBox(height: 4),
-        const SizedBox(
+        SizedBox(
           width: 72,
           child: Text(
-            '???',
+            l10n.pokedexUnknownLabel,
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: Color(0xFF4A4A4A),
@@ -4463,6 +4707,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     Map<String, dynamic> species,
     String familyNorm,
   ) {
+    final l10n = AppLocalizations.of(context);
     final speciesId = _speciesIdFromSpeciesMap(species);
     final entry = speciesId != null
         ? _pokedexEntryForSpeciesId(speciesId)
@@ -4475,8 +4720,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ? speciesName
               : (codeFallback != null && codeFallback.isNotEmpty)
               ? codeFallback
-              : '베지펫')
-        : '???';
+              : l10n.pokedexDefaultPetName)
+        : l10n.pokedexUnknownLabel;
     final iconData = familyNorm == 'cat'
         ? Icons.pets
         : familyNorm == 'dog'
@@ -4586,7 +4831,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : _buildPastelBlueGradientButtonText(
-                    '사용하기',
+                    AppLocalizations.of(context).bagUseAction,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
@@ -4599,16 +4844,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget _buildBagItemDetailGlassPanel(_BagItem item) {
     final isTicket = item.category == 'ticket';
     final showUseInPanel = isTicket && _effectiveRandomTicketCountForBag() > 0;
-    const nameStyle = TextStyle(
-      fontSize: 11,
+    final nameStyle = TextStyle(
+      fontSize: _isEnglishLocale ? 10.5 : 11,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF000000),
+      color: const Color(0xFF000000),
       height: 1.2,
     );
-    const descStyle = TextStyle(
-      fontSize: 11,
+    final descStyle = TextStyle(
+      fontSize: _isEnglishLocale ? 10 : 11,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF4A4A4A),
+      color: const Color(0xFF4A4A4A),
       height: 1.35,
     );
 
@@ -4647,19 +4892,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: _buildBagDetailPreviewIcon(item),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    item.name,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: nameStyle,
+                  // 영어 "Random Adoption Ticket" 같은 긴 이름이 detail 패널 폭을
+                  // 넘기지 않도록 FittedBox 로 한 단계 축소 허용.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: Text(
+                      _localizedBagItemName(item),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: nameStyle,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Expanded(
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
                       child: Text(
-                        item.description,
+                        _localizedBagItemDescription(item),
                         textAlign: TextAlign.left,
                         style: descStyle,
                       ),
@@ -4679,11 +4930,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   List<_BagItem> _defaultToyBagItems() {
+    // name/description 슬롯에는 안정적인 code 만 들어가고, 화면 표시 시점에만
+    // [_localizedBagItemName] / [_localizedBagItemDescription] 으로 변환한다.
     return const [
       _BagItem(
         category: 'toy',
-        name: '뼈다귀 인형',
-        description: ' 강아지 베지펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.',
+        name: 'bone_doll',
+        description: '',
         quantity: 1,
         icon: Icons.cruelty_free_outlined,
         usable: false,
@@ -4691,9 +4944,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       _BagItem(
         category: 'toy',
-        name: '실뭉치',
-        description:
-            ' 고양이 베지펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.',
+        name: 'yarn_ball',
+        description: '',
         quantity: 1,
         icon: Icons.sports_baseball_outlined,
         usable: false,
@@ -5051,11 +5303,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 확인을 누르면 true, 취소/dismiss 면 false.
   Future<bool> _confirmUseRandomTicket() async {
     if (!mounted) return false;
+    final l10n = AppLocalizations.of(context);
     return _showVegePetConfirmDialog(
-      message: "'분양권(랜덤)'을 사용하시겠습니까?",
-      description: '사용된 아이템은 되돌릴 수 없습니다.',
-      primaryLabel: '사용',
-      secondaryLabel: '취소',
+      message: l10n.randomTicketUseConfirmMessage,
+      description: l10n.randomTicketUseConfirmDesc,
+      primaryLabel: l10n.useLabel,
+      secondaryLabel: l10n.cancelLabel,
       barrierDismissible: true,
       dimBarrier: false,
     );
@@ -5076,12 +5329,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_isUsingRandomTicket) return;
 
     final user = supabase.auth.currentUser;
+    final l10n = AppLocalizations.of(context);
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_effectiveRandomTicketCountForBag() <= 0) {
-      _showSnack('보유 중인 랜덤 분양권이 없어요.');
+      _showSnack(l10n.snackTicketEmpty);
       return;
     }
 
@@ -5095,7 +5349,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         currentPet['is_resident'] == true &&
         currentPet['graduated_at'] != null;
     if (currentPet != null && !isCurrentGraduated) {
-      _showSnack('현재 육성 중인 베지펫이 있어요. 성숙기 달성 후 사용할 수 있어요.');
+      _showSnack(l10n.snackTicketBlockedDuringGrowth);
       return;
     }
 
@@ -5111,7 +5365,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         );
       } catch (e) {
         if (!mounted) return;
-        _showSnack('분양권 사용 실패: $e');
+        _showSnack(l10n.snackTicketUseFailed(e.toString()));
         return;
       }
 
@@ -5129,7 +5383,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           : int.tryParse(speciesIdRaw?.toString() ?? '');
       if (speciesId == null) {
         if (!mounted) return;
-        _showSnack('분양 결과를 해석할 수 없어요. 잠시 후 다시 시도해주세요.');
+        _showSnack(l10n.snackAdoptError);
         return;
       }
 
@@ -5143,7 +5397,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             .maybeSingle();
         if (existingPokedex != null) {
           if (!mounted) return;
-          _showSnack('이미 도감에 등록된 베지펫이 반환되었어요. 분양 로직을 확인해주세요.');
+          _showSnack(l10n.snackTicketDuplicatePokedex);
           // 분양권 수량은 RPC 단계에서 이미 차감됐을 수 있으므로 재조회만 해둔다.
           await _fetchRandomTicketCount();
           if (mounted) setState(() {});
@@ -5163,7 +5417,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               .eq('id', currentPet['id']);
         } catch (e) {
           if (!mounted) return;
-          _showSnack('기존 펫 비활성화 실패: $e');
+          _showSnack(l10n.snackOldPetDeactivateFailed(e.toString()));
           return;
         }
       }
@@ -5182,7 +5436,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         });
       } catch (e) {
         if (!mounted) return;
-        _showSnack('새 베지펫 분양 저장 실패: $e');
+        _showSnack(l10n.snackNewPetAdoptSaveFailed(e.toString()));
         return;
       }
 
@@ -5201,7 +5455,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (!mounted) return;
       _safeSetState(() {});
 
-      _showSnack('새 베지펫이 분양되었어요!');
+      _showSnack(l10n.snackNewPetAdopted);
 
       // 성공 분기만: 게임메뉴 바깥 탭 가방 닫기와 동일하게 중앙 페이드 → 마당
       await _dismissBagPanelAfterTicketAdoptSuccessLikeBackdrop();
@@ -5294,6 +5548,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isShopNoticeOpen = false;
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
+    _isNameInterlockNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -5347,6 +5602,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isShopNoticeOpen = false;
       _isWithdrawConfirmOpen = false;
       _isWithdrawFinalConfirmOpen = true;
+      _isNameInterlockNoticeOpen = false;
     });
     _yardConfirmOverlayFadeController.stop();
     _yardConfirmOverlayFadeController.value = 1;
@@ -5706,7 +5962,131 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildShopNoticeGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
+        _buildNameInterlockNoticeGlobalOverlay(),
       ],
+    );
+  }
+
+  Widget _buildNameInterlockNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.nameInterlockMain,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.nameInterlockSub,
+                    textAlign: TextAlign.left,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: isEn ? 9 : 10,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFFB92020),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: () => unawaited(_hideNameInterlockNotice()),
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.confirmLabel,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNameInterlockNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isNameInterlockNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => unawaited(_hideNameInterlockNotice()),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildNameInterlockNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -5714,6 +6094,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_isYardConfirmOverlayFadeVisible(_isShopNoticeOpen)) {
       return const SizedBox.shrink();
     }
+    final l10n = AppLocalizations.of(context);
 
     return Positioned.fill(
       child: _buildVegePetYardConfirmOverlayFade(
@@ -5747,77 +6128,81 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
+                            children: [
                               Text(
-                                '오픈 준비중...',
-                              textAlign: TextAlign.left,
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF000000),
-                                height: 1.25,
+                                l10n.shopNoticeTitle,
+                                textAlign: TextAlign.left,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF000000),
+                                  height: 1.25,
+                                ),
                               ),
-                            ),
-                            SizedBox(height: 5),
-                            Text(
-                              '조금만 기다려주세요!',
-                              textAlign: TextAlign.left,
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A4A4A),
-                                height: 1.25,
+                              const SizedBox(height: 5),
+                              Text(
+                                l10n.shopNoticeDescription,
+                                textAlign: TextAlign.left,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF4A4A4A),
+                                  height: 1.25,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
-                        child: InkWell(
-                          onTap: _closeShopNoticeOverlay,
+                      const SizedBox(height: 2),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Material(
+                          color: Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
-                          child: Ink(
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
+                          child: InkWell(
+                            onTap: _closeShopNoticeOverlay,
+                            borderRadius: BorderRadius.circular(14),
+                            child: Ink(
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: const Color(0xFFF1F1F1),
+                                  width: 0.8,
                                 ),
-                              ],
-                            ),
-                            child: Center(
-                              child: _buildPastelBlueGradientButtonText(
-                                '확인',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.03),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: _buildPastelBlueGradientButtonText(
+                                  l10n.confirmLabel,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -5831,6 +6216,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
       _isShopNoticeOpen = false;
+      _isNameInterlockNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
@@ -5861,6 +6247,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_isYardConfirmOverlayFadeVisible(_isWithdrawConfirmOpen)) {
       return const SizedBox.shrink();
     }
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
 
     const titleStyle = TextStyle(
       fontFamily: 'Pretendard',
@@ -5869,11 +6257,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       color: Color(0xFF000000),
       height: 1.2,
     );
-    const descStyle = TextStyle(
+    final descStyle = TextStyle(
       fontFamily: 'Pretendard',
-      fontSize: 10,
+      fontSize: isEn ? 9 : 10,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF4A4A4A),
+      color: const Color(0xFF4A4A4A),
       height: 1.2,
     );
 
@@ -5915,22 +6303,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: const [
+                                children: [
                                   Text(
-                                    '회원 탈퇴',
+                                    l10n.withdrawConfirmTitle,
                                     textAlign: TextAlign.left,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: titleStyle,
                                   ),
-                                SizedBox(height: 4),
-                                Text(
-                                  '현재 계정의 펫, 식단 일지 등 모든 기록이 초기화 되며, 되돌릴 수 없어요. 정말 탈퇴할까요?',
-                                  textAlign: TextAlign.left,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: descStyle,
-                                ),
-                              ],
-                            ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    l10n.withdrawConfirmDescription,
+                                    textAlign: TextAlign.left,
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: descStyle,
+                                  ),
+                                ],
+                              ),
                           ),
                         ],
                       ),
@@ -5969,7 +6359,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   ),
                                   child: Center(
                                     child: _buildPastelBlueGradientButtonText(
-                                      '취소',
+                                      l10n.cancelLabel,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -6007,18 +6397,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                       ),
                                     ],
                                   ),
-                                  child: const Center(
-                                    child: Text(
-                                      '탈퇴',
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontFamily: 'Pretendard',
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFFB92020),
-                                        height: 1.0,
+                                  child: Center(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        l10n.withdrawConfirmDeleteButton,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontFamily: 'Pretendard',
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFFB92020),
+                                          height: 1.0,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -6044,6 +6438,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_isYardConfirmOverlayFadeVisible(_isWithdrawFinalConfirmOpen)) {
       return const SizedBox.shrink();
     }
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
 
     const titleStyle = TextStyle(
       fontFamily: 'Pretendard',
@@ -6052,11 +6448,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       color: Color(0xFF000000),
       height: 1.2,
     );
-    const descStyle = TextStyle(
+    final descStyle = TextStyle(
       fontFamily: 'Pretendard',
-      fontSize: 10,
+      fontSize: isEn ? 9 : 10,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF4A4A4A),
+      color: const Color(0xFF4A4A4A),
       height: 1.2,
     );
 
@@ -6100,22 +6496,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: const [
+                                children: [
                                   Text(
-                                    '탈퇴 확인',
+                                    l10n.withdrawFinalTitle,
                                     textAlign: TextAlign.left,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: titleStyle,
                                   ),
-                                  SizedBox(height: 4),
+                                  const SizedBox(height: 4),
                                   Text(
-                                    '아래 버튼을 누르면 회원 탈퇴가 최종 완료됩니다.',
-                                  textAlign: TextAlign.left,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: descStyle,
-                                ),
-                              ],
-                            ),
+                                    l10n.withdrawFinalDescription,
+                                    textAlign: TextAlign.left,
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: descStyle,
+                                  ),
+                                ],
+                              ),
                           ),
                         ],
                       ),
@@ -6150,18 +6548,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 ),
                               ],
                             ),
-                            child: const Center(
-                              child: Text(
-                                '최종 탈퇴',
-                                textAlign: TextAlign.center,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFFB92020),
-                                  height: 1.0,
+                            child: Center(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.center,
+                                child: Text(
+                                  l10n.withdrawFinalDeleteButton,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFB92020),
+                                    height: 1.0,
+                                  ),
                                 ),
                               ),
                             ),
@@ -6373,12 +6775,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 top: 16,
                 left: 16,
                 right: 16,
-                child: Text(
-                  l10n.supportCenter,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: titleStyle,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.center,
+                  child: Text(
+                    l10n.supportCenter,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle,
+                  ),
                 ),
               ),
               Positioned(
@@ -6395,7 +6801,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         const ClipboardData(text: _kCustomerCenterEmail),
                       );
                       if (!mounted) return;
-                      _showSnack('이메일이 복사되었어요.');
+                      _showSnack(AppLocalizations.of(context).emailCopied);
                     },
                     borderRadius: BorderRadius.circular(16),
                     child: Ink(
@@ -6440,12 +6846,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      '• 문의 및 건의',
-                      textAlign: TextAlign.left,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: labelStyle,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '• ${l10n.contactAndFeedback}',
+                        textAlign: TextAlign.left,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: labelStyle,
+                      ),
                     ),
                     Container(
                       height: 24,
@@ -6481,12 +6891,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_emailLinkOtpSent) {
       if (_isEmailOtpCooldownActive()) return;
       final raw = _emailLinkController.text.trim();
+      final l10n = AppLocalizations.of(context);
       if (raw.isEmpty) {
-        _showSnack('이메일을 입력해주세요.');
+        _showSnack(l10n.snackEmailRequired);
         return;
       }
       if (!_looksLikeEmail(raw)) {
-        _showSnack('올바른 이메일 형식으로 입력해주세요.');
+        _showSnack(l10n.snackInvalidEmail);
         return;
       }
       _safeSetState(() => _emailLinkPanelSendBusy = true);
@@ -6503,18 +6914,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _startEmailOtpCooldown();
       }
     } else {
+      final l10n = AppLocalizations.of(context);
       if (_hasEffectiveEmailLink()) {
-        _showSnack('이미 이메일 계정으로 연동되어 있어요.');
+        _showSnack(l10n.snackEmailAlreadyLinked);
         return;
       }
       final raw = _emailLinkController.text.trim();
       if (raw.isEmpty || !_looksLikeEmail(raw)) {
-        _showSnack('올바른 이메일 형식으로 입력해주세요.');
+        _showSnack(l10n.snackInvalidEmail);
         return;
       }
       final code = _emailLinkOtpController.text.trim();
       if (code.isEmpty) {
-        _showSnack('인증 코드를 입력해주세요.');
+        _showSnack(l10n.snackOtpRequired);
         return;
       }
       _safeSetState(() => _emailLinkPanelVerifyBusy = true);
@@ -6529,7 +6941,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _resetEmailLinkPanelOtpFlow();
           _isEmailLinkPanelOpen = false;
         });
-        _showSnack('이메일 계정 연동이 완료되었어요.');
+        _showSnack(l10n.snackEmailLinkCompleted);
       }
     }
   }
@@ -6538,7 +6950,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_emailLinkPanelResendBusy || _isEmailOtpCooldownActive()) return;
     final raw = _emailLinkController.text.trim();
     if (raw.isEmpty || !_looksLikeEmail(raw)) {
-      _showSnack('올바른 이메일 형식으로 입력해주세요.');
+      _showSnack(AppLocalizations.of(context).snackInvalidEmail);
       return;
     }
     _safeSetState(() => _emailLinkPanelResendBusy = true);
@@ -6801,16 +7213,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   top: 16,
                   left: 16,
                   right: 16,
-                  child: Text(
-                    l10n.emailAccountLink,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _settingsPanelTextStyle(
-                      13,
-                      FontWeight.w600,
-                      const Color(0xFF000000),
-                      height: 1.0,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: Text(
+                      l10n.emailAccountLink,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _settingsPanelTextStyle(
+                        13,
+                        FontWeight.w600,
+                        const Color(0xFF000000),
+                        height: 1.0,
+                      ),
                     ),
                   ),
                 ),
@@ -6951,7 +7367,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isSettingsPanelOpen ||
         _settingsPanelSwapInProgress ||
         _settingsSupportDocSwapInProgress ||
-        _activeSettingsSupportDoc != null;
+        _activeSettingsSupportDoc != null ||
+        _isHelpPanelOpen ||
+        _helpPanelSwapInProgress;
   }
 
   bool _isAnyGameMenuSurfaceActiveOrTransitioning() {
@@ -6966,6 +7384,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gamePokedexSwapController.isAnimating ||
         _gameStorySwapController.isAnimating ||
         _gameSettingsSwapController.isAnimating ||
+        _gameHelpSwapController.isAnimating ||
         _isShopNoticeOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen;
@@ -7037,6 +7456,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     if (_isStoryPanelOpen || _storyPanelSwapInProgress) {
       opacity *= 1.0 - _gameStorySwapCurve.value;
+    }
+    if (_isHelpPanelOpen || _helpPanelSwapInProgress) {
+      opacity *= 1.0 - _gameHelpSwapCurve.value;
     }
     return opacity.clamp(0.0, 1.0);
   }
@@ -7507,13 +7929,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ).createShader(bounds),
                   blendMode: BlendMode.srcIn,
                   child: Text(
-                    '분양받기!',
+                    AppLocalizations.of(context).adoptionReceiveButtonExclaim,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 16,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: _isEnglishLocale ? 14 : 16,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFFAFCFFF),
-                      height: 1.0,
+                      color: const Color(0xFFAFCFFF),
+                      height: 1.15,
                     ),
                   ),
                 ),
@@ -7526,9 +7950,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final l10n = AppLocalizations.of(context);
     final dogSpecies = _initialAdoptionSpeciesByFamily(['dog', '강아지', '댕']);
     final catSpecies = _initialAdoptionSpeciesByFamily(['cat', '고양이', '냥']);
-    final titleText = Localizations.localeOf(context).languageCode == 'ko'
-        ? '베지펫을 분양 받을 차례에요!'
-        : l10n.initialAdoptionTitle;
+    final titleText = _isEnglishLocale
+        ? l10n.initialAdoptionTitle
+        : l10n.adoptionTitleAlt;
     const titleStyle = TextStyle(
       fontSize: 16,
       fontWeight: FontWeight.w700,
@@ -7781,14 +8205,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   String? _validateToyPlayEligibility() {
-    if (_activePet == null) return '먼저 펫을 분양받아주세요.';
+    final l10n = AppLocalizations.of(context);
+    if (_activePet == null) return l10n.snackAdoptFirst;
     final today = _todayDateStr();
     if (_activePet!['last_played_on']?.toString() == today) {
-      return '오늘은 이미 놀아줬어요.';
+      return l10n.snackPlayedToday;
     }
     final family = _activePetFamily();
     if (family != 'dog' && family != 'cat') {
-      return '펫 정보를 확인할 수 없어요.';
+      return l10n.snackPetActionInvalid;
     }
     return null;
   }
@@ -7877,9 +8302,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   String _petInfoMealButtonShortLabel() {
-    final code = Localizations.localeOf(context).languageCode;
-    if (code == 'ko') return '먹이주기';
-    return 'Feed';
+    return AppLocalizations.of(context).petInfoFeedShort;
   }
 
   Widget _buildPetInfoBannerContent() {
@@ -7950,6 +8373,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
+    final isEn = _isEnglishLocale;
     Widget pillButton({required String label, required VoidCallback? onTap}) {
       final disabled = onTap == null;
       return Material(
@@ -7976,9 +8400,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               children: [
                 Opacity(
                   opacity: disabled ? 0.45 : 1,
+                  // 영어 "Feed" / "Play" 는 descender 가 있어 fontSize 13 으로
+                  // 살짝 줄이면 클리핑 없이 1줄 표시된다. 한국어는 기존 14 유지.
                   child: _buildPastelBlueGradientButtonText(
                     label,
-                    fontSize: 14,
+                    fontSize: isEn ? 13 : 14,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -8170,6 +8596,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildPetInfoDietBubble() {
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
     return SizedBox(
       width: 68,
       height: 20,
@@ -8189,13 +8617,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 width: 0.6,
               ),
             ),
-            child: const Text(
-              '식단 인증!',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF4A4A4A),
-                height: 1.0,
+            // 영어 "Meal Check!" 는 폭이 좁아 잘릴 수 있어 FittedBox 로 자동 축소.
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  l10n.petInfoMealCheckBubble,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: isEn ? 9.5 : 10,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF4A4A4A),
+                    height: 1.1,
+                  ),
+                ),
               ),
             ),
           ),
@@ -8468,6 +8906,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  /// 먹이주기(feed) 패널의 기본 높이 (한국어 기준). 영어 locale 에서는 문구가 길어
+  /// 하단 안내가 잘릴 수 있어 +9px 만 늘리고 top 은 그대로 유지한다.
+  static const double _kMealPanelBaseH = 212;
+  double get _mealPanelHeight => _isEnglishLocale ? _kMealPanelBaseH + 9 : _kMealPanelBaseH;
+
+  Widget _buildMealPanelFootnote(String text, bool isEn) {
+    final style = TextStyle(
+      fontSize: isEn ? 8 : 9,
+      fontWeight: FontWeight.w600,
+      color: const Color(0xFF4A4A4A),
+      height: 1.3,
+    );
+    if (isEn) {
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+      );
+    }
+    return Text(text, style: style);
+  }
+
   Widget _buildMealPanelLayer() {
     final shouldMount = _isMealPanelOpen || _petMealSwapInProgress;
     if (!shouldMount) {
@@ -8489,7 +8949,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           left: 40,
           top: 40,
           width: 246,
-          height: 212,
+          height: _mealPanelHeight,
           child: AnimatedBuilder(
             animation: _petMealSwapController,
             builder: (context, _) {
@@ -8640,6 +9100,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final uploading = _isUploadingMeal;
     final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
     final uploadingDinner = uploading && _uploadingSlot == 'dinner';
+    final isEn = _isEnglishLocale;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -8647,7 +9108,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
           width: 246,
-          height: 212,
+          height: _mealPanelHeight,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.60),
             borderRadius: BorderRadius.circular(20),
@@ -8747,38 +9208,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       offset: const Offset(0, -2),
                       child: Padding(
                         padding: const EdgeInsets.only(left: 1),
+                        // 영어 문구는 길어 fontSize 8 로 줄이고 1줄 표시(scaleDown).
+                        // 한국어는 기존 fontSize 9 / 자연스러운 줄바뀜 유지.
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              l10n.mealPanelFootnote1,
-                              style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A4A4A),
-                                height: 1.3,
-                              ),
-                            ),
+                            _buildMealPanelFootnote(l10n.mealPanelFootnote1, isEn),
                             const SizedBox(height: 4),
-                            Text(
-                              l10n.mealPanelFootnote2,
-                              style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A4A4A),
-                                height: 1.3,
-                              ),
-                            ),
+                            _buildMealPanelFootnote(l10n.mealPanelFootnote2, isEn),
                             const SizedBox(height: 4),
-                            Text(
-                              l10n.mealPanelFootnote3,
-                              style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A4A4A),
-                                height: 1.3,
-                              ),
-                            ),
+                            _buildMealPanelFootnote(l10n.mealPanelFootnote3, isEn),
                           ],
                         ),
                       ),
@@ -8902,16 +9341,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         const SizedBox(height: 4),
         SizedBox(
           width: 112,
-          child: Text(
-            toy.name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF4A4A4A),
-              height: 1.15,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: Text(
+              _localizedBagItemName(toy),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _isEnglishLocale ? 10 : 11,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF4A4A4A),
+                height: 1.15,
+              ),
             ),
           ),
         ),
@@ -9100,16 +9543,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _completeToyMenuDrop(_BagItem toy) async {
     if (_isCompletingToyPlay) return;
 
+    final l10n = AppLocalizations.of(context);
     final family = _activePetFamily();
     if (toy.targetPetFamily != family) {
-      _showSnack('이 장난감은 이 베지펫에게 사용할 수 없어요.');
+      _showSnack(l10n.snackToyNotUsable);
       return;
     }
 
     final today = _todayDateStr();
     if (_activePet?['last_played_on']?.toString() == today) {
       _closeToyMenuInstant();
-      _showSnack('오늘은 이미 놀아줬어요.');
+      _showSnack(l10n.snackPlayedTodayAlready);
       return;
     }
 
@@ -9564,19 +10008,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 먹이주기 시트에서 "아점/저녁 식단 사진 올리기" 버튼을 눌렀을 때의 메인 엔트리.
   Future<void> _uploadMealPhotoAndEvaluate(String slot) async {
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_activePet == null) {
-      _showSnack('먼저 펫을 분양받아주세요.');
+      _showSnack(l10n.snackAdoptFirst);
       return;
     }
     if (_isUploadingMeal) return;
 
     if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
-      _showSnack('이미 해당 식단 인증을 완료했어요.');
+      _showSnack(l10n.snackMealAlreadyCertified);
       return;
     }
 
@@ -9619,7 +10064,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isUploadingMeal = false;
           _uploadingSlot = null;
         });
-        _showSnack('사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.');
+        _showSnack(l10n.snackMealUploadFailed);
         return;
       }
 
@@ -9640,7 +10085,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isUploadingMeal = false;
           _uploadingSlot = null;
         });
-        _showSnack('AI 판정에 실패했어요. 잠시 후 다시 시도해주세요.');
+        _showSnack(l10n.snackMealAiFailed);
         return;
       }
 
@@ -9668,7 +10113,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isUploadingMeal = false;
         _uploadingSlot = null;
       });
-      _showSnack('식단 인증 중 오류가 발생했어요: $e');
+      _showSnack(l10n.snackMealUnknownError(e.toString()));
     }
   }
 
@@ -9684,7 +10129,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
       return xfile;
     } catch (e) {
-      _showSnack('카메라를 사용할 수 없어요: $e');
+      _showSnack(
+        AppLocalizations.of(context).snackCameraUnavailable(e.toString()),
+      );
       return null;
     }
   }
@@ -9939,7 +10386,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _dietDiaryPanelSwapInProgress ||
         _bagPanelSwapInProgress ||
         _pokedexPanelSwapInProgress ||
-        _settingsPanelSwapInProgress;
+        _settingsPanelSwapInProgress ||
+        _helpPanelSwapInProgress;
     final atSlideOpen = _gameMenuPanelAtSlideOpen;
     final targetLeft = yardExit < 0.999
         ? _kGameMenuPanelLeft
@@ -9992,6 +10440,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gamePokedexSwapController,
         _gameStorySwapController,
         _gameSettingsSwapController,
+        _gameHelpSwapController,
         _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
@@ -10028,6 +10477,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final settingsOpacity =
             ((_isSettingsPanelOpen || _settingsPanelSwapInProgress)
                 ? _gameSettingsSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final helpOpacity =
+            ((_isHelpPanelOpen || _helpPanelSwapInProgress)
+                ? _gameHelpSwapCurve.value.clamp(0.0, 1.0)
                 : 0.0) *
             yardExit;
 
@@ -10085,6 +10539,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: _buildSettingsGameMenuGlassPanel(),
                   ),
                 ),
+              if (_isHelpPanelOpen || _helpPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: helpOpacity < 0.05,
+                  child: Opacity(
+                    opacity: helpOpacity,
+                    child: _buildHelpGameMenuGlassPanel(),
+                  ),
+                ),
             ],
           ),
         );
@@ -10128,21 +10590,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final genderForAvatar = _selectedGender ?? _profile?['gender']?.toString();
     final fieldsEnabled = !_isSavingProfile && !_isSavingProfilePanel;
 
-    Widget rowForWidth(double fieldW, String label, Widget field) {
+    final isEn = _isEnglishLocale;
+    Widget rowForWidth(
+      double fieldW,
+      String label,
+      Widget field, {
+      double? labelFontSize,
+    }) {
       final useW = fieldW.clamp(100.0, _kGameMenuProfileFieldW);
+      final resolvedLabelSize =
+          labelFontSize ?? (isEn ? 10 : 11);
       return Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
             width: _kGameMenuProfileLabelW,
+            // 영어 "Age Range" / "Diet Goal" 등은 길어서 ellipsis 가 발생.
+            // 50px 라벨 폭은 유지하고 fontSize 만 영어에서 10 으로 줄여 1줄 표시.
             child: Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 11,
+              style: TextStyle(
+                fontSize: resolvedLabelSize,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF000000),
+                color: const Color(0xFF000000),
                 height: 1.15,
               ),
             ),
@@ -10216,7 +10688,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               Positioned(
                 left: 9,
-                top: 14,
+                top: _gameMenuSubPanelTitleTop,
                 right: 8,
                 child: Padding(
                   padding: const EdgeInsets.only(left: 28),
@@ -10369,6 +10841,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                         );
                                       },
                                     ),
+                                    labelFontSize: isEn ? 8 : null,
                                   ),
                                   const SizedBox(height: 8),
                                   rowForWidth(
@@ -10500,7 +10973,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: Center(
               child: _yardGameMenuItem(
                 icon: item.$1,
-                label: item.$2,
+                label: _menuLabelForKey(item.$2),
                 onTap: () => unawaited(_onYardGameMenuItemTap(item.$2)),
               ),
             ),
@@ -10517,7 +10990,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           child: Center(
             child: _yardGameMenuItem(
               icon: rowItems[0].$1,
-              label: rowItems[0].$2,
+              label: _menuLabelForKey(rowItems[0].$2),
               onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[0].$2)),
             ),
           ),
@@ -10526,7 +10999,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           child: Center(
             child: _yardGameMenuItem(
               icon: rowItems[1].$1,
-              label: rowItems[1].$2,
+              label: _menuLabelForKey(rowItems[1].$2),
               onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[1].$2)),
             ),
           ),
@@ -10586,16 +11059,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           SizedBox(
             height: _kYardGameMenuLabelAreaH,
             width: _kYardGameMenuItemW,
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF4A4A4A),
-                height: 1.2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _isEnglishLocale ? 9.5 : 10,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF4A4A4A),
+                  height: 1.2,
+                ),
               ),
             ),
           ),
@@ -10604,47 +11081,53 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _onYardGameMenuItemTap(String label) async {
-    if (label == '프로필') {
+  Future<void> _onYardGameMenuItemTap(String key) async {
+    if (key == 'profile') {
       await _openProfilePanelFromGameMenu();
       return;
     }
-    if (label == '식단일지') {
+    if (key == 'dietDiary') {
       await _openDietDiaryFromGameMenu();
       return;
     }
-    if (label == '가방') {
+    if (key == 'bag') {
       await _openBagPanelFromGameMenu();
       return;
     }
-    if (label == '도감') {
+    if (key == 'pokedex') {
       await _openPokedexPanelFromGameMenu();
       return;
     }
-    if (label == '스토리') {
+    if (key == 'story') {
       await _openStoryPanelFromGameMenu();
       return;
     }
-    if (label == '설정') {
+    if (key == 'settings') {
       await _openSettingsFromGameMenu();
       return;
     }
-    if (label == '상점') {
+    if (key == 'help') {
+      await _openHelpPanelFromGameMenu();
+      return;
+    }
+    if (key == 'shop') {
       if (_isShopNoticeOpen) return;
+      _isNameInterlockNoticeOpen = false;
       _safeSetState(() => _isShopNoticeOpen = true);
       _playYardConfirmOverlayEnter();
       return;
     }
     await _closeGameMenuPanel();
     if (!mounted) return;
-    await _onMenuTap(label);
+    await _onMenuTap(_menuLabelForKey(key));
   }
 
   Future<void> _persistGameMenuProfilePatch(Map<String, dynamic> patch) async {
     if (_isSavingProfilePanel) return;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     _safeSetState(() => _isSavingProfilePanel = true);
@@ -10659,7 +11142,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _safeSetState(() {});
     } catch (e) {
       if (!mounted) return;
-      _showSnack('프로필 저장 실패: $e');
+      _showSnack(l10n.snackProfileSaveFailed(e.toString()));
       try {
         await _fetchProfile();
       } catch (_) {}
@@ -10675,15 +11158,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _submitGameMenuProfileNickname() async {
-    if (_isSavingProfilePanel) return;
+    if (_isSavingProfilePanel || _isNameInterlockNoticeOpen) return;
     _enforceProfileNicknameMaxLength();
     final nickname = _nicknameController.text.trim();
-    if (nickname.isEmpty) {
-      _showSnack('닉네임을 입력해주세요.');
-      return;
-    }
-    if (nickname.characters.length > _kProfileNicknameMaxLength) {
-      _showSnack('닉네임은 8자까지만 입력할 수 있어요.');
+    if (!_isValidNicknameOrPetName(nickname)) {
+      await _showNameInterlockNotice();
       return;
     }
     await _persistGameMenuProfilePatch({'nickname': nickname});
@@ -10692,9 +11171,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _openProfilePanelFromGameMenu() async {
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     final user = supabase.auth.currentUser;
     if (user == null || _profile == null) {
-      _showSnack('프로필 정보를 불러올 수 없어요.');
+      _showSnack(AppLocalizations.of(context).snackProfileLoadFailed);
       return;
     }
     _gameDietDiarySwapController.stop();
@@ -10782,6 +11262,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameSettingsSwapController.value = 0;
     _isSettingsPanelOpen = false;
     _settingsPanelSwapInProgress = false;
+    _gameHelpSwapController.stop();
+    _gameHelpSwapController.value = 0;
+    _isHelpPanelOpen = false;
+    _helpPanelSwapInProgress = false;
     _isEmailLinkPanelOpen = false;
     _isCustomerCenterPanelOpen = false;
     _instantCloseYardConfirmOverlays();
@@ -10797,6 +11281,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _gameSettingsSwapController.value = 0.0;
     if (!_isSettingsPanelOpen && !_settingsPanelSwapInProgress) return;
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    _resetSettingsPanelScrollOffset();
     _safeSetState(() {
       _isSettingsPanelOpen = false;
       _settingsPanelSwapInProgress = false;
@@ -10829,6 +11314,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (_storyPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.settings:
         if (_settingsPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.help:
+        if (_helpPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.none:
         return;
     }
@@ -10959,6 +11446,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
       return;
     }
+    if (_isHelpPanelOpen && !_helpPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.help,
+      );
+      return;
+    }
 
     await _closeGameMenuPanel();
   }
@@ -11085,7 +11578,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _refreshSettingsPanelDataAfterOpen() async {
+  /// 설정 패널을 띄우기 전에 프로필·토글 상태를 맞춘다.
+  /// 패널 표시 뒤 setState 로 스크롤 메트릭이 바뀌면 Scrollbar 가 깜빡일 수 있어
+  /// 열기 전에 await 한다.
+  Future<void> _prepareSettingsPanelData() async {
     try {
       await Future.wait([
         _fetchProfile(),
@@ -11093,10 +11589,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _loadSoundSettings(),
       ]);
       await _syncAuthEmailToProfileIfNeeded();
-      if (!mounted) return;
-      _safeSetState(() {});
     } catch (e) {
-      debugPrint('refresh settings panel after open failed: $e');
+      debugPrint('prepare settings panel data failed: $e');
+    }
+  }
+
+  /// 메뉴↔설정 페이드 전환·외부 닫기 페이드 중에는 Scrollbar thumb 를 숨긴다.
+  /// (전환 직후 jumpTo/setState 로 스크롤 메트릭이 바뀌면 thumb 가 깜빡인다.)
+  bool get _settingsScrollbarThumbVisible {
+    if (!_isSettingsPanelOpen) return false;
+    if (_settingsPanelSwapInProgress) return false;
+    if (_gameSettingsSwapController.isAnimating) return false;
+    if (_gameMenuSubOutsideDismissKind !=
+        _GameMenuSubOutsideDismissKind.none) {
+      return false;
+    }
+    return _gameSettingsSwapCurve.value >= 1.0;
+  }
+
+  /// 설정 패널 Scrollbar: 전환 완료 후에만 thumb 표시.
+  Widget _buildSettingsPanelScrollbar({
+    required ScrollController controller,
+    required Widget child,
+  }) {
+    return Scrollbar(
+      controller: controller,
+      thumbVisibility: _settingsScrollbarThumbVisible,
+      child: child,
+    );
+  }
+
+  void _resetSettingsPanelScrollOffset() {
+    if (_settingsScrollController.hasClients &&
+        _settingsScrollController.offset != 0) {
+      _settingsScrollController.jumpTo(0);
+    }
+    if (_settingsSupportDocScrollController.hasClients &&
+        _settingsSupportDocScrollController.offset != 0) {
+      _settingsSupportDocScrollController.jumpTo(0);
     }
   }
 
@@ -11104,6 +11634,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_dietDiaryPanelSwapInProgress) return;
     if (_gameDietDiarySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _gameProfileSwapController.stop();
@@ -11212,7 +11743,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (label == '식단일지') {
       await _openDietDiaryFromGameMenu();
     } else {
-      _showSnack('나중에 구현 예정: $label');
+      _showSnack(AppLocalizations.of(context).snackComingLater(label));
     }
   }
 
@@ -11226,6 +11757,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
     _instantResetStoryPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -11263,6 +11795,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
+    await _prepareSettingsPanelData();
+    if (!mounted) return;
+
+    _resetSettingsPanelScrollOffset();
 
     _gameSettingsSwapController.stop();
     _gameSettingsSwapController.value = 0.0;
@@ -11284,8 +11820,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         });
       }),
     );
-
-    unawaited(_refreshSettingsPanelDataAfterOpen());
   }
 
   Future<void> _closeSettingsPanelToGameMenu() async {
@@ -11298,6 +11832,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
     await _gameSettingsSwapController.reverse(from: 1.0);
     if (!mounted) return;
+    _resetSettingsPanelScrollOffset();
     _safeSetState(() {
       _settingsPanelSwapInProgress = false;
       _isSettingsPanelOpen = false;
@@ -11360,9 +11895,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
 
     return RepaintBoundary(
-      child: Scrollbar(
+      child: _buildSettingsPanelScrollbar(
         controller: _settingsSupportDocScrollController,
-        thumbVisibility: true,
         child: SingleChildScrollView(
           controller: _settingsSupportDocScrollController,
           physics: const ClampingScrollPhysics(),
@@ -11670,12 +12204,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         onTap: onTap,
         child: Row(
           children: [
+            // 영어 "Account & Data Deletion" / "Privacy Policy" 등 긴 항목이
+            // ellipsis 로 잘리지 않도록 FittedBox(scaleDown) 으로 1줄 표시.
             Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: rowLabelStyle,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: rowLabelStyle,
+                ),
               ),
             ),
             Icon(
@@ -11748,7 +12288,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               Positioned(
                 left: 37,
-                top: 14,
+                top: _gameMenuSubPanelTitleTop,
                 right: 8,
                 child: Text(
                   l10n.settings,
@@ -11781,9 +12321,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           opacity: _activeSettingsSupportDoc == null ? 1 : 0,
                           child: RepaintBoundary(
                             key: const ValueKey('settings-panel-main'),
-                            child: Scrollbar(
+                            child: _buildSettingsPanelScrollbar(
                               controller: _settingsScrollController,
-                              thumbVisibility: true,
                               child: SingleChildScrollView(
                                 controller: _settingsScrollController,
                                 padding:
@@ -11811,7 +12350,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           if (linked)
                             _buildSettingsGrayRow(
                               onTap: () {
-                                _showSnack('이미 이메일 계정으로 연동되어 있어요.');
+                                _showSnack(
+                                  AppLocalizations.of(
+                                    context,
+                                  ).snackEmailAlreadyLinked,
+                                );
                               },
                               child: Row(
                                 children: [
@@ -12387,9 +12930,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     await _waitForUiSettle();
     if (!mounted) return;
 
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인 상태가 아니어서 탈퇴를 진행할 수 없어요.');
+      _showSnack(l10n.snackWithdrawCannotLogin);
       return;
     }
 
@@ -12498,6 +13042,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _instantCloseYardConfirmOverlays();
         _isStoryPanelOpen = false;
         _storyPanelSwapInProgress = false;
+        _isHelpPanelOpen = false;
+        _helpPanelSwapInProgress = false;
         _resetEmailLinkPanelOtpFlow();
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
         _nicknameController.clear();
@@ -12524,6 +13070,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _gameBagSwapController.value = 0;
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
+      _gameHelpSwapController.value = 0;
       _gameMenuSubOutsideDismissController.value = 0;
 
       await _waitForUiSettle();
@@ -12531,10 +13078,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _bootstrap();
 
       if (!mounted) return;
-      _showSnack('회원 탈퇴가 완료되었어요.');
+      _showSnack(l10n.snackWithdrawCompleted);
     } catch (e) {
       if (!mounted) return;
-      _showSnack('회원 탈퇴 처리 중 오류가 발생했어요: $e');
+      _showSnack(l10n.snackWithdrawError(e.toString()));
     }
   }
 
@@ -12967,9 +13514,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required String? weightText,
     required String noteText,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack('로그인이 필요해요.');
+      _showSnack(l10n.snackLoginRequired);
       return false;
     }
 
@@ -12978,7 +13526,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (wRaw.isNotEmpty) {
       final parsed = double.tryParse(wRaw.replaceAll(',', '.'));
       if (parsed == null) {
-        _showSnack('체중은 숫자로 입력해주세요.');
+        _showSnack(l10n.snackWeightNumberOnly);
         return false;
       }
       weight = parsed;
@@ -12997,7 +13545,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }, onConflict: 'user_id,diary_date');
       return true;
     } catch (e) {
-      _showSnack('식단일지 저장 실패: $e');
+      _showSnack(l10n.snackDiarySaveFailed(e.toString()));
       return false;
     }
   }
@@ -13356,7 +13904,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               Positioned(
                 left: 37,
-                top: 14,
+                top:
+                    _kGameMenuSubPanelTitleTop +
+                    (Localizations.localeOf(sheetContext).languageCode == 'en'
+                        ? _kGameMenuSubPanelTitleTopEnOffset
+                        : 0.0),
                 right: 8,
                 child: Text(
                   l10n.dietDiaryPanelTitle,
@@ -13963,29 +14515,98 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   // ---------- 공통 유틸 ----------
 
+  /// 현재 적용된 앱 locale 이 영어인지 확인. fontSize/창 높이/문구 분기에 사용한다.
+  /// 한국어 UI는 기존 동작을 그대로 유지하고, 영어 UI 만 보정한다.
+  bool get _isEnglishLocale {
+    return Localizations.localeOf(context).languageCode == 'en';
+  }
+
+  double get _gameMenuSubPanelTitleTop =>
+      _kGameMenuSubPanelTitleTop +
+      (_isEnglishLocale ? _kGameMenuSubPanelTitleTopEnOffset : 0.0);
+
   String _familyToKorean(String family) {
+    final l10n = AppLocalizations.of(context);
     switch (family) {
       case 'cat':
-        return '고양이';
+        return l10n.familyCat;
       case 'dog':
-        return '강아지';
+        return l10n.familyDog;
       default:
         return family;
     }
   }
 
   String _stageToKorean(String stage) {
+    final l10n = AppLocalizations.of(context);
     switch (stage) {
       case 'baby':
-        return '유아기';
+        return l10n.stageBaby;
       case 'child':
-        return '유년기';
+        return l10n.stageChild;
       case 'grown':
-        return '성장기';
+        return l10n.stageGrown;
       case 'adult':
-        return '성숙기';
+        return l10n.stageAdult;
       default:
         return stage;
+    }
+  }
+
+  /// 메뉴 라벨 key → 현재 locale 표시 문자열.
+  /// `_menuSheetItems` 의 String 슬롯은 안정적인 key 만 들고 다니며, 실제 표시는
+  /// 이 함수에서 l10n 으로 매핑한다. onTap 분기도 key 기준으로 한다.
+  String _menuLabelForKey(String key) {
+    final l10n = AppLocalizations.of(context);
+    switch (key) {
+      case 'profile':
+        return l10n.menuLabelProfile;
+      case 'dietDiary':
+        return l10n.menuLabelDietDiary;
+      case 'bag':
+        return l10n.menuLabelBag;
+      case 'shop':
+        return l10n.menuLabelShop;
+      case 'pokedex':
+        return l10n.menuLabelPokedex;
+      case 'story':
+        return l10n.menuLabelStory;
+      case 'help':
+        return l10n.menuLabelHelp;
+      case 'settings':
+        return l10n.menuLabelSettings;
+      default:
+        return key;
+    }
+  }
+
+  /// 가방/놀아주기 아이템 표시명. _BagItem 의 name 슬롯에는 안정적인 code 가
+  /// 들어가고, 실제 화면 표시 시점에만 l10n 으로 변환한다.
+  String _localizedBagItemName(_BagItem item) {
+    final l10n = AppLocalizations.of(context);
+    switch (item.name) {
+      case 'random_adoption_ticket':
+        return l10n.bagItemRandomTicketName;
+      case 'bone_doll':
+        return l10n.bagItemBoneDollName;
+      case 'yarn_ball':
+        return l10n.bagItemYarnBallName;
+      default:
+        return item.name;
+    }
+  }
+
+  String _localizedBagItemDescription(_BagItem item) {
+    final l10n = AppLocalizations.of(context);
+    switch (item.name) {
+      case 'random_adoption_ticket':
+        return l10n.bagItemRandomTicketDesc;
+      case 'bone_doll':
+        return l10n.bagItemBoneDollDesc;
+      case 'yarn_ball':
+        return l10n.bagItemYarnBallDesc;
+      default:
+        return item.description;
     }
   }
 
@@ -14036,6 +14657,166 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
+bool _isValidNicknameOrPetNameValue(String raw) {
+  final value = raw.trim();
+  return _HomePageState._nameAllowedRegExp.hasMatch(value);
+}
+
+Widget _buildVegePetPastelBlueGradientButtonTextShared(
+  String text, {
+  double fontSize = 14,
+  FontWeight fontWeight = FontWeight.w600,
+}) {
+  // 영어 locale 의 descender (y/g/p) 가 그라데이션 클리핑으로 흰색이 되는 문제를
+  // 막기 위해 height 를 1.15 로 키운다. 한국어는 descender 가 없어 시각 영향이 없다.
+  return ShaderMask(
+    blendMode: BlendMode.srcIn,
+    shaderCallback: (bounds) => const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
+    ).createShader(bounds),
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        color: Colors.white,
+        height: 1.15,
+      ),
+    ),
+  );
+}
+
+Widget _buildVegePetConfirmDialogShellShared({
+  required Widget child,
+  required double width,
+  required double height,
+}) {
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(20),
+    child: BackdropFilter(
+      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.60),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.35),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+    ),
+  );
+}
+
+Widget _buildNameInterlockNoticeDialogShared({
+  required BuildContext context,
+  required VoidCallback onConfirm,
+}) {
+  const dialogW = _HomePageState._kVegePetConfirmDialogW;
+  const dialogH = _HomePageState._kVegePetConfirmDialogH;
+  final l10n = AppLocalizations.of(context);
+  final isEn = Localizations.localeOf(context).languageCode == 'en';
+
+  return _buildVegePetConfirmDialogShellShared(
+    width: dialogW,
+    height: dialogH,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.nameInterlockMain,
+                  textAlign: TextAlign.left,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF000000),
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  l10n.nameInterlockSub,
+                  textAlign: TextAlign.left,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: isEn ? 9 : 10,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFFB92020),
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              onTap: onConfirm,
+              borderRadius: BorderRadius.circular(14),
+              child: Ink(
+                height: 30,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.all(Radius.circular(14)),
+                  border: Border.fromBorderSide(
+                    BorderSide(color: Color(0xFFF1F1F1), width: 0.8),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x08000000),
+                      blurRadius: 4,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: _buildVegePetPastelBlueGradientButtonTextShared(
+                    l10n.confirmLabel,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 // 이름 입력 전용 Dialog.
 //
 // 책임:
@@ -14082,30 +14863,81 @@ class _PetNicknameDialog extends StatefulWidget {
   State<_PetNicknameDialog> createState() => _PetNicknameDialogState();
 }
 
-class _PetNicknameDialogState extends State<_PetNicknameDialog> {
+class _PetNicknameDialogState extends State<_PetNicknameDialog>
+    with TickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
   bool _isClosing = false;
+  bool _isNameInterlockNoticeOpen = false;
+  late AnimationController _panelEnterController;
+  late Animation<double> _panelEnterCurve;
+  late AnimationController _nameInterlockFadeController;
+  late Animation<double> _nameInterlockFadeCurve;
+
+  @override
+  void initState() {
+    super.initState();
+    _panelEnterController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _panelEnterCurve = CurvedAnimation(
+      parent: _panelEnterController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    _nameInterlockFadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    );
+    _nameInterlockFadeCurve = CurvedAnimation(
+      parent: _nameInterlockFadeController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    unawaited(_panelEnterController.forward());
+  }
 
   @override
   void dispose() {
+    _panelEnterController.dispose();
+    _nameInterlockFadeController.dispose();
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (_isClosing) return;
-    final text = _controller.text.trim();
+  Future<void> _showNameInterlockNotice() async {
+    if (_isNameInterlockNoticeOpen || _isClosing) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!_isNameInterlockNoticeOpen) {
+      setState(() => _isNameInterlockNoticeOpen = true);
+    }
+    _nameInterlockFadeController.stop();
+    _nameInterlockFadeController.value = 0;
+    unawaited(_nameInterlockFadeController.forward());
+  }
 
-    if (text.isEmpty) {
+  Future<void> _hideNameInterlockNotice() async {
+    if (!_isNameInterlockNoticeOpen) return;
+    if (_nameInterlockFadeController.value <= 0) {
+      if (mounted) {
+        setState(() => _isNameInterlockNoticeOpen = false);
+      }
       return;
     }
-    if (text.characters.length > 8) {
-      final fixed = text.characters.take(8).toString();
-      _controller.value = TextEditingValue(
-        text: fixed,
-        selection: TextSelection.collapsed(offset: fixed.length),
-        composing: TextRange.empty,
-      );
+    if (_nameInterlockFadeController.status == AnimationStatus.reverse) {
+      return;
+    }
+    await _nameInterlockFadeController.reverse();
+    if (!mounted) return;
+    setState(() => _isNameInterlockNoticeOpen = false);
+  }
+
+  Future<void> _submit() async {
+    if (_isClosing || _isNameInterlockNoticeOpen) return;
+    final text = _controller.text.trim();
+
+    if (!_isValidNicknameOrPetNameValue(text)) {
+      await _showNameInterlockNotice();
       return;
     }
 
@@ -14113,7 +14945,7 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
     // 트리 dispose 와 focus 정리 타이밍이 겹치는 것을 방지한다.
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _isClosing = true);
-    await Future<void>.delayed(const Duration(milliseconds: 220));
+    await _panelEnterController.reverse();
     if (!mounted) return;
     Navigator.of(context).pop(text);
   }
@@ -14177,15 +15009,14 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
                 top: 91,
                 width: 272,
                 height: 208,
-                child: TweenAnimationBuilder<double>(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  tween: Tween<double>(begin: 0, end: _isClosing ? 0 : 1),
-                  builder: (context, value, child) {
+                child: AnimatedBuilder(
+                  animation: _panelEnterCurve,
+                  builder: (context, child) {
+                    final t = _panelEnterCurve.value.clamp(0.0, 1.0);
                     return Opacity(
-                      opacity: value,
+                      opacity: t,
                       child: Transform.scale(
-                        scale: 0.985 + (0.015 * value),
+                        scale: 0.985 + (0.015 * t),
                         child: child,
                       ),
                     );
@@ -14363,7 +15194,7 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
                                   ],
                                 ),
                                 child: TextButton(
-                                  onPressed: _isClosing
+                                  onPressed: (_isClosing || _isNameInterlockNoticeOpen)
                                       ? null
                                       : () {
                                           unawaited(_submit());
@@ -14410,6 +15241,46 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog> {
                   ),
                 ),
               ),
+              if (_isNameInterlockNoticeOpen)
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: _nameInterlockFadeCurve,
+                    builder: (context, fadedChild) {
+                      return Opacity(
+                        opacity: _nameInterlockFadeCurve.value.clamp(0.0, 1.0),
+                        child: fadedChild,
+                      );
+                    },
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: () => unawaited(_hideNameInterlockNotice()),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                        Positioned(
+                          left: _HomePageState._kVegePetConfirmDialogLeft,
+                          top: _HomePageState._kVegePetConfirmDialogTop,
+                          width: _HomePageState._kVegePetConfirmDialogW,
+                          height: _HomePageState._kVegePetConfirmDialogH,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {},
+                            child: _buildNameInterlockNoticeDialogShared(
+                              context: context,
+                              onConfirm: () =>
+                                  unawaited(_hideNameInterlockNotice()),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -14677,6 +15548,11 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
 
     if (widget.embeddedInGameMenuPanel) {
       final l10n = AppLocalizations.of(context);
+      final isEnglish =
+          Localizations.localeOf(context).languageCode == 'en';
+      final embeddedTitleTop =
+          _kGameMenuSubPanelTitleTop +
+          (isEnglish ? _kGameMenuSubPanelTitleTopEnOffset : 0.0);
       final caption = widget.monthYearCaptionBuilder!(visibleMonth);
       Widget embeddedHeader({
         required String rightCaption,
@@ -14713,7 +15589,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
               ),
               Positioned(
                 left: 37,
-                top: 14,
+                top: embeddedTitleTop,
                 right: 8,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -15100,14 +15976,16 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
 
   @override
   Widget build(BuildContext context) {
+    const labelBaseSize = 11.0;
     const labelStyle = TextStyle(
-      fontSize: 11,
+      fontSize: labelBaseSize,
       fontWeight: FontWeight.w600,
       color: Color(0xFF000000),
       fontFamily: _diaryFontFamily,
       fontFamilyFallback: _diaryFontFallback,
       height: 1.0,
     );
+    final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     const fieldStyle = TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w600,
@@ -15125,8 +16003,14 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _photoSlot(label: '(아점)', url: _brunchUrl),
-              _photoSlot(label: '(저녁)', url: _dinnerUrl),
+              _photoSlot(
+                label: AppLocalizations.of(context).diaryPhotoBrunchLabel,
+                url: _brunchUrl,
+              ),
+              _photoSlot(
+                label: AppLocalizations.of(context).diaryPhotoDinnerLabel,
+                url: _dinnerUrl,
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -15136,8 +16020,30 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
               SizedBox(
                 width: 62,
                 child: Transform.translate(
-                  offset: Offset(0, -1),
-                  child: Text('• 체중(Kg)', style: labelStyle),
+                  offset: const Offset(0, -1),
+                  child: isEnglish
+                      ? Text.rich(
+                          TextSpan(
+                            style: labelStyle,
+                            children: [
+                              const TextSpan(text: '• Weight'),
+                              TextSpan(
+                                text: '(Kg)',
+                                style: labelStyle.copyWith(
+                                  fontSize: labelBaseSize - 2,
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.visible,
+                        )
+                      : Text(
+                          AppLocalizations.of(context).diaryWeightLabel,
+                          style: labelStyle,
+                          maxLines: 1,
+                          overflow: TextOverflow.visible,
+                        ),
                 ),
               ),
               const SizedBox(width: 6),
@@ -15163,7 +16069,10 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
             ],
           ),
           const SizedBox(height: 7),
-          const Text('• 식후 감정 & 실패 요인', style: labelStyle),
+          Text(
+            AppLocalizations.of(context).diaryNoteLabel,
+            style: labelStyle,
+          ),
           const SizedBox(height: 4),
           Expanded(
             child: _diaryFieldShell(

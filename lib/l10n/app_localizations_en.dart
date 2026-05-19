@@ -27,7 +27,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pushNotifications => 'Push Notifications';
 
   @override
-  String get customerSupport => 'Customer Support';
+  String get customerSupport => 'Support';
 
   @override
   String get korean => '한국어';
@@ -60,7 +60,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get withdrawAccount => 'Delete Account';
 
   @override
-  String get emailAccountLink => 'Link Email Account';
+  String get emailAccountLink => 'Link Email';
 
   @override
   String get emailLinkCompleted => 'Email linked';
@@ -111,7 +111,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealNotificationMessage2 =>
-      'It’s time to give VegePet a healthy meal!';
+      'It\'s time to give VegePet a healthy meal!';
 
   @override
   String get mealNotificationTitle => 'VegePet Meal Time';
@@ -146,22 +146,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get soundEffectsDisabled => 'Sound effects have been turned off.';
 
   @override
-  String get supportCenter => 'Support Center';
+  String get supportCenter => 'Support';
 
   @override
-  String get contactAndFeedback => 'Contact & Feedback';
+  String get contactAndFeedback => 'Inquiries & Feedback';
 
   @override
-  String get supportEmail => 'Contact & Feedback: acoustic.jwg@gmail.com';
+  String get supportEmail => 'Contact: acoustic.jwg@gmail.com';
 
   @override
   String get copyEmail => 'Copy Email';
 
   @override
-  String get emailCopied => 'Email address copied.';
+  String get emailCopied => 'Email copied.';
 
   @override
-  String get termsOfService => 'Terms of Service';
+  String get termsOfService => 'Terms';
 
   @override
   String get privacyPolicy => 'Privacy Policy';
@@ -173,7 +173,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get guardianGuide => 'Guardian Guide';
 
   @override
-  String get accountDataDeletionGuide => 'Account & Data Deletion Guide';
+  String get accountDataDeletionGuide => 'Account & Data Deletion';
 
   @override
   String get legalNoticeDraft =>
@@ -198,13 +198,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoNameLabel => 'Name';
 
   @override
-  String get petInfoSpeciesLabel => 'Species';
+  String get petInfoSpeciesLabel => 'Type';
 
   @override
   String get petInfoStageLabel => 'Stage';
 
   @override
-  String get petInfoFeedAction => 'Feed (Meal Photo)';
+  String get petInfoFeedAction => 'Feed';
 
   @override
   String get petInfoPlayAction => 'Play';
@@ -213,8 +213,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoPetAction => 'Pet';
 
   @override
-  String get petInfoMealTimeGuide =>
-      'Brunch: 06:00-14:00 / Dinner: 17:00-22:00';
+  String get petInfoMealTimeGuide => 'Brunch: 06-14 / Dinner: 17-22';
 
   @override
   String get petInfoStatusDone => 'Done';
@@ -226,22 +225,52 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoCurrentAffection => 'Current Affection';
 
   @override
-  String get petInfoStageComplete => 'Adult Stage Reached';
+  String get petInfoStageComplete => 'Adult Reached';
 
   @override
-  String get petInfoUntilAdult => 'Until Adult';
+  String get petInfoUntilAdult => 'To Adult';
 
   @override
-  String get petInfoUntilGrown => 'Until Grown';
+  String get petInfoUntilGrown => 'To Growing';
 
   @override
-  String get petInfoUntilChild => 'Until Child';
+  String get petInfoUntilChild => 'To Baby';
+
+  @override
+  String get petInfoFeedShort => 'Feed';
+
+  @override
+  String get petInfoMealCheckBubble => 'Meal Check!';
 
   @override
   String get gameMenuTooltip => 'Game Menu';
 
   @override
   String get gameMenuPanelTitle => 'Menu';
+
+  @override
+  String get menuLabelProfile => 'Profile';
+
+  @override
+  String get menuLabelDietDiary => 'Diet Diary';
+
+  @override
+  String get menuLabelBag => 'Bag';
+
+  @override
+  String get menuLabelShop => 'Shop';
+
+  @override
+  String get menuLabelPokedex => 'Pokedex';
+
+  @override
+  String get menuLabelStory => 'Story';
+
+  @override
+  String get menuLabelHelp => 'Help';
+
+  @override
+  String get menuLabelSettings => 'Settings';
 
   @override
   String get profileSetupTitle => 'Please enter your profile!';
@@ -272,7 +301,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retry => 'Retry';
 
   @override
-  String get initialAdoptionTitle => 'It\'s time to adopt a baby VegePet!';
+  String get initialAdoptionTitle => 'Time to adopt a baby VegePet!';
 
   @override
   String get initialAdoptionDescription =>
@@ -291,24 +320,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mealPanelTitle => 'Feed';
 
   @override
-  String get mealPanelTodayCertLabel => 'Today\'s meal verification!';
+  String get mealPanelTodayCertLabel => 'Today\'s Meal Check!';
 
   @override
-  String get mealPanelBrunchButton => 'Brunch meal';
+  String get mealPanelBrunchButton => 'Brunch';
 
   @override
-  String get mealPanelDinnerButton => 'Dinner meal';
+  String get mealPanelDinnerButton => 'Dinner';
 
   @override
-  String get mealPanelFootnote1 => '• Brunch: 06–14 / Dinner: 17–22';
+  String get mealPanelFootnote1 => '• Brunch: 06-14 / Dinner: 17-22';
 
   @override
   String get mealPanelFootnote2 =>
-      '• Only photos taken with the live camera are used for AI evaluation.';
+      '• Only live camera photos are used for AI review.';
 
   @override
-  String get mealPanelFootnote3 =>
-      '• Captured meal photos can be viewed in the diet diary.';
+  String get mealPanelFootnote3 => '• Meal photos can be viewed in Diet Diary.';
 
   @override
   String get mealPanelUploading => 'Evaluating...';
@@ -318,16 +346,197 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get profilePanelFootnoteAi =>
-      '• Meal feedback is based on gender, age range, and diet goals.';
+      '• Meal feedback uses your gender, age, and diet goals.';
 
   @override
-  String get dietDiaryPanelTitle => 'Diet diary';
+  String get dietDiaryPanelTitle => 'Diet Diary';
 
   @override
   String get dietDiaryMonthPickerTitle => 'Choose month';
 
   @override
   String get dietDiarySavedSnackbar => 'Diet diary saved.';
+
+  @override
+  String get bagPanelTitle => 'Bag';
+
+  @override
+  String get bagSectionTickets => '• Tickets';
+
+  @override
+  String get bagSectionToys => '• Toys';
+
+  @override
+  String get bagSectionFurniture => '• Furniture';
+
+  @override
+  String get bagUseAction => 'Use';
+
+  @override
+  String get bagItemRandomTicketName => 'Random Adoption Ticket';
+
+  @override
+  String get bagItemRandomTicketDesc =>
+      ' A random VegePet adoption ticket earned after reaching adulthood. Use it to adopt one cute VegePet at random!';
+
+  @override
+  String get bagItemBoneDollName => 'Bone Doll';
+
+  @override
+  String get bagItemBoneDollDesc =>
+      ' A bone-shaped toy that dog VegePets love. A special toy that tastes like veggies when bitten.';
+
+  @override
+  String get bagItemYarnBallName => 'Yarn Ball';
+
+  @override
+  String get bagItemYarnBallDesc =>
+      ' A yarn ball that cat VegePets love. Watching them bat it around makes affection grow.';
+
+  @override
+  String get randomTicketUseConfirmMessage => 'Use \'Random Adoption Ticket\'?';
+
+  @override
+  String get randomTicketUseConfirmDesc => 'Used items cannot be reverted.';
+
+  @override
+  String get useLabel => 'Use';
+
+  @override
+  String get cancelLabel => 'Cancel';
+
+  @override
+  String get confirmLabel => 'OK';
+
+  @override
+  String get pokedexPanelTitle => 'Pokedex';
+
+  @override
+  String get pokedexSectionDogs => '• Dogs';
+
+  @override
+  String get pokedexSectionCats => '• Cats';
+
+  @override
+  String get pokedexUnknownLabel => '???';
+
+  @override
+  String get pokedexDefaultPetName => 'VegePet';
+
+  @override
+  String get storyPanelTitle => 'Story';
+
+  @override
+  String get helpPanelTitle => 'Help';
+
+  @override
+  String get shopNoticeTitle => 'Coming Soon...';
+
+  @override
+  String get shopNoticeDescription => 'Please stay tuned!';
+
+  @override
+  String get withdrawConfirmTitle => 'Delete Account';
+
+  @override
+  String get withdrawConfirmDescription =>
+      'All pets, diet diary records, and account data will be reset and cannot be restored. Continue?';
+
+  @override
+  String get withdrawConfirmDeleteButton => 'Delete';
+
+  @override
+  String get withdrawFinalTitle => 'Final Confirmation';
+
+  @override
+  String get withdrawFinalDescription =>
+      'Press the button below to permanently delete your account.';
+
+  @override
+  String get withdrawFinalDeleteButton => 'Delete Permanently';
+
+  @override
+  String get nameInterlockMain => 'Please try again.';
+
+  @override
+  String get nameInterlockSub => '2-8 chars only / No special characters!';
+
+  @override
+  String get stageBaby => 'Baby';
+
+  @override
+  String get stageChild => 'Child';
+
+  @override
+  String get stageGrown => 'Growing';
+
+  @override
+  String get stageAdult => 'Adult';
+
+  @override
+  String get familyDog => 'Dogs';
+
+  @override
+  String get familyCat => 'Cats';
+
+  @override
+  String get defaultPetName => 'Pet';
+
+  @override
+  String get adoptionTitleAlt => 'Time to adopt a baby VegePet!';
+
+  @override
+  String get adoptionReceiveButtonExclaim => 'Adopt!';
+
+  @override
+  String get snackLoginRequired => 'Login required.';
+
+  @override
+  String get snackInvalidEmail => 'Please enter a valid email address.';
+
+  @override
+  String get snackEmailRequired => 'Please enter your email.';
+
+  @override
+  String get snackOtpRequired => 'Please enter the verification code.';
+
+  @override
+  String get snackEmailAlreadyLinked =>
+      'This account is already linked to an email.';
+
+  @override
+  String get snackEmailLinkCompleted => 'Email link completed.';
+
+  @override
+  String get snackTicketEmpty => 'No random adoption tickets available.';
+
+  @override
+  String get snackTicketBlockedDuringGrowth =>
+      'A VegePet is still growing. Use this after it reaches adulthood.';
+
+  @override
+  String get snackTicketDuplicatePokedex =>
+      'A VegePet already registered in the pokedex was returned. Please check the adoption flow.';
+
+  @override
+  String get snackAdoptError =>
+      'Could not parse the adoption result. Please try again later.';
+
+  @override
+  String get snackPetActionInvalid => 'Pet info is unavailable.';
+
+  @override
+  String get snackAdoptFirst => 'Please adopt a pet first.';
+
+  @override
+  String get snackPlayedToday => 'You already played with your VegePet today.';
+
+  @override
+  String get snackRandomTicketGranted => 'You earned a random adoption ticket!';
+
+  @override
+  String get snackStageReachedAdult =>
+      'Your VegePet reached the adult stage! Raising complete!';
 
   @override
   String get settingsSectionAccountBullet => '• Account';
@@ -342,7 +551,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSectionSoundBullet => '• Sound';
 
   @override
-  String get settingsSectionSupportBullet => '• Customer Support';
+  String get settingsSectionSupportBullet => '• Support';
 
   @override
   String settingsGuestUserIdLine(String userIdPrefix) {
@@ -350,7 +559,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get emailLinkSendOtpButton => 'Send verification code';
+  String get emailLinkSendOtpButton => 'Get Code';
 
   @override
   String get emailLinkEmailRowLabel => '• Email';
@@ -359,13 +568,244 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailLinkOtpRowLabel => '• Code';
 
   @override
-  String get emailLinkResendCodeButton => 'Resend verification code';
+  String get emailLinkResendCodeButton => 'Resend Code';
 
   @override
-  String get emailLinkVerifyCompleteButton => 'Complete verification';
+  String get emailLinkVerifyCompleteButton => 'Verify';
 
   @override
   String emailOtpRetryAfterSeconds(int seconds) {
-    return 'Resend available in ${seconds}s';
+    return 'Resend in ${seconds}s';
+  }
+
+  @override
+  String get emailAlreadyUsedTitle => 'Email Unavailable';
+
+  @override
+  String get emailAlreadyUsedBody =>
+      'This email is already in use.\nPlease enter a different email.';
+
+  @override
+  String get emailLinkInviteTitle => 'Protect Your VegePet';
+
+  @override
+  String get emailLinkInviteBody =>
+      'Oh no! If you change phones or uninstall the app, your cute VegePet may disappear! 😢 Would you like to link your email in Settings now?';
+
+  @override
+  String get emailLinkInviteLater => 'Maybe later';
+
+  @override
+  String get emailLinkInviteNow => 'Link now';
+
+  @override
+  String get emailLinkInviteSnack => 'This will lead to Settings > Email Link.';
+
+  @override
+  String get saveLabel => 'Save';
+
+  @override
+  String get diaryPhotoBrunchLabel => '(Brunch)';
+
+  @override
+  String get diaryPhotoDinnerLabel => '(Dinner)';
+
+  @override
+  String get diaryWeightLabel => '• Weight(Kg)';
+
+  @override
+  String get diaryNoteLabel => '• Post-meal mood & issues';
+
+  @override
+  String get snackSelectGender => 'Please choose a gender.';
+
+  @override
+  String get snackSelectAgeRange => 'Please choose an age range.';
+
+  @override
+  String get snackSelectDietGoal => 'Please choose a diet goal.';
+
+  @override
+  String snackProfileSaveFailed(String error) {
+    return 'Failed to save profile: $error';
+  }
+
+  @override
+  String get snackProfileSaved => 'Profile saved!';
+
+  @override
+  String get snackProfileLoadFailed => 'Could not load profile.';
+
+  @override
+  String get snackLanguageChangeFailed =>
+      'Failed to change language. Please try again.';
+
+  @override
+  String get snackOtpSent => 'Verification code has been sent to your email.';
+
+  @override
+  String snackOtpSendFailed(String error) {
+    return 'Failed to send verification code: $error';
+  }
+
+  @override
+  String get snackEmailOtpRequired =>
+      'Please enter your email and verification code.';
+
+  @override
+  String snackOtpVerifyFailed(String error) {
+    return 'Failed to verify code: $error';
+  }
+
+  @override
+  String get snackEmailLinkPartialSavedFailed =>
+      'Email verified, but failed to save profile state. Please reopen settings.';
+
+  @override
+  String get snackMealAlreadyCertified =>
+      'This meal slot has already been certified.';
+
+  @override
+  String snackMealSaveFailed(String error) {
+    return 'Failed to save meal check: $error';
+  }
+
+  @override
+  String get snackMealUploadFailed =>
+      'Failed to upload photo. Please try again later.';
+
+  @override
+  String get snackMealAiFailed => 'AI review failed. Please try again later.';
+
+  @override
+  String snackMealUnknownError(String error) {
+    return 'An error occurred during meal check: $error';
+  }
+
+  @override
+  String snackCameraUnavailable(String error) {
+    return 'Camera is unavailable: $error';
+  }
+
+  @override
+  String get snackPetAlreadyGraduated => 'This VegePet has already graduated.';
+
+  @override
+  String snackPlayActionSuccess(String label) {
+    return '$label success! Affection +1';
+  }
+
+  @override
+  String snackPlayActionFailed(String label, String error) {
+    return '$label failed: $error';
+  }
+
+  @override
+  String get snackAlreadyRaising => 'You already have a VegePet in training.';
+
+  @override
+  String get snackPetSelectInvalid => 'Pet selection is invalid.';
+
+  @override
+  String snackAdoptSaveFailed(String error) {
+    return 'Failed to save adoption: $error';
+  }
+
+  @override
+  String get snackNameSaved => 'Name saved!';
+
+  @override
+  String snackNameSaveFailed(String error) {
+    return 'Failed to save name: $error';
+  }
+
+  @override
+  String get snackPokedexFetchFailed => 'Could not load Pokedex info.';
+
+  @override
+  String get snackSpeciesFetchFailed => 'Could not load species info.';
+
+  @override
+  String snackTicketUseFailed(String error) {
+    return 'Failed to use the ticket: $error';
+  }
+
+  @override
+  String snackOldPetDeactivateFailed(String error) {
+    return 'Failed to deactivate the previous pet: $error';
+  }
+
+  @override
+  String snackNewPetAdoptSaveFailed(String error) {
+    return 'Failed to save adoption: $error';
+  }
+
+  @override
+  String get snackNewPetAdopted => 'A new VegePet has been adopted!';
+
+  @override
+  String get snackToyNotUsable => 'This toy can\'t be used on this VegePet.';
+
+  @override
+  String get snackEnterName => 'Please enter a name.';
+
+  @override
+  String snackComingLater(String label) {
+    return 'Coming later: $label';
+  }
+
+  @override
+  String get snackWithdrawCannotLogin =>
+      'Cannot proceed with deletion when not signed in.';
+
+  @override
+  String get snackWithdrawCompleted => 'Your account has been deleted.';
+
+  @override
+  String snackWithdrawError(String error) {
+    return 'An error occurred while deleting your account: $error';
+  }
+
+  @override
+  String get snackWeightNumberOnly => 'Please enter weight as a number.';
+
+  @override
+  String snackDiarySaveFailed(String error) {
+    return 'Failed to save diet diary: $error';
+  }
+
+  @override
+  String get snackStageGrewToChild => 'Your VegePet grew into the Child stage!';
+
+  @override
+  String get snackStageGrewToGrown =>
+      'Your VegePet grew into the Growing stage!';
+
+  @override
+  String get snackStageGrewToAdult =>
+      'Your VegePet reached the Adult stage! Raising complete!';
+
+  @override
+  String snackGraduationFailed(String error) {
+    return 'Adult transition failed: $error';
+  }
+
+  @override
+  String get petActionPlay => 'Play';
+
+  @override
+  String get petActionPet => 'Pet';
+
+  @override
+  String get snackPlayedTodayAlready =>
+      'You already played with your VegePet today.';
+
+  @override
+  String get snackPettedTodayAlready =>
+      'You already petted your VegePet today.';
+
+  @override
+  String snackPetFetchFailed(String error) {
+    return 'Failed to load pet info: $error';
   }
 }

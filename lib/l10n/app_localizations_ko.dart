@@ -151,7 +151,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get copyEmail => '이메일 복사';
 
   @override
-  String get emailCopied => '이메일 주소가 복사되었어요.';
+  String get emailCopied => '이메일이 복사되었어요.';
 
   @override
   String get termsOfService => '이용약관';
@@ -230,10 +230,40 @@ class AppLocalizationsKo extends AppLocalizations {
   String get petInfoUntilChild => '유년기까지';
 
   @override
+  String get petInfoFeedShort => '먹이주기';
+
+  @override
+  String get petInfoMealCheckBubble => '식단 인증!';
+
+  @override
   String get gameMenuTooltip => '게임 메뉴';
 
   @override
   String get gameMenuPanelTitle => '메뉴';
+
+  @override
+  String get menuLabelProfile => '프로필';
+
+  @override
+  String get menuLabelDietDiary => '식단일지';
+
+  @override
+  String get menuLabelBag => '가방';
+
+  @override
+  String get menuLabelShop => '상점';
+
+  @override
+  String get menuLabelPokedex => '도감';
+
+  @override
+  String get menuLabelStory => '스토리';
+
+  @override
+  String get menuLabelHelp => '도움말';
+
+  @override
+  String get menuLabelSettings => '설정';
 
   @override
   String get profileSetupTitle => '프로필을 입력해주세요!';
@@ -317,6 +347,183 @@ class AppLocalizationsKo extends AppLocalizations {
   String get dietDiarySavedSnackbar => '식단일지가 저장되었어요.';
 
   @override
+  String get bagPanelTitle => '가방';
+
+  @override
+  String get bagSectionTickets => '• 분양권';
+
+  @override
+  String get bagSectionToys => '• 장난감';
+
+  @override
+  String get bagSectionFurniture => '• 가구';
+
+  @override
+  String get bagUseAction => '사용하기';
+
+  @override
+  String get bagItemRandomTicketName => '분양권(랜덤)';
+
+  @override
+  String get bagItemRandomTicketDesc =>
+      ' 성숙기를 달성하면 주는 베지펫 랜덤 분양양 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!';
+
+  @override
+  String get bagItemBoneDollName => '뼈다귀 인형';
+
+  @override
+  String get bagItemBoneDollDesc =>
+      ' 강아지 베지펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.';
+
+  @override
+  String get bagItemYarnBallName => '실뭉치';
+
+  @override
+  String get bagItemYarnBallDesc =>
+      ' 고양이 베지펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.';
+
+  @override
+  String get randomTicketUseConfirmMessage => '\'분양권(랜덤)\'을 사용하시겠습니까?';
+
+  @override
+  String get randomTicketUseConfirmDesc => '사용된 아이템은 되돌릴 수 없습니다.';
+
+  @override
+  String get useLabel => '사용';
+
+  @override
+  String get cancelLabel => '취소';
+
+  @override
+  String get confirmLabel => '확인';
+
+  @override
+  String get pokedexPanelTitle => '도감';
+
+  @override
+  String get pokedexSectionDogs => '• 강아지';
+
+  @override
+  String get pokedexSectionCats => '• 고양이';
+
+  @override
+  String get pokedexUnknownLabel => '???';
+
+  @override
+  String get pokedexDefaultPetName => '베지펫';
+
+  @override
+  String get storyPanelTitle => '스토리';
+
+  @override
+  String get helpPanelTitle => '도움말';
+
+  @override
+  String get shopNoticeTitle => '오픈 준비중...';
+
+  @override
+  String get shopNoticeDescription => '조금만 기다려주세요!';
+
+  @override
+  String get withdrawConfirmTitle => '회원 탈퇴';
+
+  @override
+  String get withdrawConfirmDescription =>
+      '현재 계정의 펫, 식단 일지 등 모든 기록이 초기화 되며, 되돌릴 수 없어요. 정말 탈퇴할까요?';
+
+  @override
+  String get withdrawConfirmDeleteButton => '탈퇴';
+
+  @override
+  String get withdrawFinalTitle => '탈퇴 확인';
+
+  @override
+  String get withdrawFinalDescription => '아래 버튼을 누르면 회원 탈퇴가 최종 완료됩니다.';
+
+  @override
+  String get withdrawFinalDeleteButton => '최종 탈퇴';
+
+  @override
+  String get nameInterlockMain => '다시 입력해주세요.';
+
+  @override
+  String get nameInterlockSub => '※ 2 ~ 8글자 제한 / 특수 문자 금지!';
+
+  @override
+  String get stageBaby => '유아기';
+
+  @override
+  String get stageChild => '유년기';
+
+  @override
+  String get stageGrown => '성장기';
+
+  @override
+  String get stageAdult => '성숙기';
+
+  @override
+  String get familyDog => '강아지';
+
+  @override
+  String get familyCat => '고양이';
+
+  @override
+  String get defaultPetName => '펫';
+
+  @override
+  String get adoptionTitleAlt => '베지펫을 분양 받을 차례에요!';
+
+  @override
+  String get adoptionReceiveButtonExclaim => '분양받기!';
+
+  @override
+  String get snackLoginRequired => '로그인이 필요해요.';
+
+  @override
+  String get snackInvalidEmail => '올바른 이메일 형식으로 입력해주세요.';
+
+  @override
+  String get snackEmailRequired => '이메일을 입력해주세요.';
+
+  @override
+  String get snackOtpRequired => '인증 코드를 입력해주세요.';
+
+  @override
+  String get snackEmailAlreadyLinked => '이미 이메일 계정으로 연동되어 있어요.';
+
+  @override
+  String get snackEmailLinkCompleted => '이메일 계정 연동이 완료되었어요.';
+
+  @override
+  String get snackTicketEmpty => '보유 중인 랜덤 분양권이 없어요.';
+
+  @override
+  String get snackTicketBlockedDuringGrowth =>
+      '현재 육성 중인 베지펫이 있어요. 성숙기 달성 후 사용할 수 있어요.';
+
+  @override
+  String get snackTicketDuplicatePokedex =>
+      '이미 도감에 등록된 베지펫이 반환되었어요. 분양 로직을 확인해주세요.';
+
+  @override
+  String get snackAdoptError => '분양 결과를 해석할 수 없어요. 잠시 후 다시 시도해주세요.';
+
+  @override
+  String get snackPetActionInvalid => '펫 정보를 확인할 수 없어요.';
+
+  @override
+  String get snackAdoptFirst => '먼저 펫을 분양받아주세요.';
+
+  @override
+  String get snackPlayedToday => '오늘은 이미 놀아줬어요.';
+
+  @override
+  String get snackRandomTicketGranted => '랜덤 분양권을 획득했어요!';
+
+  @override
+  String get snackStageReachedAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+
+  @override
   String get settingsSectionAccountBullet => '• 계정';
 
   @override
@@ -354,5 +561,226 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String emailOtpRetryAfterSeconds(int seconds) {
     return '$seconds초 후에 재전송 가능';
+  }
+
+  @override
+  String get emailAlreadyUsedTitle => '이메일 연동 불가';
+
+  @override
+  String get emailAlreadyUsedBody => '이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.';
+
+  @override
+  String get emailLinkInviteTitle => '베지펫을 지켜주세요';
+
+  @override
+  String get emailLinkInviteBody =>
+      '헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?';
+
+  @override
+  String get emailLinkInviteLater => '나중에 할게요';
+
+  @override
+  String get emailLinkInviteNow => '지금 연동하기';
+
+  @override
+  String get emailLinkInviteSnack => '나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.';
+
+  @override
+  String get saveLabel => '저장';
+
+  @override
+  String get diaryPhotoBrunchLabel => '(아점)';
+
+  @override
+  String get diaryPhotoDinnerLabel => '(저녁)';
+
+  @override
+  String get diaryWeightLabel => '• 체중(Kg)';
+
+  @override
+  String get diaryNoteLabel => '• 식후 감정 & 실패 요인';
+
+  @override
+  String get snackSelectGender => '성별을 선택해주세요.';
+
+  @override
+  String get snackSelectAgeRange => '나이대를 선택해주세요.';
+
+  @override
+  String get snackSelectDietGoal => '식단 목적을 선택해주세요.';
+
+  @override
+  String snackProfileSaveFailed(String error) {
+    return '프로필 저장 실패: $error';
+  }
+
+  @override
+  String get snackProfileSaved => '프로필이 저장되었어요!';
+
+  @override
+  String get snackProfileLoadFailed => '프로필 정보를 불러올 수 없어요.';
+
+  @override
+  String get snackLanguageChangeFailed => '언어 변경에 실패했어요. 다시 시도해주세요.';
+
+  @override
+  String get snackOtpSent => '인증 코드가 이메일로 발송되었어요.';
+
+  @override
+  String snackOtpSendFailed(String error) {
+    return '인증 코드 발송에 실패했어요: $error';
+  }
+
+  @override
+  String get snackEmailOtpRequired => '이메일과 인증 코드를 입력해주세요.';
+
+  @override
+  String snackOtpVerifyFailed(String error) {
+    return '인증 코드 확인에 실패했어요: $error';
+  }
+
+  @override
+  String get snackEmailLinkPartialSavedFailed =>
+      '이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.';
+
+  @override
+  String get snackMealAlreadyCertified => '이미 해당 식단 인증을 완료했어요.';
+
+  @override
+  String snackMealSaveFailed(String error) {
+    return '식단 인증 저장 실패: $error';
+  }
+
+  @override
+  String get snackMealUploadFailed => '사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.';
+
+  @override
+  String get snackMealAiFailed => 'AI 판정에 실패했어요. 잠시 후 다시 시도해주세요.';
+
+  @override
+  String snackMealUnknownError(String error) {
+    return '식단 인증 중 오류가 발생했어요: $error';
+  }
+
+  @override
+  String snackCameraUnavailable(String error) {
+    return '카메라를 사용할 수 없어요: $error';
+  }
+
+  @override
+  String get snackPetAlreadyGraduated => '이미 졸업 처리된 베지펫이에요.';
+
+  @override
+  String snackPlayActionSuccess(String label) {
+    return '$label 성공! 애정도 +1';
+  }
+
+  @override
+  String snackPlayActionFailed(String label, String error) {
+    return '$label 실패: $error';
+  }
+
+  @override
+  String get snackAlreadyRaising => '이미 육성 중인 펫이 있어요.';
+
+  @override
+  String get snackPetSelectInvalid => '펫 선택값이 올바르지 않아요.';
+
+  @override
+  String snackAdoptSaveFailed(String error) {
+    return '분양 저장에 실패했어요: $error';
+  }
+
+  @override
+  String get snackNameSaved => '이름이 저장되었어요!';
+
+  @override
+  String snackNameSaveFailed(String error) {
+    return '이름 저장 실패: $error';
+  }
+
+  @override
+  String get snackPokedexFetchFailed => '도감 정보를 불러오지 못했어요.';
+
+  @override
+  String get snackSpeciesFetchFailed => '펫 종류 정보를 불러오지 못했어요.';
+
+  @override
+  String snackTicketUseFailed(String error) {
+    return '분양권 사용 실패: $error';
+  }
+
+  @override
+  String snackOldPetDeactivateFailed(String error) {
+    return '기존 펫 비활성화 실패: $error';
+  }
+
+  @override
+  String snackNewPetAdoptSaveFailed(String error) {
+    return '새 베지펫 분양 저장 실패: $error';
+  }
+
+  @override
+  String get snackNewPetAdopted => '새 베지펫이 분양되었어요!';
+
+  @override
+  String get snackToyNotUsable => '이 장난감은 이 베지펫에게 사용할 수 없어요.';
+
+  @override
+  String get snackEnterName => '이름을 입력해주세요.';
+
+  @override
+  String snackComingLater(String label) {
+    return '나중에 구현 예정: $label';
+  }
+
+  @override
+  String get snackWithdrawCannotLogin => '로그인 상태가 아니어서 탈퇴를 진행할 수 없어요.';
+
+  @override
+  String get snackWithdrawCompleted => '회원 탈퇴가 완료되었어요.';
+
+  @override
+  String snackWithdrawError(String error) {
+    return '회원 탈퇴 처리 중 오류가 발생했어요: $error';
+  }
+
+  @override
+  String get snackWeightNumberOnly => '체중은 숫자로 입력해주세요.';
+
+  @override
+  String snackDiarySaveFailed(String error) {
+    return '식단일지 저장 실패: $error';
+  }
+
+  @override
+  String get snackStageGrewToChild => '베지펫이 유년기로 성장했어요!';
+
+  @override
+  String get snackStageGrewToGrown => '베지펫이 성장기로 자랐어요!';
+
+  @override
+  String get snackStageGrewToAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+
+  @override
+  String snackGraduationFailed(String error) {
+    return '성숙기 전환 처리 실패: $error';
+  }
+
+  @override
+  String get petActionPlay => '놀아주기';
+
+  @override
+  String get petActionPet => '쓰다듬기';
+
+  @override
+  String get snackPlayedTodayAlready => '오늘은 이미 놀아줬어요.';
+
+  @override
+  String get snackPettedTodayAlready => '오늘은 이미 쓰다듬었어요.';
+
+  @override
+  String snackPetFetchFailed(String error) {
+    return '펫 정보를 불러올 수 없어요: $error';
   }
 }

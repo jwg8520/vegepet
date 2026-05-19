@@ -383,7 +383,7 @@ abstract class AppLocalizations {
   /// No description provided for @emailCopied.
   ///
   /// In ko, this message translates to:
-  /// **'이메일 주소가 복사되었어요.'**
+  /// **'이메일이 복사되었어요.'**
   String get emailCopied;
 
   /// No description provided for @termsOfService.
@@ -536,6 +536,18 @@ abstract class AppLocalizations {
   /// **'유년기까지'**
   String get petInfoUntilChild;
 
+  /// No description provided for @petInfoFeedShort.
+  ///
+  /// In ko, this message translates to:
+  /// **'먹이주기'**
+  String get petInfoFeedShort;
+
+  /// No description provided for @petInfoMealCheckBubble.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 인증!'**
+  String get petInfoMealCheckBubble;
+
   /// No description provided for @gameMenuTooltip.
   ///
   /// In ko, this message translates to:
@@ -547,6 +559,54 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'메뉴'**
   String get gameMenuPanelTitle;
+
+  /// No description provided for @menuLabelProfile.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필'**
+  String get menuLabelProfile;
+
+  /// No description provided for @menuLabelDietDiary.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단일지'**
+  String get menuLabelDietDiary;
+
+  /// No description provided for @menuLabelBag.
+  ///
+  /// In ko, this message translates to:
+  /// **'가방'**
+  String get menuLabelBag;
+
+  /// No description provided for @menuLabelShop.
+  ///
+  /// In ko, this message translates to:
+  /// **'상점'**
+  String get menuLabelShop;
+
+  /// No description provided for @menuLabelPokedex.
+  ///
+  /// In ko, this message translates to:
+  /// **'도감'**
+  String get menuLabelPokedex;
+
+  /// No description provided for @menuLabelStory.
+  ///
+  /// In ko, this message translates to:
+  /// **'스토리'**
+  String get menuLabelStory;
+
+  /// No description provided for @menuLabelHelp.
+  ///
+  /// In ko, this message translates to:
+  /// **'도움말'**
+  String get menuLabelHelp;
+
+  /// No description provided for @menuLabelSettings.
+  ///
+  /// In ko, this message translates to:
+  /// **'설정'**
+  String get menuLabelSettings;
 
   /// No description provided for @profileSetupTitle.
   ///
@@ -710,6 +770,348 @@ abstract class AppLocalizations {
   /// **'식단일지가 저장되었어요.'**
   String get dietDiarySavedSnackbar;
 
+  /// No description provided for @bagPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'가방'**
+  String get bagPanelTitle;
+
+  /// No description provided for @bagSectionTickets.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 분양권'**
+  String get bagSectionTickets;
+
+  /// No description provided for @bagSectionToys.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 장난감'**
+  String get bagSectionToys;
+
+  /// No description provided for @bagSectionFurniture.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 가구'**
+  String get bagSectionFurniture;
+
+  /// No description provided for @bagUseAction.
+  ///
+  /// In ko, this message translates to:
+  /// **'사용하기'**
+  String get bagUseAction;
+
+  /// No description provided for @bagItemRandomTicketName.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양권(랜덤)'**
+  String get bagItemRandomTicketName;
+
+  /// No description provided for @bagItemRandomTicketDesc.
+  ///
+  /// In ko, this message translates to:
+  /// **' 성숙기를 달성하면 주는 베지펫 랜덤 분양양 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!'**
+  String get bagItemRandomTicketDesc;
+
+  /// No description provided for @bagItemBoneDollName.
+  ///
+  /// In ko, this message translates to:
+  /// **'뼈다귀 인형'**
+  String get bagItemBoneDollName;
+
+  /// No description provided for @bagItemBoneDollDesc.
+  ///
+  /// In ko, this message translates to:
+  /// **' 강아지 베지펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.'**
+  String get bagItemBoneDollDesc;
+
+  /// No description provided for @bagItemYarnBallName.
+  ///
+  /// In ko, this message translates to:
+  /// **'실뭉치'**
+  String get bagItemYarnBallName;
+
+  /// No description provided for @bagItemYarnBallDesc.
+  ///
+  /// In ko, this message translates to:
+  /// **' 고양이 베지펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.'**
+  String get bagItemYarnBallDesc;
+
+  /// No description provided for @randomTicketUseConfirmMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'\'분양권(랜덤)\'을 사용하시겠습니까?'**
+  String get randomTicketUseConfirmMessage;
+
+  /// No description provided for @randomTicketUseConfirmDesc.
+  ///
+  /// In ko, this message translates to:
+  /// **'사용된 아이템은 되돌릴 수 없습니다.'**
+  String get randomTicketUseConfirmDesc;
+
+  /// No description provided for @useLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'사용'**
+  String get useLabel;
+
+  /// No description provided for @cancelLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'취소'**
+  String get cancelLabel;
+
+  /// No description provided for @confirmLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get confirmLabel;
+
+  /// No description provided for @pokedexPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'도감'**
+  String get pokedexPanelTitle;
+
+  /// No description provided for @pokedexSectionDogs.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 강아지'**
+  String get pokedexSectionDogs;
+
+  /// No description provided for @pokedexSectionCats.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 고양이'**
+  String get pokedexSectionCats;
+
+  /// No description provided for @pokedexUnknownLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'???'**
+  String get pokedexUnknownLabel;
+
+  /// No description provided for @pokedexDefaultPetName.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫'**
+  String get pokedexDefaultPetName;
+
+  /// No description provided for @storyPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'스토리'**
+  String get storyPanelTitle;
+
+  /// No description provided for @helpPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'도움말'**
+  String get helpPanelTitle;
+
+  /// No description provided for @shopNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'오픈 준비중...'**
+  String get shopNoticeTitle;
+
+  /// No description provided for @shopNoticeDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'조금만 기다려주세요!'**
+  String get shopNoticeDescription;
+
+  /// No description provided for @withdrawConfirmTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'회원 탈퇴'**
+  String get withdrawConfirmTitle;
+
+  /// No description provided for @withdrawConfirmDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'현재 계정의 펫, 식단 일지 등 모든 기록이 초기화 되며, 되돌릴 수 없어요. 정말 탈퇴할까요?'**
+  String get withdrawConfirmDescription;
+
+  /// No description provided for @withdrawConfirmDeleteButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'탈퇴'**
+  String get withdrawConfirmDeleteButton;
+
+  /// No description provided for @withdrawFinalTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'탈퇴 확인'**
+  String get withdrawFinalTitle;
+
+  /// No description provided for @withdrawFinalDescription.
+  ///
+  /// In ko, this message translates to:
+  /// **'아래 버튼을 누르면 회원 탈퇴가 최종 완료됩니다.'**
+  String get withdrawFinalDescription;
+
+  /// No description provided for @withdrawFinalDeleteButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'최종 탈퇴'**
+  String get withdrawFinalDeleteButton;
+
+  /// No description provided for @nameInterlockMain.
+  ///
+  /// In ko, this message translates to:
+  /// **'다시 입력해주세요.'**
+  String get nameInterlockMain;
+
+  /// No description provided for @nameInterlockSub.
+  ///
+  /// In ko, this message translates to:
+  /// **'※ 2 ~ 8글자 제한 / 특수 문자 금지!'**
+  String get nameInterlockSub;
+
+  /// No description provided for @stageBaby.
+  ///
+  /// In ko, this message translates to:
+  /// **'유아기'**
+  String get stageBaby;
+
+  /// No description provided for @stageChild.
+  ///
+  /// In ko, this message translates to:
+  /// **'유년기'**
+  String get stageChild;
+
+  /// No description provided for @stageGrown.
+  ///
+  /// In ko, this message translates to:
+  /// **'성장기'**
+  String get stageGrown;
+
+  /// No description provided for @stageAdult.
+  ///
+  /// In ko, this message translates to:
+  /// **'성숙기'**
+  String get stageAdult;
+
+  /// No description provided for @familyDog.
+  ///
+  /// In ko, this message translates to:
+  /// **'강아지'**
+  String get familyDog;
+
+  /// No description provided for @familyCat.
+  ///
+  /// In ko, this message translates to:
+  /// **'고양이'**
+  String get familyCat;
+
+  /// No description provided for @defaultPetName.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫'**
+  String get defaultPetName;
+
+  /// No description provided for @adoptionTitleAlt.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫을 분양 받을 차례에요!'**
+  String get adoptionTitleAlt;
+
+  /// No description provided for @adoptionReceiveButtonExclaim.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양받기!'**
+  String get adoptionReceiveButtonExclaim;
+
+  /// No description provided for @snackLoginRequired.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그인이 필요해요.'**
+  String get snackLoginRequired;
+
+  /// No description provided for @snackInvalidEmail.
+  ///
+  /// In ko, this message translates to:
+  /// **'올바른 이메일 형식으로 입력해주세요.'**
+  String get snackInvalidEmail;
+
+  /// No description provided for @snackEmailRequired.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일을 입력해주세요.'**
+  String get snackEmailRequired;
+
+  /// No description provided for @snackOtpRequired.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드를 입력해주세요.'**
+  String get snackOtpRequired;
+
+  /// No description provided for @snackEmailAlreadyLinked.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 이메일 계정으로 연동되어 있어요.'**
+  String get snackEmailAlreadyLinked;
+
+  /// No description provided for @snackEmailLinkCompleted.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 계정 연동이 완료되었어요.'**
+  String get snackEmailLinkCompleted;
+
+  /// No description provided for @snackTicketEmpty.
+  ///
+  /// In ko, this message translates to:
+  /// **'보유 중인 랜덤 분양권이 없어요.'**
+  String get snackTicketEmpty;
+
+  /// No description provided for @snackTicketBlockedDuringGrowth.
+  ///
+  /// In ko, this message translates to:
+  /// **'현재 육성 중인 베지펫이 있어요. 성숙기 달성 후 사용할 수 있어요.'**
+  String get snackTicketBlockedDuringGrowth;
+
+  /// No description provided for @snackTicketDuplicatePokedex.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 도감에 등록된 베지펫이 반환되었어요. 분양 로직을 확인해주세요.'**
+  String get snackTicketDuplicatePokedex;
+
+  /// No description provided for @snackAdoptError.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양 결과를 해석할 수 없어요. 잠시 후 다시 시도해주세요.'**
+  String get snackAdoptError;
+
+  /// No description provided for @snackPetActionInvalid.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫 정보를 확인할 수 없어요.'**
+  String get snackPetActionInvalid;
+
+  /// No description provided for @snackAdoptFirst.
+  ///
+  /// In ko, this message translates to:
+  /// **'먼저 펫을 분양받아주세요.'**
+  String get snackAdoptFirst;
+
+  /// No description provided for @snackPlayedToday.
+  ///
+  /// In ko, this message translates to:
+  /// **'오늘은 이미 놀아줬어요.'**
+  String get snackPlayedToday;
+
+  /// No description provided for @snackRandomTicketGranted.
+  ///
+  /// In ko, this message translates to:
+  /// **'랜덤 분양권을 획득했어요!'**
+  String get snackRandomTicketGranted;
+
+  /// No description provided for @snackStageReachedAdult.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!'**
+  String get snackStageReachedAdult;
+
   /// No description provided for @settingsSectionAccountBullet.
   ///
   /// In ko, this message translates to:
@@ -781,6 +1183,372 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'{seconds}초 후에 재전송 가능'**
   String emailOtpRetryAfterSeconds(int seconds);
+
+  /// No description provided for @emailAlreadyUsedTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 연동 불가'**
+  String get emailAlreadyUsedTitle;
+
+  /// No description provided for @emailAlreadyUsedBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.'**
+  String get emailAlreadyUsedBody;
+
+  /// No description provided for @emailLinkInviteTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫을 지켜주세요'**
+  String get emailLinkInviteTitle;
+
+  /// No description provided for @emailLinkInviteBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?'**
+  String get emailLinkInviteBody;
+
+  /// No description provided for @emailLinkInviteLater.
+  ///
+  /// In ko, this message translates to:
+  /// **'나중에 할게요'**
+  String get emailLinkInviteLater;
+
+  /// No description provided for @emailLinkInviteNow.
+  ///
+  /// In ko, this message translates to:
+  /// **'지금 연동하기'**
+  String get emailLinkInviteNow;
+
+  /// No description provided for @emailLinkInviteSnack.
+  ///
+  /// In ko, this message translates to:
+  /// **'나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.'**
+  String get emailLinkInviteSnack;
+
+  /// No description provided for @saveLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'저장'**
+  String get saveLabel;
+
+  /// No description provided for @diaryPhotoBrunchLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'(아점)'**
+  String get diaryPhotoBrunchLabel;
+
+  /// No description provided for @diaryPhotoDinnerLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'(저녁)'**
+  String get diaryPhotoDinnerLabel;
+
+  /// No description provided for @diaryWeightLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 체중(Kg)'**
+  String get diaryWeightLabel;
+
+  /// No description provided for @diaryNoteLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 식후 감정 & 실패 요인'**
+  String get diaryNoteLabel;
+
+  /// No description provided for @snackSelectGender.
+  ///
+  /// In ko, this message translates to:
+  /// **'성별을 선택해주세요.'**
+  String get snackSelectGender;
+
+  /// No description provided for @snackSelectAgeRange.
+  ///
+  /// In ko, this message translates to:
+  /// **'나이대를 선택해주세요.'**
+  String get snackSelectAgeRange;
+
+  /// No description provided for @snackSelectDietGoal.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 목적을 선택해주세요.'**
+  String get snackSelectDietGoal;
+
+  /// No description provided for @snackProfileSaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필 저장 실패: {error}'**
+  String snackProfileSaveFailed(String error);
+
+  /// No description provided for @snackProfileSaved.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필이 저장되었어요!'**
+  String get snackProfileSaved;
+
+  /// No description provided for @snackProfileLoadFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로필 정보를 불러올 수 없어요.'**
+  String get snackProfileLoadFailed;
+
+  /// No description provided for @snackLanguageChangeFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'언어 변경에 실패했어요. 다시 시도해주세요.'**
+  String get snackLanguageChangeFailed;
+
+  /// No description provided for @snackOtpSent.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드가 이메일로 발송되었어요.'**
+  String get snackOtpSent;
+
+  /// No description provided for @snackOtpSendFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드 발송에 실패했어요: {error}'**
+  String snackOtpSendFailed(String error);
+
+  /// No description provided for @snackEmailOtpRequired.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일과 인증 코드를 입력해주세요.'**
+  String get snackEmailOtpRequired;
+
+  /// No description provided for @snackOtpVerifyFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 코드 확인에 실패했어요: {error}'**
+  String snackOtpVerifyFailed(String error);
+
+  /// No description provided for @snackEmailLinkPartialSavedFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.'**
+  String get snackEmailLinkPartialSavedFailed;
+
+  /// No description provided for @snackMealAlreadyCertified.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 해당 식단 인증을 완료했어요.'**
+  String get snackMealAlreadyCertified;
+
+  /// No description provided for @snackMealSaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 인증 저장 실패: {error}'**
+  String snackMealSaveFailed(String error);
+
+  /// No description provided for @snackMealUploadFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.'**
+  String get snackMealUploadFailed;
+
+  /// No description provided for @snackMealAiFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'AI 판정에 실패했어요. 잠시 후 다시 시도해주세요.'**
+  String get snackMealAiFailed;
+
+  /// No description provided for @snackMealUnknownError.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 인증 중 오류가 발생했어요: {error}'**
+  String snackMealUnknownError(String error);
+
+  /// No description provided for @snackCameraUnavailable.
+  ///
+  /// In ko, this message translates to:
+  /// **'카메라를 사용할 수 없어요: {error}'**
+  String snackCameraUnavailable(String error);
+
+  /// No description provided for @snackPetAlreadyGraduated.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 졸업 처리된 베지펫이에요.'**
+  String get snackPetAlreadyGraduated;
+
+  /// No description provided for @snackPlayActionSuccess.
+  ///
+  /// In ko, this message translates to:
+  /// **'{label} 성공! 애정도 +1'**
+  String snackPlayActionSuccess(String label);
+
+  /// No description provided for @snackPlayActionFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'{label} 실패: {error}'**
+  String snackPlayActionFailed(String label, String error);
+
+  /// No description provided for @snackAlreadyRaising.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 육성 중인 펫이 있어요.'**
+  String get snackAlreadyRaising;
+
+  /// No description provided for @snackPetSelectInvalid.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫 선택값이 올바르지 않아요.'**
+  String get snackPetSelectInvalid;
+
+  /// No description provided for @snackAdoptSaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양 저장에 실패했어요: {error}'**
+  String snackAdoptSaveFailed(String error);
+
+  /// No description provided for @snackNameSaved.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름이 저장되었어요!'**
+  String get snackNameSaved;
+
+  /// No description provided for @snackNameSaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름 저장 실패: {error}'**
+  String snackNameSaveFailed(String error);
+
+  /// No description provided for @snackPokedexFetchFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'도감 정보를 불러오지 못했어요.'**
+  String get snackPokedexFetchFailed;
+
+  /// No description provided for @snackSpeciesFetchFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫 종류 정보를 불러오지 못했어요.'**
+  String get snackSpeciesFetchFailed;
+
+  /// No description provided for @snackTicketUseFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'분양권 사용 실패: {error}'**
+  String snackTicketUseFailed(String error);
+
+  /// No description provided for @snackOldPetDeactivateFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'기존 펫 비활성화 실패: {error}'**
+  String snackOldPetDeactivateFailed(String error);
+
+  /// No description provided for @snackNewPetAdoptSaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 베지펫 분양 저장 실패: {error}'**
+  String snackNewPetAdoptSaveFailed(String error);
+
+  /// No description provided for @snackNewPetAdopted.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 베지펫이 분양되었어요!'**
+  String get snackNewPetAdopted;
+
+  /// No description provided for @snackToyNotUsable.
+  ///
+  /// In ko, this message translates to:
+  /// **'이 장난감은 이 베지펫에게 사용할 수 없어요.'**
+  String get snackToyNotUsable;
+
+  /// No description provided for @snackEnterName.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름을 입력해주세요.'**
+  String get snackEnterName;
+
+  /// No description provided for @snackComingLater.
+  ///
+  /// In ko, this message translates to:
+  /// **'나중에 구현 예정: {label}'**
+  String snackComingLater(String label);
+
+  /// No description provided for @snackWithdrawCannotLogin.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그인 상태가 아니어서 탈퇴를 진행할 수 없어요.'**
+  String get snackWithdrawCannotLogin;
+
+  /// No description provided for @snackWithdrawCompleted.
+  ///
+  /// In ko, this message translates to:
+  /// **'회원 탈퇴가 완료되었어요.'**
+  String get snackWithdrawCompleted;
+
+  /// No description provided for @snackWithdrawError.
+  ///
+  /// In ko, this message translates to:
+  /// **'회원 탈퇴 처리 중 오류가 발생했어요: {error}'**
+  String snackWithdrawError(String error);
+
+  /// No description provided for @snackWeightNumberOnly.
+  ///
+  /// In ko, this message translates to:
+  /// **'체중은 숫자로 입력해주세요.'**
+  String get snackWeightNumberOnly;
+
+  /// No description provided for @snackDiarySaveFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단일지 저장 실패: {error}'**
+  String snackDiarySaveFailed(String error);
+
+  /// No description provided for @snackStageGrewToChild.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 유년기로 성장했어요!'**
+  String get snackStageGrewToChild;
+
+  /// No description provided for @snackStageGrewToGrown.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 성장기로 자랐어요!'**
+  String get snackStageGrewToGrown;
+
+  /// No description provided for @snackStageGrewToAdult.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!'**
+  String get snackStageGrewToAdult;
+
+  /// No description provided for @snackGraduationFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'성숙기 전환 처리 실패: {error}'**
+  String snackGraduationFailed(String error);
+
+  /// No description provided for @petActionPlay.
+  ///
+  /// In ko, this message translates to:
+  /// **'놀아주기'**
+  String get petActionPlay;
+
+  /// No description provided for @petActionPet.
+  ///
+  /// In ko, this message translates to:
+  /// **'쓰다듬기'**
+  String get petActionPet;
+
+  /// No description provided for @snackPlayedTodayAlready.
+  ///
+  /// In ko, this message translates to:
+  /// **'오늘은 이미 놀아줬어요.'**
+  String get snackPlayedTodayAlready;
+
+  /// No description provided for @snackPettedTodayAlready.
+  ///
+  /// In ko, this message translates to:
+  /// **'오늘은 이미 쓰다듬었어요.'**
+  String get snackPettedTodayAlready;
+
+  /// No description provided for @snackPetFetchFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'펫 정보를 불러올 수 없어요: {error}'**
+  String snackPetFetchFailed(String error);
 }
 
 class _AppLocalizationsDelegate
