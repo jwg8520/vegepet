@@ -927,8 +927,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     _safeSetState(() => _isSavingProfile = true);
+    final savedProfileComplete =
+        nickname.isNotEmpty &&
+        _selectedGender != null &&
+        _selectedGender!.trim().isNotEmpty &&
+        _selectedAgeRange != null &&
+        _selectedAgeRange!.trim().isNotEmpty &&
+        _selectedDietGoal != null &&
+        _selectedDietGoal!.trim().isNotEmpty;
     try {
-      await supabase
+      final updatedProfile = await supabase
           .from('profiles')
           .update({
             'nickname': nickname,
@@ -937,7 +945,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             'diet_goal': _selectedDietGoal,
             'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select()
+          .maybeSingle();
+
+      if (updatedProfile != null) {
+        _profile = Map<String, dynamic>.from(updatedProfile);
+      }
 
       if (!mounted) return;
       _safeSetState(() {
@@ -947,28 +961,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await Future<void>.delayed(const Duration(milliseconds: 230));
       if (!mounted) return;
 
-      await _fetchProfile();
+      if (updatedProfile == null) {
+        await _fetchProfile();
+      }
       await _fetchActivePet();
       if (!mounted) return;
 
-      final profileComplete = _isProfileComplete();
+      _profile = {
+        ...?_profile,
+        'id': user.id,
+        'nickname': nickname,
+        'gender': _selectedGender,
+        'age_range': _selectedAgeRange,
+        'diet_goal': _selectedDietGoal,
+      };
+
+      final hasActivePet = _activePet != null;
+
+      debugPrint(
+        'profile save complete: '
+        'savedProfileComplete=$savedProfileComplete, '
+        'fetchedProfileComplete=${_isProfileComplete()}, '
+        'nicknameLen=${_profile?['nickname']?.toString().length ?? 0}, '
+        'gender=${_profile?['gender']}, '
+        'age_range=${_profile?['age_range']}, '
+        'diet_goal=${_profile?['diet_goal']}, '
+        'activePet=${_activePet?['id']}',
+      );
 
       _safeSetState(() {
         _isSavingProfile = false;
         _isProfileSetupClosing = false;
+        _isProfileSetupPanelVisible = false;
 
-        if (profileComplete) {
-          _isProfileSetupPanelVisible = false;
-
-          if (_activePet == null) {
-            _isInitialAdoptionPanelVisible = true;
-            _isInitialAdoptionPanelClosing = false;
-            _isInitialAdoptionInFlight = false;
-          } else {
-            _isInitialAdoptionPanelVisible = false;
-          }
+        if (savedProfileComplete && !hasActivePet) {
+          _isInitialAdoptionPanelVisible = true;
+          _isInitialAdoptionPanelClosing = false;
+          _isInitialAdoptionInFlight = false;
         } else {
-          _isProfileSetupPanelVisible = true;
+          _isInitialAdoptionPanelVisible = false;
         }
       });
     } catch (e) {
@@ -1098,26 +1129,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 offset: Offset(0, dropdownVerticalOffset),
                 child: Material(
                   color: Colors.transparent,
-                  child: IgnorePointer(
-                    ignoring: !_profileSelectOverlayVisible,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 160),
-                      curve: Curves.easeOutCubic,
-                      opacity: _profileSelectOverlayVisible ? 1 : 0,
-                      child: AnimatedScale(
+                  child: SizedBox(
+                    width: dropdownWidth,
+                    child: IgnorePointer(
+                      ignoring: !_profileSelectOverlayVisible,
+                      child: AnimatedOpacity(
                         duration: const Duration(milliseconds: 160),
                         curve: Curves.easeOutCubic,
-                        scale: _profileSelectOverlayVisible ? 1 : 0.96,
-                        alignment: Alignment.topCenter,
-                        child: AnimatedSlide(
+                        opacity: _profileSelectOverlayVisible ? 1 : 0,
+                        child: AnimatedScale(
                           duration: const Duration(milliseconds: 160),
                           curve: Curves.easeOutCubic,
-                          offset: _profileSelectOverlayVisible
-                              ? Offset.zero
-                              : const Offset(0, -0.04),
-                          child: SizedBox(
-                            width: dropdownWidth,
+                          scale: _profileSelectOverlayVisible ? 1 : 0.96,
+                          alignment: Alignment.topCenter,
+                          child: AnimatedSlide(
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeOutCubic,
+                            offset: _profileSelectOverlayVisible
+                                ? Offset.zero
+                                : const Offset(0, -0.04),
                             child: Container(
+                              width: dropdownWidth,
                               decoration: BoxDecoration(
                                 color: menuBackgroundColor,
                                 borderRadius: BorderRadius.circular(12),
@@ -1134,20 +1166,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: SizedBox(
-                                  width: dropdownWidth,
-                                  height: menuHeight,
-                                  child: _buildProfileSelectOptionsList(
-                                    options: options,
-                                    selectedValue: selectedValue,
-                                    onChanged: onChanged,
-                                    optionLabelBuilder: optionLabelBuilder,
-                                    listWidth: dropdownWidth,
-                                    listHeight: menuHeight,
-                                    selectedBackgroundColor:
-                                        selectedBackgroundColor,
-                                    splashColor: splashColor,
-                                  ),
+                                child: _buildProfileSelectOptionsList(
+                                  options: options,
+                                  selectedValue: selectedValue,
+                                  onChanged: onChanged,
+                                  optionLabelBuilder: optionLabelBuilder,
+                                  listWidth: dropdownWidth,
+                                  listHeight: menuHeight,
+                                  selectedBackgroundColor:
+                                      selectedBackgroundColor,
+                                  splashColor: splashColor,
                                 ),
                               ),
                             ),
@@ -1276,54 +1304,58 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     Color selectedBackgroundColor = const Color(0xFFEFF6FF),
     Color splashColor = const Color(0xFFF4F8FF),
   }) {
-    final listView = ListView.builder(
-      controller: _profileSelectScrollController,
-      padding: EdgeInsets.zero,
-      itemExtent: 30,
-      itemCount: options.length,
-      primary: false,
-      shrinkWrap: false,
-      itemBuilder: (context, index) {
-        final option = options[index];
-        final isSelected = option == selectedValue;
-        final isFirst = index == 0;
-        final isLast = index == options.length - 1;
-        return InkWell(
-          splashColor: splashColor.withValues(alpha: 0.45),
-          highlightColor: splashColor.withValues(alpha: 0.35),
-          hoverColor: splashColor.withValues(alpha: 0.25),
-          onTap: () {
-            onChanged(option);
-            unawaited(_closeProfileSelectOverlay());
-          },
-          child: Container(
-            height: 30,
-            width: double.infinity,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: isSelected ? selectedBackgroundColor : Colors.transparent,
-              borderRadius: BorderRadius.vertical(
-                top: isFirst ? const Radius.circular(12) : Radius.zero,
-                bottom: isLast ? const Radius.circular(12) : Radius.zero,
+    final listView = ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: ListView.builder(
+        controller: _profileSelectScrollController,
+        padding: EdgeInsets.zero,
+        itemExtent: 30,
+        itemCount: options.length,
+        primary: false,
+        shrinkWrap: false,
+        physics: const ClampingScrollPhysics(),
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final isSelected = option == selectedValue;
+          final isFirst = index == 0;
+          final isLast = index == options.length - 1;
+          return InkWell(
+            splashColor: splashColor.withValues(alpha: 0.45),
+            highlightColor: splashColor.withValues(alpha: 0.35),
+            hoverColor: splashColor.withValues(alpha: 0.25),
+            onTap: () {
+              onChanged(option);
+              unawaited(_closeProfileSelectOverlay());
+            },
+            child: Container(
+              height: 30,
+              width: double.infinity,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: isSelected ? selectedBackgroundColor : Colors.transparent,
+                borderRadius: BorderRadius.vertical(
+                  top: isFirst ? const Radius.circular(12) : Radius.zero,
+                  bottom: isLast ? const Radius.circular(12) : Radius.zero,
+                ),
+              ),
+              child: Text(
+                optionLabelBuilder?.call(option) ?? option,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: _isEnglishLocale && optionLabelBuilder != null
+                      ? 10
+                      : 11,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF4A4A4A),
+                ),
               ),
             ),
-            child: Text(
-              optionLabelBuilder?.call(option) ?? option,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.left,
-              style: TextStyle(
-                fontSize: _isEnglishLocale && optionLabelBuilder != null
-                    ? 10
-                    : 11,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF4A4A4A),
-              ),
-            ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
     if (options.length <= 3) {
       return SizedBox(
@@ -1335,9 +1367,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return SizedBox(
       width: listWidth,
       height: listHeight,
-      child: Scrollbar(
+      child: RawScrollbar(
         controller: _profileSelectScrollController,
         thumbVisibility: true,
+        thickness: 3,
+        radius: const Radius.circular(20),
         child: listView,
       ),
     );
