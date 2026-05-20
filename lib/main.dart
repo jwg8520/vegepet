@@ -953,6 +953,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _profile = Map<String, dynamic>.from(updatedProfile);
       }
 
+      // 저장 성공 직후 onboarding 판단이 fetch 타이밍에 막히지 않도록 로컬값으로 즉시 보정.
+      _profile = {
+        ...?_profile,
+        'id': user.id,
+        'nickname': nickname,
+        'gender': _selectedGender,
+        'age_range': _selectedAgeRange,
+        'diet_goal': _selectedDietGoal,
+      };
+
       if (!mounted) return;
       _safeSetState(() {
         _isProfileSetupClosing = true;
@@ -967,6 +977,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _fetchActivePet();
       if (!mounted) return;
 
+      // fetch 결과가 old/null이어도 저장한 로컬값을 우선 반영.
       _profile = {
         ...?_profile,
         'id': user.id,
@@ -1294,6 +1305,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildProfileSelectScrollThumb({
+    required double listHeight,
+    required int optionCount,
+  }) {
+    const itemHeight = 30.0;
+    const thumbWidth = 3.0;
+    const thumbRightInset = 2.0;
+    final controller = _profileSelectScrollController;
+    if (controller == null || optionCount <= 3) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        if (!controller.hasClients) {
+          return const SizedBox.shrink();
+        }
+
+        final position = controller.position;
+        final maxScroll = position.maxScrollExtent;
+        if (maxScroll <= 0) {
+          return const SizedBox.shrink();
+        }
+
+        final contentHeight = optionCount * itemHeight;
+        final thumbHeight = (listHeight / contentHeight * listHeight).clamp(
+          16.0,
+          listHeight,
+        );
+        final scrollFraction = (position.pixels / maxScroll).clamp(0.0, 1.0);
+        final thumbTop =
+            scrollFraction * (listHeight - thumbHeight).clamp(0.0, listHeight);
+
+        return Positioned(
+          right: thumbRightInset,
+          top: thumbTop,
+          width: thumbWidth,
+          height: thumbHeight,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0x99000000),
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildProfileSelectOptionsList({
     required List<String> options,
     required String? selectedValue,
@@ -1304,11 +1365,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     Color selectedBackgroundColor = const Color(0xFFEFF6FF),
     Color splashColor = const Color(0xFFF4F8FF),
   }) {
+    final showScrollThumb = options.length > 3;
     final listView = ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: ListView.builder(
         controller: _profileSelectScrollController,
-        padding: EdgeInsets.zero,
+        padding: EdgeInsets.only(right: showScrollThumb ? 6 : 0),
         itemExtent: 30,
         itemCount: options.length,
         primary: false,
@@ -1357,22 +1419,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         },
       ),
     );
-    if (options.length <= 3) {
-      return SizedBox(
-        width: listWidth,
-        height: listHeight,
-        child: listView,
-      );
-    }
     return SizedBox(
       width: listWidth,
       height: listHeight,
-      child: RawScrollbar(
-        controller: _profileSelectScrollController,
-        thumbVisibility: true,
-        thickness: 3,
-        radius: const Radius.circular(20),
-        child: listView,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          Positioned.fill(child: listView),
+          if (showScrollThumb)
+            _buildProfileSelectScrollThumb(
+              listHeight: listHeight,
+              optionCount: options.length,
+            ),
+        ],
       ),
     );
   }
@@ -6012,10 +6071,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     if (showProfileSetup &&
         !_isProfileSetupClosing &&
-        !_isProfileSetupPanelVisible) {
+        !_isProfileSetupPanelVisible &&
+        !_isInitialAdoptionPanelVisible) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final canShow = _status == _ViewStatus.ready && !_isProfileComplete();
+        final canShow =
+            _status == _ViewStatus.ready &&
+            !_isProfileComplete() &&
+            !_isInitialAdoptionPanelVisible;
         if (!canShow || _isProfileSetupClosing) return;
         setState(() {
           _isProfileSetupPanelVisible = true;
