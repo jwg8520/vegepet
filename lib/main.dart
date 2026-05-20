@@ -935,32 +935,38 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _selectedAgeRange!.trim().isNotEmpty &&
         _selectedDietGoal != null &&
         _selectedDietGoal!.trim().isNotEmpty;
+    debugPrint(
+      'profile save request: user=${user.id}, '
+      'nicknameLen=${nickname.length}, '
+      'gender=$_selectedGender, '
+      'age_range=$_selectedAgeRange, '
+      'diet_goal=$_selectedDietGoal',
+    );
     try {
-      final updatedProfile = await supabase
-          .from('profiles')
-          .update({
-            'nickname': nickname,
-            'gender': _selectedGender,
-            'age_range': _selectedAgeRange,
-            'diet_goal': _selectedDietGoal,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', user.id)
-          .select()
-          .maybeSingle();
-
-      if (updatedProfile != null) {
-        _profile = Map<String, dynamic>.from(updatedProfile);
-      }
-
-      // 저장 성공 직후 onboarding 판단이 fetch 타이밍에 막히지 않도록 로컬값으로 즉시 보정.
-      _profile = {
-        ...?_profile,
+      final nowIso = DateTime.now().toIso8601String();
+      final profilePayload = <String, dynamic>{
         'id': user.id,
         'nickname': nickname,
         'gender': _selectedGender,
         'age_range': _selectedAgeRange,
         'diet_goal': _selectedDietGoal,
+        'updated_at': nowIso,
+      };
+
+      final savedRows = await supabase
+          .from('profiles')
+          .upsert(profilePayload, onConflict: 'id')
+          .select();
+
+      Map<String, dynamic>? savedProfile;
+      if (savedRows.isNotEmpty) {
+        savedProfile = Map<String, dynamic>.from(savedRows.first);
+      }
+
+      _profile = {
+        ...?_profile,
+        ...profilePayload,
+        if (savedProfile != null) ...savedProfile,
       };
 
       if (!mounted) return;
@@ -971,33 +977,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await Future<void>.delayed(const Duration(milliseconds: 230));
       if (!mounted) return;
 
-      if (updatedProfile == null) {
-        await _fetchProfile();
-      }
       await _fetchActivePet();
       if (!mounted) return;
 
-      // fetch 결과가 old/null이어도 저장한 로컬값을 우선 반영.
-      _profile = {
-        ...?_profile,
-        'id': user.id,
-        'nickname': nickname,
-        'gender': _selectedGender,
-        'age_range': _selectedAgeRange,
-        'diet_goal': _selectedDietGoal,
-      };
-
-      final hasActivePet = _activePet != null;
-
       debugPrint(
-        'profile save complete: '
+        'profile upsert success: '
+        'profile=$_profile, '
         'savedProfileComplete=$savedProfileComplete, '
-        'fetchedProfileComplete=${_isProfileComplete()}, '
-        'nicknameLen=${_profile?['nickname']?.toString().length ?? 0}, '
-        'gender=${_profile?['gender']}, '
-        'age_range=${_profile?['age_range']}, '
-        'diet_goal=${_profile?['diet_goal']}, '
-        'activePet=${_activePet?['id']}',
+        'activePetId=${_activePet?['id']}',
       );
 
       _safeSetState(() {
@@ -1005,7 +992,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isProfileSetupClosing = false;
         _isProfileSetupPanelVisible = false;
 
-        if (savedProfileComplete && !hasActivePet) {
+        if (savedProfileComplete && _activePet == null) {
           _isInitialAdoptionPanelVisible = true;
           _isInitialAdoptionPanelClosing = false;
           _isInitialAdoptionInFlight = false;
@@ -1013,7 +1000,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isInitialAdoptionPanelVisible = false;
         }
       });
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('profile upsert failed: $e\n$st');
       if (!mounted) return;
       _safeSetState(() {
         _isSavingProfile = false;
@@ -1305,13 +1293,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildProfileSelectScrollThumb({
+  Widget _buildProfileSelectManualScrollbar({
     required double listHeight,
     required int optionCount,
   }) {
-    const itemHeight = 30.0;
-    const thumbWidth = 3.0;
-    const thumbRightInset = 2.0;
     final controller = _profileSelectScrollController;
     if (controller == null || optionCount <= 3) {
       return const SizedBox.shrink();
@@ -1324,32 +1309,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           return const SizedBox.shrink();
         }
 
-        final position = controller.position;
-        final maxScroll = position.maxScrollExtent;
+        const itemHeight = 30.0;
+        final contentHeight = optionCount * itemHeight;
+        final maxScroll = controller.position.maxScrollExtent;
         if (maxScroll <= 0) {
           return const SizedBox.shrink();
         }
 
-        final contentHeight = optionCount * itemHeight;
-        final thumbHeight = (listHeight / contentHeight * listHeight).clamp(
+        final thumbHeight = (listHeight * (listHeight / contentHeight)).clamp(
           16.0,
           listHeight,
         );
-        final scrollFraction = (position.pixels / maxScroll).clamp(0.0, 1.0);
-        final thumbTop =
-            scrollFraction * (listHeight - thumbHeight).clamp(0.0, listHeight);
+        final maxThumbTop = listHeight - thumbHeight;
+        final fraction = (controller.offset / maxScroll).clamp(0.0, 1.0);
+        final thumbTop = fraction * maxThumbTop;
 
-        return Positioned(
-          right: thumbRightInset,
-          top: thumbTop,
-          width: thumbWidth,
-          height: thumbHeight,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0x99000000),
-              borderRadius: BorderRadius.circular(20),
+        return Stack(
+          children: [
+            Positioned(
+              top: thumbTop,
+              right: 0,
+              width: 3,
+              height: thumbHeight,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0x99000000),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
             ),
-          ),
+          ],
         );
       },
     );
@@ -1370,7 +1359,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: ListView.builder(
         controller: _profileSelectScrollController,
-        padding: EdgeInsets.only(right: showScrollThumb ? 6 : 0),
+        padding: EdgeInsets.only(right: showScrollThumb ? 8 : 0),
         itemExtent: 30,
         itemCount: options.length,
         primary: false,
@@ -1427,9 +1416,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         children: [
           Positioned.fill(child: listView),
           if (showScrollThumb)
-            _buildProfileSelectScrollThumb(
-              listHeight: listHeight,
-              optionCount: options.length,
+            Positioned(
+              right: 3,
+              top: 0,
+              bottom: 0,
+              width: 3,
+              child: _buildProfileSelectManualScrollbar(
+                listHeight: listHeight,
+                optionCount: options.length,
+              ),
             ),
         ],
       ),
@@ -1530,13 +1525,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
-    final data = await supabase
+    final rows = await supabase
         .from('profiles')
         .select()
         .eq('id', user.id)
-        .maybeSingle();
+        .limit(1);
 
-    _profile = data == null ? null : Map<String, dynamic>.from(data);
+    if (rows.isNotEmpty) {
+      _profile = Map<String, dynamic>.from(rows.first);
+    } else {
+      _profile = null;
+    }
   }
 
   bool _isEmailLinkedProfile() {
