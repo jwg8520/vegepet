@@ -316,6 +316,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kVegePetConfirmDialogW = 240;
   static const double _kVegePetConfirmDialogH = 116;
 
+  /// 분양 후 이름 짓기 패널 — 프로필 입력창과 동일 앵커 (286, 83).
+  static const double _kPetNicknameDialogLeft = 286;
+  static const double _kPetNicknameDialogTop = 83;
+  static const double _kPetNicknameDialogW = 272;
+  static const double _kPetNicknameDialogH = 208;
+
   static const int _kProfileNicknameMaxLength = 8;
   static final RegExp _nameAllowedRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
 
@@ -15253,29 +15259,52 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog>
       height: 1.0,
     );
 
+    final mq = MediaQuery.of(context);
+    final sw = mq.size.width;
+    final sh = mq.size.height;
+    final scale = min(
+      sw / _HomePageState._kGameCanvasWidth,
+      sh / _HomePageState._kGameCanvasHeight,
+    );
+    final ox = (sw - _HomePageState._kGameCanvasWidth * scale) / 2;
+    final oy = (sh - _HomePageState._kGameCanvasHeight * scale) / 2;
+    final dlgLeft = ox + _HomePageState._kPetNicknameDialogLeft * scale;
+    final dlgTop = oy + _HomePageState._kPetNicknameDialogTop * scale;
+    final dlgW = _HomePageState._kPetNicknameDialogW * scale;
+    final dlgH = _HomePageState._kPetNicknameDialogH * scale;
+    final noticeLeft =
+        ox + _HomePageState._kVegePetConfirmDialogLeft * scale;
+    final noticeTop = oy + _HomePageState._kVegePetConfirmDialogTop * scale;
+    final noticeW = _HomePageState._kVegePetConfirmDialogW * scale;
+    final noticeH = _HomePageState._kVegePetConfirmDialogH * scale;
+
     return Dialog(
       insetPadding: EdgeInsets.zero,
       backgroundColor: Colors.transparent,
       elevation: 0,
-      child: Center(
-        child: SizedBox(
-          width: 844,
-          height: 390,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-                  child: const SizedBox.expand(),
-                ),
+      child: SizedBox(
+        width: sw,
+        height: sh,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+                child: const SizedBox.expand(),
               ),
-              Positioned(
-                left: 286,
-                top: 91,
-                width: 272,
-                height: 208,
-                child: AnimatedBuilder(
+            ),
+            Positioned(
+              left: dlgLeft,
+              top: dlgTop,
+              width: dlgW,
+              height: dlgH,
+              child: FittedBox(
+                fit: BoxFit.fill,
+                child: SizedBox(
+                  width: _HomePageState._kPetNicknameDialogW,
+                  height: _HomePageState._kPetNicknameDialogH,
+                  child: AnimatedBuilder(
                   animation: _panelEnterCurve,
                   builder: (context, child) {
                     final t = _panelEnterCurve.value.clamp(0.0, 1.0);
@@ -15506,49 +15535,57 @@ class _PetNicknameDialogState extends State<_PetNicknameDialog>
                     ),
                   ),
                 ),
+                  ),
+                ),
               ),
-              if (_isNameInterlockNoticeOpen)
-                Positioned.fill(
-                  child: AnimatedBuilder(
-                    animation: _nameInterlockFadeCurve,
-                    builder: (context, fadedChild) {
-                      return Opacity(
-                        opacity: _nameInterlockFadeCurve.value.clamp(0.0, 1.0),
-                        child: fadedChild,
-                      );
-                    },
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned.fill(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: () => unawaited(_hideNameInterlockNotice()),
-                            child: const SizedBox.expand(),
-                          ),
+            if (_isNameInterlockNoticeOpen)
+              Positioned.fill(
+                child: AnimatedBuilder(
+                  animation: _nameInterlockFadeCurve,
+                  builder: (context, fadedChild) {
+                    return Opacity(
+                      opacity: _nameInterlockFadeCurve.value.clamp(0.0, 1.0),
+                      child: fadedChild,
+                    );
+                  },
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    fit: StackFit.expand,
+                    children: [
+                      Positioned.fill(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: () => unawaited(_hideNameInterlockNotice()),
+                          child: const SizedBox.expand(),
                         ),
-                        Positioned(
-                          left: _HomePageState._kVegePetConfirmDialogLeft,
-                          top: _HomePageState._kVegePetConfirmDialogTop,
-                          width: _HomePageState._kVegePetConfirmDialogW,
-                          height: _HomePageState._kVegePetConfirmDialogH,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {},
-                            child: _buildNameInterlockNoticeDialogShared(
-                              context: context,
-                              onConfirm: () =>
-                                  unawaited(_hideNameInterlockNotice()),
+                      ),
+                      Positioned(
+                        left: noticeLeft,
+                        top: noticeTop,
+                        width: noticeW,
+                        height: noticeH,
+                        child: FittedBox(
+                          fit: BoxFit.fill,
+                          child: SizedBox(
+                            width: _HomePageState._kVegePetConfirmDialogW,
+                            height: _HomePageState._kVegePetConfirmDialogH,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {},
+                              child: _buildNameInterlockNoticeDialogShared(
+                                context: context,
+                                onConfirm: () =>
+                                    unawaited(_hideNameInterlockNotice()),
+                              ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
