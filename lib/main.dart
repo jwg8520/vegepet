@@ -368,6 +368,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _isSavingProfile = false;
   bool _isNamingDialogOpen = false;
   bool _canShowActivePetDuringNaming = false;
+  bool _isPetNamingPanelClosing = false;
+  final TextEditingController _petNamingController = TextEditingController();
+  Completer<String?>? _petNamingCompleter;
+  late AnimationController _petNamingPanelEnterController;
+  late Animation<double> _petNamingPanelEnterCurve;
 
   static const List<String> _languageDisplayOptions = ['한국어', 'English'];
 
@@ -794,6 +799,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+    _petNamingPanelEnterController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _petNamingPanelEnterCurve = CurvedAnimation(
+      parent: _petNamingPanelEnterController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
     _bootstrap();
   }
 
@@ -823,6 +837,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
     _yardConfirmOverlayFadeController.dispose();
+    _petNamingPanelEnterController.dispose();
+    _petNamingController.dispose();
+    if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
+      _petNamingCompleter!.complete(null);
+    }
     super.dispose();
   }
 
@@ -3176,46 +3195,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  // 분양 직후에 뜨는 닉네임 입력 다이얼로그.
+  // 분양 직후 마당 캔버스(844×390) 위 이름 짓기 패널.
   // 허용 문자: 한글/영문 대소문자/숫자, 길이 2~8자, 공백·특수문자 금지.
-  //
-  // Dialog 위젯 자체(_PetNicknameDialog)는 "이름 입력 / 검증 / 문자열 반환" 만
-  // 책임지고, Supabase user_pets.nickname update / _fetchActivePet /
-  // HomePage setState / SnackBar 같은 후처리는 Dialog 가 완전히 닫히고
-  // 한 frame 양보된 뒤 여기에서 수행한다. 이렇게 분리해야 TextField/Focus/
-  // TextEditingController dispose 와 HomePage 상태 갱신이 겹쳐서 발생하던
-  // `_dependents.isEmpty is not true` assertion 오류가 재발하지 않는다.
+  // 패널이 닫히고 한 frame 양보된 뒤 Supabase 저장/스낵바를 수행한다.
   Future<void> _showNicknameDialog() async {
     final pet = _activePet;
     if (pet == null || !mounted) return;
 
-    // Dialog 가 닫힌 사이 _activePet 이 재조회로 잠시 비거나 바뀌더라도
-    // 잘못된 row 를 업데이트하지 않도록 petId 를 미리 확보해 둔다.
     final petId = pet['id']?.toString();
     if (petId == null || petId.isEmpty) return;
 
     _dismissFocus();
+    _petNamingController.clear();
 
-    // 이름 짓기 창 fade-in 과 마당 activePet 표시를 같은 전환에서 같이 켠다.
+    final completer = Completer<String?>();
+    _petNamingCompleter = completer;
+
     _safeSetState(() {
       _isNamingDialogOpen = true;
       _canShowActivePetDuringNaming = true;
+      _isPetNamingPanelClosing = false;
     });
+    _petNamingPanelEnterController.stop();
+    _petNamingPanelEnterController.value = 0;
+    unawaited(_petNamingPanelEnterController.forward());
 
-    final nickname = await showDialog<String>(
-      context: _rootNavigatorKey.currentContext ?? context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      useRootNavigator: true,
-      builder: (ctx) => _PetNicknameDialog(activePet: pet),
-    );
-
-    if (mounted) {
-      _safeSetState(() {
-        _isNamingDialogOpen = false;
-        _canShowActivePetDuringNaming = false;
-      });
-    }
+    final nickname = await completer.future;
+    _petNamingCompleter = null;
 
     if (!mounted || nickname == null) return;
 
@@ -3319,6 +3325,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isInitialAdoptionInFlight = false;
         _isNamingDialogOpen = false;
         _canShowActivePetDuringNaming = false;
+        _isPetNamingPanelClosing = false;
+        _petNamingController.clear();
+        if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
+          _petNamingCompleter!.complete(null);
+        }
+        _petNamingCompleter = null;
+        _petNamingPanelEnterController.stop();
+        _petNamingPanelEnterController.value = 0;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -6122,6 +6136,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
+        if (_isNamingDialogOpen || _isPetNamingPanelClosing)
+          _buildInYardPetNamingPanel(),
         _buildBagItemDetailGlobalOverlay(),
         _buildPokedexMaturePetDetailGlobalOverlay(),
         _buildEmailLinkPanelGlobalOverlay(),
@@ -7873,6 +7889,310 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ),
                     child: _buildProfileFormContent(),
                   ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _petIconDataForNaming() {
+    final species = _activePet?['pet_species'];
+    final family = species is Map
+        ? species['family']?.toString().toLowerCase().trim()
+        : null;
+    if (family != null && family.contains('dog')) return Icons.pets;
+    if (family != null && family.contains('cat')) return Icons.cruelty_free;
+    return Icons.pets;
+  }
+
+  Future<void> _closePetNamingPanel({required String? result}) async {
+    if (_isPetNamingPanelClosing) return;
+    _dismissFocus();
+    _safeSetState(() => _isPetNamingPanelClosing = true);
+    if (_petNamingPanelEnterController.value > 0) {
+      await _petNamingPanelEnterController.reverse();
+    }
+    if (!mounted) return;
+    _safeSetState(() {
+      _isNamingDialogOpen = false;
+      _canShowActivePetDuringNaming = false;
+      _isPetNamingPanelClosing = false;
+    });
+    final completer = _petNamingCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(result);
+    }
+  }
+
+  Future<void> _submitPetNaming() async {
+    if (_isPetNamingPanelClosing || _isNameInterlockNoticeOpen) return;
+    final text = _petNamingController.text.trim();
+    if (!_isValidNicknameOrPetName(text)) {
+      await _showNameInterlockNotice();
+      return;
+    }
+    await _closePetNamingPanel(result: text);
+  }
+
+  Widget _buildInYardPetNamingPanel() {
+    const titleStyle = TextStyle(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const subtitleStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+    const labelStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    const fieldTextStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.0,
+    );
+
+    final panelInteractive =
+        _isNamingDialogOpen && !_isPetNamingPanelClosing;
+
+    return Positioned(
+      left: _kPetNicknameDialogLeft,
+      top: _kPetNicknameDialogTop,
+      width: _kPetNicknameDialogW,
+      height: _kPetNicknameDialogH,
+      child: IgnorePointer(
+        ignoring: !panelInteractive,
+        child: AnimatedBuilder(
+          animation: _petNamingPanelEnterCurve,
+          builder: (context, child) {
+            final t = _petNamingPanelEnterCurve.value.clamp(0.0, 1.0);
+            return Opacity(
+              opacity: t,
+              child: Transform.scale(
+                scale: 0.985 + (0.015 * t),
+                child: child,
+              ),
+            );
+          },
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.07),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Positioned(
+                      left: 14,
+                      top: 14,
+                      right: 14,
+                      child: Text(
+                        '아기 베지펫이 분양 되었어요🥹',
+                        textAlign: TextAlign.left,
+                        style: titleStyle,
+                      ),
+                    ),
+                    const Positioned(
+                      left: 14,
+                      top: 40,
+                      right: 14,
+                      child: Text(
+                        '건강하게 키워주세요!',
+                        textAlign: TextAlign.left,
+                        style: subtitleStyle,
+                      ),
+                    ),
+                    Positioned(
+                      left: 112,
+                      top: 60,
+                      width: 48,
+                      height: 48,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F5F5),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: const Color(0xFFB8B8B8),
+                            width: 1,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          _petIconDataForNaming(),
+                          size: 24,
+                          color: const Color(0xFF3A3A3A),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 14,
+                      top: 120,
+                      width: 244,
+                      height: 26,
+                      child: Row(
+                        children: [
+                          const SizedBox(
+                            width: 36,
+                            child: Text(
+                              '이름',
+                              textAlign: TextAlign.left,
+                              style: labelStyle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Container(
+                              height: 26,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFFE6E6E6),
+                                  width: 1,
+                                ),
+                              ),
+                              alignment: Alignment.centerLeft,
+                              child: TextField(
+                                controller: _petNamingController,
+                                autofocus: false,
+                                maxLines: 1,
+                                maxLength: 8,
+                                maxLengthEnforcement:
+                                    MaxLengthEnforcement.enforced,
+                                style: fieldTextStyle,
+                                inputFormatters: [
+                                  LengthLimitingTextInputFormatter(
+                                    8,
+                                    maxLengthEnforcement:
+                                        MaxLengthEnforcement.enforced,
+                                  ),
+                                ],
+                                buildCounter:
+                                    (
+                                      BuildContext context, {
+                                      required int currentLength,
+                                      required bool isFocused,
+                                      required int? maxLength,
+                                    }) {
+                                      return null;
+                                    },
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                  hintText: '이름을 지어주세요.',
+                                  hintStyle: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF4A4A4A),
+                                  ),
+                                  errorText: null,
+                                ),
+                                onTapOutside: (_) =>
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus(),
+                                onSubmitted: (_) {
+                                  unawaited(_submitPetNaming());
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned(
+                      left: 14,
+                      top: 160,
+                      width: 244,
+                      height: 34,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: const Color(0xFFF1F1F1),
+                            width: 0.8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: TextButton(
+                          onPressed:
+                              (_isPetNamingPanelClosing ||
+                                  _isNameInterlockNoticeOpen)
+                              ? null
+                              : () {
+                                  unawaited(_submitPetNaming());
+                                },
+                          style: TextButton.styleFrom(
+                            elevation: 0,
+                            shadowColor: Colors.transparent,
+                            backgroundColor: Colors.transparent,
+                            disabledBackgroundColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: ShaderMask(
+                            shaderCallback: (bounds) => const LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Color(0xFFA9C9FF),
+                                Color(0xFFBFD9FF),
+                              ],
+                            ).createShader(bounds),
+                            blendMode: BlendMode.srcIn,
+                            child: const Text(
+                              '저장',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFAFCFFF),
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -13194,6 +13514,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isInitialAdoptionInFlight = false;
         _isNamingDialogOpen = false;
         _canShowActivePetDuringNaming = false;
+        _isPetNamingPanelClosing = false;
+        _petNamingController.clear();
+        if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
+          _petNamingCompleter!.complete(null);
+        }
+        _petNamingCompleter = null;
+        _petNamingPanelEnterController.stop();
+        _petNamingPanelEnterController.value = 0;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -14929,11 +15257,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
-bool _isValidNicknameOrPetNameValue(String raw) {
-  final value = raw.trim();
-  return _HomePageState._nameAllowedRegExp.hasMatch(value);
-}
-
 Widget _buildVegePetPastelBlueGradientButtonTextShared(
   String text, {
   double fontSize = 14,
@@ -14996,111 +15319,6 @@ Widget _buildVegePetConfirmDialogShellShared({
   );
 }
 
-Widget _buildNameInterlockNoticeDialogShared({
-  required BuildContext context,
-  required VoidCallback onConfirm,
-}) {
-  const dialogW = _HomePageState._kVegePetConfirmDialogW;
-  const dialogH = _HomePageState._kVegePetConfirmDialogH;
-  final l10n = AppLocalizations.of(context);
-  final isEn = Localizations.localeOf(context).languageCode == 'en';
-
-  return _buildVegePetConfirmDialogShellShared(
-    width: dialogW,
-    height: dialogH,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.nameInterlockMain,
-                  textAlign: TextAlign.left,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: 'Pretendard',
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF000000),
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  l10n.nameInterlockSub,
-                  textAlign: TextAlign.left,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'Pretendard',
-                    fontSize: isEn ? 9 : 10,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFFB92020),
-                    height: 1.25,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              onTap: onConfirm,
-              borderRadius: BorderRadius.circular(14),
-              child: Ink(
-                height: 30,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.all(Radius.circular(14)),
-                  border: Border.fromBorderSide(
-                    BorderSide(color: Color(0xFFF1F1F1), width: 0.8),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0x08000000),
-                      blurRadius: 4,
-                      offset: Offset(0, 1),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: _buildVegePetPastelBlueGradientButtonTextShared(
-                    l10n.confirmLabel,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-// 이름 입력 전용 Dialog.
-//
-// 책임:
-//   - TextEditingController / 검증 / 에러 메시지 상태 소유 및 관리
-//   - 저장 버튼/엔터 입력 시 검증 통과한 nickname 문자열을 Navigator.pop 으로 반환
-//
-// 비책임 (절대 하지 말 것):
-//   - Supabase 호출
-//   - HomePage 의 _fetchActivePet / _safeSetState / _showSnack 호출
-//
-// 이 분리 덕분에 Dialog dispose(TextField/Focus/TextEditingController)와
-// HomePage 의 DB 재조회/상태 갱신/SnackBar 가 같은 프레임에 겹치지 않는다.
 // 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
 //
 // category 는 'ticket' | 'furniture' | 'toy' 중 하나.
@@ -15124,472 +15342,6 @@ class _BagItem {
     this.usable = false,
     this.targetPetFamily,
   });
-}
-
-class _PetNicknameDialog extends StatefulWidget {
-  const _PetNicknameDialog({required this.activePet});
-
-  final Map<String, dynamic> activePet;
-
-  @override
-  State<_PetNicknameDialog> createState() => _PetNicknameDialogState();
-}
-
-class _PetNicknameDialogState extends State<_PetNicknameDialog>
-    with TickerProviderStateMixin {
-  final TextEditingController _controller = TextEditingController();
-  bool _isClosing = false;
-  bool _isNameInterlockNoticeOpen = false;
-  late AnimationController _panelEnterController;
-  late Animation<double> _panelEnterCurve;
-  late AnimationController _nameInterlockFadeController;
-  late Animation<double> _nameInterlockFadeCurve;
-
-  @override
-  void initState() {
-    super.initState();
-    _panelEnterController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 220),
-    );
-    _panelEnterCurve = CurvedAnimation(
-      parent: _panelEnterController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    _nameInterlockFadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 240),
-    );
-    _nameInterlockFadeCurve = CurvedAnimation(
-      parent: _nameInterlockFadeController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    unawaited(_panelEnterController.forward());
-  }
-
-  @override
-  void dispose() {
-    _panelEnterController.dispose();
-    _nameInterlockFadeController.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _showNameInterlockNotice() async {
-    if (_isNameInterlockNoticeOpen || _isClosing) return;
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (!_isNameInterlockNoticeOpen) {
-      setState(() => _isNameInterlockNoticeOpen = true);
-    }
-    _nameInterlockFadeController.stop();
-    _nameInterlockFadeController.value = 0;
-    unawaited(_nameInterlockFadeController.forward());
-  }
-
-  Future<void> _hideNameInterlockNotice() async {
-    if (!_isNameInterlockNoticeOpen) return;
-    if (_nameInterlockFadeController.value <= 0) {
-      if (mounted) {
-        setState(() => _isNameInterlockNoticeOpen = false);
-      }
-      return;
-    }
-    if (_nameInterlockFadeController.status == AnimationStatus.reverse) {
-      return;
-    }
-    await _nameInterlockFadeController.reverse();
-    if (!mounted) return;
-    setState(() => _isNameInterlockNoticeOpen = false);
-  }
-
-  Future<void> _submit() async {
-    if (_isClosing || _isNameInterlockNoticeOpen) return;
-    final text = _controller.text.trim();
-
-    if (!_isValidNicknameOrPetNameValue(text)) {
-      await _showNameInterlockNotice();
-      return;
-    }
-
-    // pop 직전 포커스 정리: TextField 가 살아 있는 채로 pop 되어
-    // 트리 dispose 와 focus 정리 타이밍이 겹치는 것을 방지한다.
-    FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => _isClosing = true);
-    await _panelEnterController.reverse();
-    if (!mounted) return;
-    Navigator.of(context).pop(text);
-  }
-
-  IconData _petIconData() {
-    final species = widget.activePet['pet_species'];
-    final family = species is Map
-        ? species['family']?.toString().toLowerCase().trim()
-        : null;
-    if (family != null && family.contains('dog')) return Icons.pets;
-    if (family != null && family.contains('cat')) return Icons.cruelty_free;
-    return Icons.pets;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const titleStyle = TextStyle(
-      fontSize: 16,
-      fontWeight: FontWeight.w700,
-      color: Color(0xFF000000),
-      height: 1.0,
-    );
-    const subtitleStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: Color(0xFF4A4A4A),
-      height: 1.0,
-    );
-    const labelStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: Color(0xFF000000),
-      height: 1.0,
-    );
-    const fieldTextStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: Color(0xFF4A4A4A),
-      height: 1.0,
-    );
-
-    final mq = MediaQuery.of(context);
-    final sw = mq.size.width;
-    final sh = mq.size.height;
-    final scale = min(
-      sw / _HomePageState._kGameCanvasWidth,
-      sh / _HomePageState._kGameCanvasHeight,
-    );
-    final ox = (sw - _HomePageState._kGameCanvasWidth * scale) / 2;
-    final oy = (sh - _HomePageState._kGameCanvasHeight * scale) / 2;
-    final dlgLeft = ox + _HomePageState._kPetNicknameDialogLeft * scale;
-    final dlgTop = oy + _HomePageState._kPetNicknameDialogTop * scale;
-    final dlgW = _HomePageState._kPetNicknameDialogW * scale;
-    final dlgH = _HomePageState._kPetNicknameDialogH * scale;
-    final noticeLeft =
-        ox + _HomePageState._kVegePetConfirmDialogLeft * scale;
-    final noticeTop = oy + _HomePageState._kVegePetConfirmDialogTop * scale;
-    final noticeW = _HomePageState._kVegePetConfirmDialogW * scale;
-    final noticeH = _HomePageState._kVegePetConfirmDialogH * scale;
-
-    return Dialog(
-      insetPadding: EdgeInsets.zero,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      child: SizedBox(
-        width: sw,
-        height: sh,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: dlgLeft,
-              top: dlgTop,
-              width: dlgW,
-              height: dlgH,
-              child: FittedBox(
-                fit: BoxFit.fill,
-                child: SizedBox(
-                  width: _HomePageState._kPetNicknameDialogW,
-                  height: _HomePageState._kPetNicknameDialogH,
-                  child: AnimatedBuilder(
-                  animation: _panelEnterCurve,
-                  builder: (context, child) {
-                    final t = _panelEnterCurve.value.clamp(0.0, 1.0);
-                    return Opacity(
-                      opacity: t,
-                      child: Transform.scale(
-                        scale: 0.985 + (0.015 * t),
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(
-                            0xFFFFFBF5,
-                          ).withValues(alpha: 0.60),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(
-                              0xFFF6F0E6,
-                            ).withValues(alpha: 0.85),
-                            width: 1,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.07),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            const Positioned(
-                              left: 14,
-                              top: 14,
-                              right: 14,
-                              child: Text(
-                                '아기 베지펫이 분양 되었어요🥹',
-                                textAlign: TextAlign.left,
-                                style: titleStyle,
-                              ),
-                            ),
-                            const Positioned(
-                              left: 14,
-                              top: 40,
-                              right: 14,
-                              child: Text(
-                                '건강하게 키워주세요!',
-                                textAlign: TextAlign.left,
-                                style: subtitleStyle,
-                              ),
-                            ),
-                            Positioned(
-                              left: 112,
-                              top: 60,
-                              width: 48,
-                              height: 48,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF5F5F5),
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color: const Color(0xFFB8B8B8),
-                                    width: 1,
-                                  ),
-                                ),
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  _petIconData(),
-                                  size: 24,
-                                  color: const Color(0xFF3A3A3A),
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              left: 14,
-                              top: 120,
-                              width: 244,
-                              height: 26,
-                              child: Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 36,
-                                    child: Text(
-                                      '이름',
-                                      textAlign: TextAlign.left,
-                                      style: labelStyle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Container(
-                                      height: 26,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
-                                          color: const Color(0xFFE6E6E6),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      alignment: Alignment.centerLeft,
-                                      child: TextField(
-                                        controller: _controller,
-                                        autofocus: false,
-                                        maxLines: 1,
-                                        maxLength: 8,
-                                        maxLengthEnforcement:
-                                            MaxLengthEnforcement.enforced,
-                                        style: fieldTextStyle,
-                                        inputFormatters: [
-                                          LengthLimitingTextInputFormatter(
-                                            8,
-                                            maxLengthEnforcement:
-                                                MaxLengthEnforcement.enforced,
-                                          ),
-                                        ],
-                                        buildCounter:
-                                            (
-                                              BuildContext context, {
-                                              required int currentLength,
-                                              required bool isFocused,
-                                              required int? maxLength,
-                                            }) {
-                                              return null;
-                                            },
-                                        decoration: InputDecoration(
-                                          isDense: true,
-                                          border: InputBorder.none,
-                                          contentPadding: EdgeInsets.zero,
-                                          hintText: '이름을 지어주세요.',
-                                          hintStyle: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF4A4A4A),
-                                          ),
-                                          errorText: null,
-                                        ),
-                                        onTapOutside: (_) => FocusManager
-                                            .instance
-                                            .primaryFocus
-                                            ?.unfocus(),
-                                        onSubmitted: (_) {
-                                          unawaited(_submit());
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Positioned(
-                              left: 14,
-                              top: 160,
-                              width: 244,
-                              height: 34,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: const Color(0xFFF1F1F1),
-                                    width: 0.8,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.03,
-                                      ),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                                child: TextButton(
-                                  onPressed: (_isClosing || _isNameInterlockNoticeOpen)
-                                      ? null
-                                      : () {
-                                          unawaited(_submit());
-                                        },
-                                  style: TextButton.styleFrom(
-                                    elevation: 0,
-                                    shadowColor: Colors.transparent,
-                                    backgroundColor: Colors.transparent,
-                                    disabledBackgroundColor: Colors.transparent,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                    padding: EdgeInsets.zero,
-                                  ),
-                                  child: ShaderMask(
-                                    shaderCallback: (bounds) =>
-                                        const LinearGradient(
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                          colors: [
-                                            Color(0xFFA9C9FF),
-                                            Color(0xFFBFD9FF),
-                                          ],
-                                        ).createShader(bounds),
-                                    blendMode: BlendMode.srcIn,
-                                    child: const Text(
-                                      '저장',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFFAFCFFF),
-                                        height: 1.0,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                  ),
-                ),
-              ),
-            if (_isNameInterlockNoticeOpen)
-              Positioned.fill(
-                child: AnimatedBuilder(
-                  animation: _nameInterlockFadeCurve,
-                  builder: (context, fadedChild) {
-                    return Opacity(
-                      opacity: _nameInterlockFadeCurve.value.clamp(0.0, 1.0),
-                      child: fadedChild,
-                    );
-                  },
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    fit: StackFit.expand,
-                    children: [
-                      Positioned.fill(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onTap: () => unawaited(_hideNameInterlockNotice()),
-                          child: const SizedBox.expand(),
-                        ),
-                      ),
-                      Positioned(
-                        left: noticeLeft,
-                        top: noticeTop,
-                        width: noticeW,
-                        height: noticeH,
-                        child: FittedBox(
-                          fit: BoxFit.fill,
-                          child: SizedBox(
-                            width: _HomePageState._kVegePetConfirmDialogW,
-                            height: _HomePageState._kVegePetConfirmDialogH,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {},
-                              child: _buildNameInterlockNoticeDialogShared(
-                                context: context,
-                                onConfirm: () =>
-                                    unawaited(_hideNameInterlockNotice()),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // 펫 정보 BottomSheet 안의 애정도 경험치 바에서 사용하는 표시 정보.
