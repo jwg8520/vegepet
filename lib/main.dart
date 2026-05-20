@@ -293,9 +293,9 @@ class _SupportDocument {
   final List<_SupportDocumentSection> sections;
 }
 
-/// 게임 메뉴 하위 패널 대제목 top (한국어 14 · 영어 -1px, 뒤로가기 버튼은 9 고정).
+/// 게임 메뉴 하위 패널 대제목 top (한국어 14 · 영어 +1px, 뒤로가기 버튼은 9 고정).
 const double _kGameMenuSubPanelTitleTop = 14;
-const double _kGameMenuSubPanelTitleTopEnOffset = -1.0;
+const double _kGameMenuSubPanelTitleTopEnOffset = 1.0;
 
 enum _ViewStatus { loading, error, ready }
 
@@ -948,13 +948,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (!mounted) return;
 
       await _fetchProfile();
+      await _fetchActivePet();
       if (!mounted) return;
+
+      final profileComplete = _isProfileComplete();
+
       _safeSetState(() {
         _isSavingProfile = false;
         _isProfileSetupClosing = false;
-        _isProfileSetupPanelVisible = true;
+
+        if (profileComplete) {
+          _isProfileSetupPanelVisible = false;
+
+          if (_activePet == null) {
+            _isInitialAdoptionPanelVisible = true;
+            _isInitialAdoptionPanelClosing = false;
+            _isInitialAdoptionInFlight = false;
+          } else {
+            _isInitialAdoptionPanelVisible = false;
+          }
+        } else {
+          _isProfileSetupPanelVisible = true;
+        }
       });
-      await _waitForUiSettle();
     } catch (e) {
       if (!mounted) return;
       _safeSetState(() {
@@ -1047,6 +1063,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required String? selectedValue,
     required ValueChanged<String> onChanged,
+    String Function(String raw)? optionLabelBuilder,
     double dropdownWidth = 176,
     double dropdownVerticalOffset = 30,
     Color menuBackgroundColor = Colors.white,
@@ -1118,11 +1135,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
                                 child: SizedBox(
+                                  width: dropdownWidth,
                                   height: menuHeight,
                                   child: _buildProfileSelectOptionsList(
                                     options: options,
                                     selectedValue: selectedValue,
                                     onChanged: onChanged,
+                                    optionLabelBuilder: optionLabelBuilder,
+                                    listWidth: dropdownWidth,
+                                    listHeight: menuHeight,
                                     selectedBackgroundColor:
                                         selectedBackgroundColor,
                                     splashColor: splashColor,
@@ -1160,10 +1181,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required ValueChanged<String> onChanged,
     required bool enabled,
+    String Function(String raw)? optionLabelBuilder,
     double fieldWidth = 176,
   }) {
     final link = _profileSelectLinks.putIfAbsent(selectKey, LayerLink.new);
     final isOpen = _openProfileSelectKey == selectKey;
+    final displayValue = value == null || value.isEmpty
+        ? ''
+        : (optionLabelBuilder?.call(value) ?? value);
+    final isEn = _isEnglishLocale;
 
     final fieldChild = Container(
       width: fieldWidth,
@@ -1177,15 +1203,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              value ?? '',
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF4A4A4A),
-              ),
-            ),
+            child: isEn
+                ? FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      displayValue,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF4A4A4A),
+                      ),
+                    ),
+                  )
+                : Text(
+                    displayValue,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                    ),
+                  ),
           ),
           Icon(
             isOpen
@@ -1216,6 +1257,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   options: options,
                   selectedValue: value,
                   onChanged: onChanged,
+                  optionLabelBuilder: optionLabelBuilder,
                   dropdownWidth: fieldWidth,
                 );
               },
@@ -1228,6 +1270,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required List<String> options,
     required String? selectedValue,
     required ValueChanged<String> onChanged,
+    required double listWidth,
+    required double listHeight,
+    String Function(String raw)? optionLabelBuilder,
     Color selectedBackgroundColor = const Color(0xFFEFF6FF),
     Color splashColor = const Color(0xFFF4F8FF),
   }) {
@@ -1236,6 +1281,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       padding: EdgeInsets.zero,
       itemExtent: 30,
       itemCount: options.length,
+      primary: false,
+      shrinkWrap: false,
       itemBuilder: (context, index) {
         final option = options[index];
         final isSelected = option == selectedValue;
@@ -1262,12 +1309,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ),
             child: Text(
-              option,
+              optionLabelBuilder?.call(option) ?? option,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.left,
-              style: const TextStyle(
-                fontSize: 11,
+              style: TextStyle(
+                fontSize: _isEnglishLocale && optionLabelBuilder != null
+                    ? 10
+                    : 11,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF4A4A4A),
+                color: const Color(0xFF4A4A4A),
               ),
             ),
           ),
@@ -1275,12 +1326,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       },
     );
     if (options.length <= 3) {
-      return listView;
+      return SizedBox(
+        width: listWidth,
+        height: listHeight,
+        child: listView,
+      );
     }
-    return Scrollbar(
-      controller: _profileSelectScrollController,
-      thumbVisibility: true,
-      child: listView,
+    return SizedBox(
+      width: listWidth,
+      height: listHeight,
+      child: Scrollbar(
+        controller: _profileSelectScrollController,
+        thumbVisibility: true,
+        child: listView,
+      ),
     );
   }
 
@@ -1316,9 +1375,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (!mounted) return;
       setState(() {
         final profileComplete = _isProfileComplete();
+        final hasActivePet = _activePet != null;
         _status = _ViewStatus.ready;
         _isProfileSetupClosing = false;
-        _isProfileSetupPanelVisible = profileComplete ? true : false;
+        _isProfileSetupPanelVisible = !profileComplete;
+        _isInitialAdoptionPanelVisible = profileComplete && !hasActivePet;
+        _isInitialAdoptionPanelClosing = false;
+        if (profileComplete && !hasActivePet) {
+          _isInitialAdoptionInFlight = false;
+        }
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -8316,6 +8381,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         : <String, dynamic>{};
     final family = species['family']?.toString().toLowerCase() ?? '';
     final speciesName = species['name_ko']?.toString() ?? '펫';
+    final typeDisplay = _localizedPetFamilyOrType(species, l10n);
     final nickname = pet['nickname']?.toString();
     final displayName = (nickname == null || nickname.isEmpty)
         ? speciesName
@@ -8351,7 +8417,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       height: 1.0,
     );
 
-    Widget metaValueBox(String text) {
+    final isEn = _isEnglishLocale;
+
+    Widget metaValueBox(String text, {bool scaleDownForEn = false}) {
+      final textWidget = Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: valueStyle.copyWith(fontSize: isEn && scaleDownForEn ? 10.5 : 12),
+      );
       return Container(
         height: 24,
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -8364,16 +8438,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             width: 0.8,
           ),
         ),
-        child: Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: valueStyle,
-        ),
+        child: isEn && scaleDownForEn
+            ? FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: textWidget,
+              )
+            : textWidget,
       );
     }
 
-    final isEn = _isEnglishLocale;
     Widget pillButton({required String label, required VoidCallback? onTap}) {
       final disabled = onTap == null;
       return Material(
@@ -8513,7 +8587,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           style: labelStyle,
                         ),
                       ),
-                      Expanded(child: metaValueBox(speciesName)),
+                      Expanded(child: metaValueBox(typeDisplay, scaleDownForEn: true)),
                     ],
                   ),
                 ),
@@ -10803,6 +10877,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                       value: _selectedGender,
                                       options: _genderOptions,
                                       enabled: fieldsEnabled,
+                                      optionLabelBuilder: (v) =>
+                                          _localizedGenderValue(v, l10n),
                                       fieldWidth: fieldW.clamp(
                                         100.0,
                                         _kGameMenuProfileFieldW,
@@ -10826,6 +10902,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                       value: _selectedAgeRange,
                                       options: _ageRangeOptions,
                                       enabled: fieldsEnabled,
+                                      optionLabelBuilder: (v) =>
+                                          _localizedAgeRangeValue(v, l10n),
                                       fieldWidth: fieldW.clamp(
                                         100.0,
                                         _kGameMenuProfileFieldW,
@@ -10852,6 +10930,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                       value: _selectedDietGoal,
                                       options: _dietGoalOptions,
                                       enabled: fieldsEnabled,
+                                      optionLabelBuilder: (v) =>
+                                          _localizedDietGoalValue(v, l10n),
                                       fieldWidth: fieldW.clamp(
                                         100.0,
                                         _kGameMenuProfileFieldW,
@@ -14139,6 +14219,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               value: _selectedGender,
               options: _genderOptions,
               enabled: !_isSavingProfile,
+              optionLabelBuilder: (v) => _localizedGenderValue(v, l10n),
               onChanged: (value) => setState(() => _selectedGender = value),
             ),
           ),
@@ -14150,6 +14231,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               value: _selectedAgeRange,
               options: _ageRangeOptions,
               enabled: !_isSavingProfile,
+              optionLabelBuilder: (v) => _localizedAgeRangeValue(v, l10n),
               onChanged: (value) => setState(() => _selectedAgeRange = value),
             ),
           ),
@@ -14161,6 +14243,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               value: _selectedDietGoal,
               options: _dietGoalOptions,
               enabled: !_isSavingProfile,
+              optionLabelBuilder: (v) => _localizedDietGoalValue(v, l10n),
               onChanged: (value) => setState(() => _selectedDietGoal = value),
             ),
           ),
@@ -14524,6 +14607,93 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   double get _gameMenuSubPanelTitleTop =>
       _kGameMenuSubPanelTitleTop +
       (_isEnglishLocale ? _kGameMenuSubPanelTitleTopEnOffset : 0.0);
+
+  /// DB/내부 raw 값 → 화면 표시용. 저장·AI context에는 raw 를 그대로 쓴다.
+  String _localizedGenderValue(String? raw, AppLocalizations l10n) {
+    final value = raw?.trim() ?? '';
+    if (!_isEnglishLocale) return value;
+
+    switch (value) {
+      case '여자':
+        return 'Female';
+      case '남자':
+        return 'Male';
+      default:
+        return value;
+    }
+  }
+
+  String _localizedAgeRangeValue(String? raw, AppLocalizations l10n) {
+    final value = raw?.trim() ?? '';
+    if (!_isEnglishLocale) return value;
+
+    switch (value) {
+      case '10대':
+        return 'Teens';
+      case '20대':
+        return '20s';
+      case '30대':
+        return '30s';
+      case '40대':
+        return '40s';
+      case '50대':
+        return '50s';
+      default:
+        return value;
+    }
+  }
+
+  String _localizedDietGoalValue(String? raw, AppLocalizations l10n) {
+    final value = raw?.trim() ?? '';
+    if (!_isEnglishLocale) return value;
+
+    switch (value) {
+      case '다이어트':
+        return 'Weight Loss';
+      case '근력향상':
+        return 'Muscle Gain';
+      case '혈당조정':
+        return 'Blood Sugar Control';
+      default:
+        return value;
+    }
+  }
+
+  String _localizedPetTypeValue(String? raw, AppLocalizations l10n) {
+    final value = raw?.trim() ?? '';
+    if (!_isEnglishLocale) return value;
+
+    switch (value) {
+      case '강아지':
+      case '댕족':
+      case 'dog':
+        return 'Dog';
+      case '고양이':
+      case '냥족':
+      case 'cat':
+        return 'Cat';
+      default:
+        return value;
+    }
+  }
+
+  String _localizedPetFamilyOrType(
+    Map<String, dynamic>? petSpecies,
+    AppLocalizations l10n,
+  ) {
+    final family = petSpecies?['family']?.toString().toLowerCase().trim() ?? '';
+    final nameKo = petSpecies?['name_ko']?.toString();
+
+    if (!_isEnglishLocale) {
+      if (family == 'dog') return '강아지';
+      if (family == 'cat') return '고양이';
+      return nameKo?.trim().isNotEmpty == true ? nameKo!.trim() : '';
+    }
+
+    if (family == 'dog') return 'Dog';
+    if (family == 'cat') return 'Cat';
+    return _localizedPetTypeValue(nameKo, l10n);
+  }
 
   String _familyToKorean(String family) {
     final l10n = AppLocalizations.of(context);
