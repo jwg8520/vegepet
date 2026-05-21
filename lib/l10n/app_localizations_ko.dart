@@ -585,6 +585,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailLinkInviteNow => '연동하기';
 
   @override
+  String get emailLinkSuccessTitle => '연동 완료💫';
+
+  @override
+  String get emailLinkSuccessBody => '기존 계정 정보가 있다면 자동으로 불러옵니다.';
+
+  @override
+  String get emailLinkSuccessConfirm => '확인';
+
+  @override
   String get saveLabel => '저장';
 
   @override

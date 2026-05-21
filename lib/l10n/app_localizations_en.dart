@@ -603,6 +603,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailLinkInviteNow => 'Link';
 
   @override
+  String get emailLinkSuccessTitle => 'Link Complete💫';
+
+  @override
+  String get emailLinkSuccessBody =>
+      'If existing account data is found, it will be loaded automatically.';
+
+  @override
+  String get emailLinkSuccessConfirm => 'OK';
+
+  @override
   String get saveLabel => 'Save';
 
   @override

@@ -543,6 +543,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 첫 식단 인증 성공 직후 이메일 연동 추천 (240×116 · 마당 좌표계).
   bool _isEmailLinkInviteNoticeOpen = false;
+
+  /// 이메일 연동 성공 직후 안내 (240×116 · 마당 좌표계).
+  bool _isEmailLinkSuccessNoticeOpen = false;
+
+  /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
+  bool _emailLinkRestoreMode = false;
   bool _isDeletingAccount = false;
   bool _emailLinkPanelSendBusy = false;
   bool _emailLinkPanelVerifyBusy = false;
@@ -1682,6 +1688,46 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _emailLinkPanelSendBusy = false;
     _emailLinkPanelVerifyBusy = false;
     _emailLinkPanelResendBusy = false;
+    _emailLinkRestoreMode = false;
+  }
+
+  Future<void> _refreshAllUserDataAfterAuthChange() async {
+    _pokedexEntries = [];
+    _pokedexPanelSelectedEntry = null;
+
+    await Future.wait([
+      _fetchProfile(),
+      _fetchPetSpecies(),
+      _fetchActivePet(),
+      _fetchResidentPets(),
+      _fetchTodayMealLogs(),
+      _fetchRandomTicketCount(),
+      _fetchPokedexEntries(),
+    ]);
+
+    if (!mounted) return;
+    _syncProfileFormFromFetched();
+    _safeSetState(() {});
+  }
+
+  Future<void> _showEmailLinkSuccessNotice() async {
+    if (_isEmailLinkSuccessNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isEmailLinkSuccessNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideEmailLinkSuccessNotice() async {
+    if (!_isEmailLinkSuccessNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isEmailLinkSuccessNoticeOpen = false,
+    );
+  }
+
+  void _closeEmailLinkSuccessNoticeOverlay() {
+    if (!_isEmailLinkSuccessNoticeOpen) return;
+    unawaited(_hideEmailLinkSuccessNotice());
   }
 
   _MealNotificationTexts _mealNotificationTextsForLocaleCode(
@@ -2173,12 +2219,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     try {
       await supabase.auth.updateUser(UserAttributes(email: trimmed));
+      if (mounted) {
+        _safeSetState(() => _emailLinkRestoreMode = false);
+      } else {
+        _emailLinkRestoreMode = false;
+      }
       _showSnack(l10n.snackOtpSent);
       return true;
     } catch (e) {
       if (_isEmailAlreadyUsedError(e)) {
-        await _showEmailAlreadyUsedDialog();
-        return false;
+        try {
+          await supabase.auth.signInWithOtp(email: trimmed);
+          if (mounted) {
+            _safeSetState(() => _emailLinkRestoreMode = true);
+          } else {
+            _emailLinkRestoreMode = true;
+          }
+          _showSnack(l10n.snackOtpSent);
+          return true;
+        } catch (restoreErr) {
+          _showSnack(l10n.snackOtpSendFailed(_formatAuthError(restoreErr)));
+          return false;
+        }
       }
       _showSnack(l10n.snackOtpSendFailed(_formatAuthError(e)));
       return false;
@@ -2196,11 +2258,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _showSnack(l10n.snackEmailOtpRequired);
       return false;
     }
+    final otpType =
+        _emailLinkRestoreMode ? OtpType.email : OtpType.emailChange;
     try {
       await supabase.auth.verifyOTP(
         email: trimmedEmail,
         token: trimmedToken,
-        type: OtpType.emailChange,
+        type: otpType,
       );
     } catch (e) {
       if (_isEmailAlreadyUsedError(e)) {
@@ -2213,14 +2277,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     try {
       await _syncAuthEmailToProfileIfNeeded();
-      await _fetchProfile();
+      await _refreshAllUserDataAfterAuthChange();
       if (mounted) {
-        _safeSetState(() {});
+        _safeSetState(() => _emailLinkRestoreMode = false);
+      } else {
+        _emailLinkRestoreMode = false;
       }
       return true;
     } catch (e) {
       _showSnack(l10n.snackEmailLinkPartialSavedFailed);
       debugPrint('verify email otp profile sync failed: $e');
+      if (mounted) {
+        _safeSetState(() => _emailLinkRestoreMode = false);
+      } else {
+        _emailLinkRestoreMode = false;
+      }
       return true;
     }
   }
@@ -5739,6 +5810,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isWithdrawFinalConfirmOpen = false;
     _isNameInterlockNoticeOpen = false;
     _isEmailLinkInviteNoticeOpen = false;
+    _isEmailLinkSuccessNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6159,6 +6231,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildEmailLinkInviteNoticeGlobalOverlay(),
+        _buildEmailLinkSuccessNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
       ],
     );
@@ -6594,6 +6667,120 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildEmailLinkSuccessNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkSuccessNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: _buildVegePetConfirmDialogShell(
+                width: _kVegePetConfirmDialogW,
+                height: _kVegePetConfirmDialogH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.emailLinkSuccessTitle,
+                              textAlign: TextAlign.left,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF000000),
+                                height: 1.25,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              l10n.emailLinkSuccessBody,
+                              textAlign: TextAlign.left,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A4A4A),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        child: InkWell(
+                          onTap: _closeEmailLinkSuccessNoticeOverlay,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Ink(
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: _buildPastelBlueGradientButtonText(
+                                l10n.emailLinkSuccessConfirm,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openWithdrawConfirmPanel() {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
@@ -6604,6 +6791,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isShopNoticeOpen = false;
       _isNameInterlockNoticeOpen = false;
       _isEmailLinkInviteNoticeOpen = false;
+      _isEmailLinkSuccessNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
@@ -7321,14 +7509,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (!mounted) return;
       _safeSetState(() => _emailLinkPanelVerifyBusy = false);
       if (ok) {
-        await _fetchProfileAndRefreshSettingsUi();
         if (!mounted) return;
         _dismissFocus();
         _safeSetState(() {
           _resetEmailLinkPanelOtpFlow();
           _isEmailLinkPanelOpen = false;
         });
-        _showSnack(l10n.snackEmailLinkCompleted);
+        await _showEmailLinkSuccessNotice();
       }
     }
   }
@@ -7478,6 +7665,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _emailLinkOtpSent = false;
                 _emailLinkOtpSentForEmail = '';
                 _emailLinkOtpController.clear();
+                _emailLinkRestoreMode = false;
               });
             }
           },
@@ -7775,7 +7963,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isShopNoticeOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
-        _isEmailLinkInviteNoticeOpen;
+        _isEmailLinkInviteNoticeOpen ||
+        _isEmailLinkSuccessNoticeOpen;
   }
 
   /// 우측 메뉴 아이콘: 패널이 닫히는 동안(슬라이드/마당 페이드) 배경에 유지.
@@ -7800,7 +7989,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isShopNoticeOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
-        _isEmailLinkInviteNoticeOpen;
+        _isEmailLinkInviteNoticeOpen ||
+        _isEmailLinkSuccessNoticeOpen;
   }
 
   double get _gameMenuYardExitFadeMultiplier {
@@ -12085,6 +12275,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_isEmailLinkInviteNoticeOpen) {
+      return;
+    }
+
+    if (_isEmailLinkSuccessNoticeOpen) {
       return;
     }
 

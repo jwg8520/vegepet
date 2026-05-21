@@ -1226,6 +1226,24 @@ abstract class AppLocalizations {
   /// **'연동하기'**
   String get emailLinkInviteNow;
 
+  /// No description provided for @emailLinkSuccessTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'연동 완료💫'**
+  String get emailLinkSuccessTitle;
+
+  /// No description provided for @emailLinkSuccessBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'기존 계정 정보가 있다면 자동으로 불러옵니다.'**
+  String get emailLinkSuccessBody;
+
+  /// No description provided for @emailLinkSuccessConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get emailLinkSuccessConfirm;
+
   /// No description provided for @saveLabel.
   ///
   /// In ko, this message translates to:
