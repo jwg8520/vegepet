@@ -586,20 +586,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'This email is already in use.\nPlease enter a different email.';
 
   @override
-  String get emailLinkInviteTitle => 'Protect Your VegePet';
+  String get emailLinkInviteTitle => 'Protect Your VegePet!';
 
   @override
-  String get emailLinkInviteBody =>
-      'Oh no! If you change phones or uninstall the app, your cute VegePet may disappear! 😢 Would you like to link your email in Settings now?';
+  String get emailLinkInviteBodyLine1 =>
+      'If you uninstall the app, your cute VegePet may disappear..😢';
 
   @override
-  String get emailLinkInviteLater => 'Maybe later';
+  String get emailLinkInviteBodyLine2 =>
+      'Would you like to link your email in Settings now?';
 
   @override
-  String get emailLinkInviteNow => 'Link now';
+  String get emailLinkInviteLater => 'Later';
 
   @override
-  String get emailLinkInviteSnack => 'This will lead to Settings > Email Link.';
+  String get emailLinkInviteNow => 'Link';
 
   @override
   String get saveLabel => 'Save';

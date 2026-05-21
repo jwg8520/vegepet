@@ -1199,32 +1199,32 @@ abstract class AppLocalizations {
   /// No description provided for @emailLinkInviteTitle.
   ///
   /// In ko, this message translates to:
-  /// **'베지펫을 지켜주세요'**
+  /// **'베지펫을 지켜주세요!'**
   String get emailLinkInviteTitle;
 
-  /// No description provided for @emailLinkInviteBody.
+  /// No description provided for @emailLinkInviteBodyLine1.
   ///
   /// In ko, this message translates to:
-  /// **'헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?'**
-  String get emailLinkInviteBody;
+  /// **'앱이 지워지면 귀여운 베지펫이 사라져요..😢'**
+  String get emailLinkInviteBodyLine1;
+
+  /// No description provided for @emailLinkInviteBodyLine2.
+  ///
+  /// In ko, this message translates to:
+  /// **'지금 설정에서 이메일 연동을 진행할까요?'**
+  String get emailLinkInviteBodyLine2;
 
   /// No description provided for @emailLinkInviteLater.
   ///
   /// In ko, this message translates to:
-  /// **'나중에 할게요'**
+  /// **'나중에'**
   String get emailLinkInviteLater;
 
   /// No description provided for @emailLinkInviteNow.
   ///
   /// In ko, this message translates to:
-  /// **'지금 연동하기'**
+  /// **'연동하기'**
   String get emailLinkInviteNow;
-
-  /// No description provided for @emailLinkInviteSnack.
-  ///
-  /// In ko, this message translates to:
-  /// **'나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.'**
-  String get emailLinkInviteSnack;
 
   /// No description provided for @saveLabel.
   ///

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -540,6 +540,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 설정 > 회원 탈퇴 2차 최종 확인 (240×116 · 마당 좌표계).
   bool _isWithdrawFinalConfirmOpen = false;
+
+  /// 첫 식단 인증 성공 직후 이메일 연동 추천 (240×116 · 마당 좌표계).
+  bool _isEmailLinkInviteNoticeOpen = false;
   bool _isDeletingAccount = false;
   bool _emailLinkPanelSendBusy = false;
   bool _emailLinkPanelVerifyBusy = false;
@@ -2736,9 +2739,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       _showSnack(slot == 'brunch' ? '아점 인증 완료 (+5)' : '저녁 인증 완료 (+5)');
 
-      if (isFirstEver && !_firstMealPopupShownThisSession) {
-        _firstMealPopupShownThisSession = true;
-        await _showEmailLinkDialog();
+      if (isFirstEver) {
+        await _maybeShowEmailLinkInviteAfterFirstMeal();
       }
     } catch (e) {
       if (!mounted) return;
@@ -2970,35 +2972,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _showEmailLinkDialog() async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        final l10n = AppLocalizations.of(ctx);
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Text(l10n.emailLinkInviteTitle),
-          content: Text(l10n.emailLinkInviteBody),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(l10n.emailLinkInviteLater),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _showSnack(l10n.emailLinkInviteSnack);
-              },
-              child: Text(l10n.emailLinkInviteNow),
-            ),
-          ],
-        );
-      },
+  Future<void> _maybeShowEmailLinkInviteAfterFirstMeal() async {
+    if (_firstMealPopupShownThisSession) return;
+    if (_hasEffectiveEmailLink()) return;
+    _firstMealPopupShownThisSession = true;
+    await _showEmailLinkInviteNotice();
+  }
+
+  Future<void> _showEmailLinkInviteNotice() async {
+    if (_isEmailLinkInviteNoticeOpen) return;
+    if (_hasEffectiveEmailLink()) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isEmailLinkInviteNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  void _closeEmailLinkInviteNoticeOverlay() {
+    if (!_isEmailLinkInviteNoticeOpen) return;
+    unawaited(
+      _dismissYardConfirmOverlayAnimated(
+        () => _isEmailLinkInviteNoticeOpen = false,
+      ),
     );
+  }
+
+  Future<void> _onEmailLinkInviteLinkTap() async {
+    if (!_isEmailLinkInviteNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isEmailLinkInviteNoticeOpen = false,
+    );
+    if (!mounted) return;
+    await _openSettingsFromGameMenu();
+    if (!mounted) return;
+    _dismissFocus();
+    _safeSetState(() {
+      _resetEmailLinkPanelOtpFlow();
+      _isCustomerCenterPanelOpen = false;
+      _isEmailLinkPanelOpen = true;
+    });
   }
 
   // Edge Function(meal-evaluate)이 KST 기준으로 meal_date 를 저장하므로,
@@ -5726,6 +5738,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
     _isNameInterlockNoticeOpen = false;
+    _isEmailLinkInviteNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6145,6 +6158,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildShopNoticeGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
+        _buildEmailLinkInviteNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
       ],
     );
@@ -6391,6 +6405,195 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildEmailLinkInviteNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkInviteNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+
+    const titleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.2,
+    );
+    final bodyStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: isEn ? 9 : 10,
+      fontWeight: FontWeight.w600,
+      color: const Color(0xFF4A4A4A),
+      height: 1.2,
+    );
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: _buildVegePetConfirmDialogShell(
+                width: _kVegePetConfirmDialogW,
+                height: _kVegePetConfirmDialogH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SizedBox(height: 16),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  l10n.emailLinkInviteTitle,
+                                    textAlign: TextAlign.left,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: titleStyle,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    l10n.emailLinkInviteBodyLine1,
+                                    textAlign: TextAlign.left,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.visible,
+                                    style: bodyStyle,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    l10n.emailLinkInviteBodyLine2,
+                                    textAlign: TextAlign.left,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.visible,
+                                    style: bodyStyle,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(14),
+                                child: InkWell(
+                                  onTap: () =>
+                                      unawaited(_onEmailLinkInviteLinkTap()),
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Ink(
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: const Color(0xFFF1F1F1),
+                                        width: 0.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.03,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: _buildPastelBlueGradientButtonText(
+                                        l10n.emailLinkInviteNow,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(14),
+                                child: InkWell(
+                                  onTap: _closeEmailLinkInviteNoticeOverlay,
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Ink(
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: const Color(0xFFF1F1F1),
+                                        width: 0.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.03,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        l10n.emailLinkInviteLater,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontFamily: 'Pretendard',
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFFB92020),
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openWithdrawConfirmPanel() {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
@@ -6400,6 +6603,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isCustomerCenterPanelOpen = false;
       _isShopNoticeOpen = false;
       _isNameInterlockNoticeOpen = false;
+      _isEmailLinkInviteNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
@@ -7570,7 +7774,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameHelpSwapController.isAnimating ||
         _isShopNoticeOpen ||
         _isWithdrawConfirmOpen ||
-        _isWithdrawFinalConfirmOpen;
+        _isWithdrawFinalConfirmOpen ||
+        _isEmailLinkInviteNoticeOpen;
   }
 
   /// 우측 메뉴 아이콘: 패널이 닫히는 동안(슬라이드/마당 페이드) 배경에 유지.
@@ -7594,7 +7799,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isAnyGameMenuSubPanelOpenOrSwapping() ||
         _isShopNoticeOpen ||
         _isWithdrawConfirmOpen ||
-        _isWithdrawFinalConfirmOpen;
+        _isWithdrawFinalConfirmOpen ||
+        _isEmailLinkInviteNoticeOpen;
   }
 
   double get _gameMenuYardExitFadeMultiplier {
@@ -10599,9 +10805,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ? result['result_type']?.toString()
           : null;
       final wasLogged = resultType != null && resultType != 'uncertain';
-      if (wasFirstEver && wasLogged && !_firstMealPopupShownThisSession) {
-        _firstMealPopupShownThisSession = true;
-        await _showEmailLinkDialog();
+      if (wasFirstEver && wasLogged) {
+        await _maybeShowEmailLinkInviteAfterFirstMeal();
       }
     } catch (e) {
       if (!mounted) return;
@@ -11876,6 +12081,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isShopNoticeOpen) {
       _closeShopNoticeOverlay();
+      return;
+    }
+
+    if (_isEmailLinkInviteNoticeOpen) {
       return;
     }
 

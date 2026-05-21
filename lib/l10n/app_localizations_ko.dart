@@ -570,20 +570,19 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailAlreadyUsedBody => '이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.';
 
   @override
-  String get emailLinkInviteTitle => '베지펫을 지켜주세요';
+  String get emailLinkInviteTitle => '베지펫을 지켜주세요!';
 
   @override
-  String get emailLinkInviteBody =>
-      '헉! 폰을 바꾸거나 앱이 지워지면 귀여운 베지펫이 사라져요! 😢 지금 설정에서 이메일 연동을 진행할까요?';
+  String get emailLinkInviteBodyLine1 => '앱이 지워지면 귀여운 베지펫이 사라져요..😢';
 
   @override
-  String get emailLinkInviteLater => '나중에 할게요';
+  String get emailLinkInviteBodyLine2 => '지금 설정에서 이메일 연동을 진행할까요?';
 
   @override
-  String get emailLinkInviteNow => '지금 연동하기';
+  String get emailLinkInviteLater => '나중에';
 
   @override
-  String get emailLinkInviteSnack => '나중에 설정 > 이메일 연동 화면으로 연결될 예정입니다.';
+  String get emailLinkInviteNow => '연동하기';
 
   @override
   String get saveLabel => '저장';
