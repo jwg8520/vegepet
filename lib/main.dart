@@ -354,6 +354,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _lastImagePath;
 
   final TextEditingController _nicknameController = TextEditingController();
+  final FocusNode _nicknameFocusNode = FocusNode();
   String? _selectedGender;
   String? _selectedAgeRange;
   String? _selectedDietGoal;
@@ -370,6 +371,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _canShowActivePetDuringNaming = false;
   bool _isPetNamingPanelClosing = false;
   final TextEditingController _petNamingController = TextEditingController();
+  final FocusNode _petNamingFocusNode = FocusNode();
   Completer<String?>? _petNamingCompleter;
   late AnimationController _petNamingPanelEnterController;
   late Animation<double> _petNamingPanelEnterCurve;
@@ -561,6 +563,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _emailLinkOtpSentForEmail = '';
   final TextEditingController _emailLinkController = TextEditingController();
   final TextEditingController _emailLinkOtpController = TextEditingController();
+  final FocusNode _emailLinkFocusNode = FocusNode();
+  final FocusNode _emailLinkOtpFocusNode = FocusNode();
+  final FocusNode _keyboardAccessoryFocusNode = FocusNode();
+
+  FocusNode? _activeKeyboardFocusNode;
+  TextEditingController? _activeKeyboardController;
+  String? _activeKeyboardInputKey;
+  TextInputType _activeKeyboardInputType = TextInputType.text;
+  final Set<FocusNode> _keyboardBoundFocusNodes = <FocusNode>{};
 
   /// 게임 메뉴 하위 패널 외부 탭 → 마당: 슬라이드 없이 전체 페이드 아웃.
   late AnimationController _gameMenuSubOutsideDismissController;
@@ -694,6 +705,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
+    _ensureKeyboardFocusBinding(
+      key: 'profile_nickname',
+      controller: _nicknameController,
+      focusNode: _nicknameFocusNode,
+    );
+    _ensureKeyboardFocusBinding(
+      key: 'pet_naming',
+      controller: _petNamingController,
+      focusNode: _petNamingFocusNode,
+    );
+    _ensureKeyboardFocusBinding(
+      key: 'email_link',
+      controller: _emailLinkController,
+      focusNode: _emailLinkFocusNode,
+      keyboardType: TextInputType.emailAddress,
+    );
+    _ensureKeyboardFocusBinding(
+      key: 'email_link_otp',
+      controller: _emailLinkOtpController,
+      focusNode: _emailLinkOtpFocusNode,
+      keyboardType: TextInputType.number,
+    );
+    _keyboardAccessoryFocusNode.addListener(() {
+      if (!mounted) return;
+      if (_keyboardAccessoryFocusNode.hasFocus) {
+        _safeSetState(() {});
+      }
+    });
     _petToySwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -833,8 +872,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
     _nicknameController.dispose();
+    _nicknameFocusNode.dispose();
     _emailLinkController.dispose();
     _emailLinkOtpController.dispose();
+    _emailLinkFocusNode.dispose();
+    _emailLinkOtpFocusNode.dispose();
+    _keyboardAccessoryFocusNode.dispose();
     _petToySwapController.dispose();
     _petMealSwapController.dispose();
     _dragHintPulseController.dispose();
@@ -852,6 +895,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _yardConfirmOverlayFadeController.dispose();
     _petNamingPanelEnterController.dispose();
     _petNamingController.dispose();
+    _petNamingFocusNode.dispose();
     if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
       _petNamingCompleter!.complete(null);
     }
@@ -5726,7 +5770,138 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // ----- 화면 전환 안정화용 helper -----
 
   void _dismissFocus() {
+    _dismissKeyboardOnly();
+  }
+
+  bool _isKeyboardVisible(BuildContext context) {
+    return MediaQuery.viewInsetsOf(context).bottom > 0;
+  }
+
+  bool _hasActiveTextInput() {
+    if (_keyboardAccessoryFocusNode.hasFocus) return true;
+    for (final node in _keyboardBoundFocusNodes) {
+      if (node.hasFocus) return true;
+    }
+    final focus = FocusManager.instance.primaryFocus;
+    return focus != null && focus.hasFocus;
+  }
+
+  void _dismissKeyboardOnly() {
+    _keyboardAccessoryFocusNode.unfocus();
     FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  bool _dismissKeyboardFirstIfNeeded() {
+    if (_hasActiveTextInput()) {
+      _dismissKeyboardOnly();
+      return true;
+    }
+    return false;
+  }
+
+  void _registerActiveKeyboardInput({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    _activeKeyboardInputKey = key;
+    _activeKeyboardController = controller;
+    _activeKeyboardFocusNode = focusNode;
+    _activeKeyboardInputType = keyboardType;
+    _safeSetState(() {});
+  }
+
+  void _clearActiveKeyboardInputIfNeeded(FocusNode focusNode) {
+    if (_activeKeyboardFocusNode != focusNode) return;
+    _activeKeyboardInputKey = null;
+    _activeKeyboardController = null;
+    _activeKeyboardFocusNode = null;
+    _safeSetState(() {});
+  }
+
+  void _ensureKeyboardFocusBinding({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    if (_keyboardBoundFocusNodes.contains(focusNode)) return;
+    _keyboardBoundFocusNodes.add(focusNode);
+    focusNode.addListener(() {
+      if (!mounted) return;
+      if (focusNode.hasFocus) {
+        _registerActiveKeyboardInput(
+          key: key,
+          controller: controller,
+          focusNode: focusNode,
+          keyboardType: keyboardType,
+        );
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_hasActiveTextInput()) return;
+        _clearActiveKeyboardInputIfNeeded(focusNode);
+      });
+    });
+    void onTextChanged() {
+      if (!mounted) return;
+      if (_activeKeyboardController == controller) {
+        _safeSetState(() {});
+      }
+    }
+
+    controller.addListener(onTextChanged);
+  }
+
+  Widget _buildKeyboardAccessoryOverlay(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final controller = _activeKeyboardController;
+    if (!_isKeyboardVisible(context) ||
+        controller == null ||
+        !_hasActiveTextInput()) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: bottomInset,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+            ),
+            alignment: Alignment.centerLeft,
+            child: TextField(
+              controller: controller,
+              focusNode: _keyboardAccessoryFocusNode,
+              keyboardType: _activeKeyboardInputType,
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+                height: 1.2,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+              maxLines: _activeKeyboardInputKey == 'diet_note' ? 2 : 1,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// BottomSheet/Dialog dispose 가 끝나고 다음 화면/시트가 안전하게 빌드되도록
@@ -6119,18 +6294,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      body: ColoredBox(
-        color: const Color(0xFFEFF5EF),
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: _kGameCanvasWidth,
-              height: _kGameCanvasHeight,
-              child: _buildGameCanvas(),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(
+            color: const Color(0xFFEFF5EF),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: _kGameCanvasWidth,
+                  height: _kGameCanvasHeight,
+                  child: _buildGameCanvas(),
+                ),
+              ),
             ),
           ),
-        ),
+          _buildKeyboardAccessoryOverlay(context),
+        ],
       ),
     );
   }
@@ -6143,7 +6324,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final showInitialAdoption =
         _status == _ViewStatus.ready && profileComplete && !hasActivePet;
     final shouldMountInitialAdoption =
-        showInitialAdoption || _isInitialAdoptionPanelClosing;
+        showInitialAdoption &&
+        (_isInitialAdoptionPanelVisible || _isInitialAdoptionPanelClosing);
     final profileSelectOwnerActive =
         showProfileSetup ||
         _isProfilePanelOpen ||
@@ -6166,25 +6348,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (!canShow || _isProfileSetupClosing) return;
         setState(() {
           _isProfileSetupPanelVisible = true;
-        });
-      });
-    }
-    if (showInitialAdoption &&
-        !_isInitialAdoptionPanelClosing &&
-        !_isInitialAdoptionPanelVisible) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final canShow =
-            _status == _ViewStatus.ready &&
-            _isProfileComplete() &&
-            _activePet == null;
-        if (!canShow ||
-            _isInitialAdoptionPanelClosing ||
-            _isInitialAdoptionInFlight) {
-          return;
-        }
-        setState(() {
-          _isInitialAdoptionPanelVisible = true;
         });
       });
     }
@@ -7210,7 +7373,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: () {
-                _dismissFocus();
+                if (_dismissKeyboardFirstIfNeeded()) return;
                 _safeSetState(() {
                   _resetEmailLinkPanelOtpFlow();
                   _isEmailLinkPanelOpen = false;
@@ -7244,6 +7407,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: () {
+                if (_dismissKeyboardFirstIfNeeded()) return;
                 _safeSetState(() => _isCustomerCenterPanelOpen = false);
               },
               child: const SizedBox.expand(),
@@ -7563,6 +7727,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     Widget shellTextField({
       required TextEditingController controller,
+      required FocusNode focusNode,
       required bool enabled,
       required TextInputType keyboardType,
       required List<TextInputFormatter> formatters,
@@ -7586,6 +7751,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         alignment: Alignment.centerLeft,
         child: TextField(
           controller: controller,
+          focusNode: focusNode,
           enabled: enabled,
           keyboardType: keyboardType,
           inputFormatters: formatters,
@@ -7632,6 +7798,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         label: l10n.emailLinkEmailRowLabel,
         field: shellTextField(
           controller: _emailLinkController,
+          focusNode: _emailLinkFocusNode,
           enabled: true,
           keyboardType: TextInputType.emailAddress,
           formatters: [
@@ -7655,6 +7822,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         label: l10n.emailLinkOtpRowLabel,
         field: shellTextField(
           controller: _emailLinkOtpController,
+          focusNode: _emailLinkOtpFocusNode,
           enabled: otpEnabled,
           keyboardType: TextInputType.number,
           formatters: [
@@ -7864,7 +8032,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
-          _dismissFocus();
+          if (_dismissKeyboardFirstIfNeeded()) return;
           unawaited(_closeProfileSelectOverlay());
         },
         child: ClipRRect(
@@ -8459,6 +8627,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               alignment: Alignment.centerLeft,
                               child: TextField(
                                 controller: _petNamingController,
+                                focusNode: _petNamingFocusNode,
                                 autofocus: false,
                                 maxLines: 1,
                                 maxLength: 8,
@@ -8493,9 +8662,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   ),
                                   errorText: null,
                                 ),
-                                onTapOutside: (_) =>
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus(),
+                                onTapOutside: (_) {
+                                  if (_dismissKeyboardFirstIfNeeded()) return;
+                                },
                                 onSubmitted: (_) {
                                   unawaited(_submitPetNaming());
                                 },
@@ -8580,51 +8749,61 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildInYardInitialAdoptionPanel() {
     final visible = _isInitialAdoptionPanelVisible;
+    final panelChild = ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+            child: _buildInitialAdoptionPanelContent(),
+          ),
+        ),
+      ),
+    );
+
+    // 등장: visible=true 와 동시에 즉시 표시(페이드 인 생략). 퇴장만 AnimatedOpacity 유지.
+    final Widget panelBody;
+    if (_isInitialAdoptionPanelClosing || !visible) {
+      panelBody = AnimatedOpacity(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        opacity: visible ? 1 : 0,
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.center,
+          scale: visible ? 1 : 0.98,
+          child: panelChild,
+        ),
+      );
+    } else {
+      panelBody = panelChild;
+    }
+
     return Positioned(
       left: _kInitialAdoptionPanelLeft,
       top: _kInitialAdoptionPanelTop,
       width: _kInitialAdoptionPanelWidth,
       height: _kInitialAdoptionPanelHeight,
       child: IgnorePointer(
-        ignoring: !visible,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-          opacity: visible ? 1 : 0,
-          child: AnimatedScale(
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.center,
-            scale: visible ? 1 : 0.98,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.07),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                    child: _buildInitialAdoptionPanelContent(),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        ignoring: !visible && !_isInitialAdoptionPanelClosing,
+        child: panelBody,
       ),
     );
   }
@@ -11184,6 +11363,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final closingMeal = _isMealPanelOpen;
     if (!closingToy && !closingMeal) return;
 
+    if (_dismissKeyboardFirstIfNeeded()) return;
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
 
@@ -11620,6 +11800,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     fieldShell(
                                       TextField(
                                         controller: _nicknameController,
+                                        focusNode: _nicknameFocusNode,
                                         enabled: fieldsEnabled,
                                         onChanged: (_) {
                                           _enforceProfileNicknameMaxLength();
@@ -12373,6 +12554,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 가방 설명창 오버레이가 터치를 못 받는 경우에 한해 여기서 설명창만 닫는다.
   /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 마당까지 닫는다.
   Future<void> _closeActiveGameMenuFromOutsideBackdropTap() async {
+    if (_dismissKeyboardFirstIfNeeded()) return;
     if (_isDietDiaryPanelOpen) {
       final handled =
           await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??
@@ -12535,6 +12717,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               onPhotoTap: _showMealPhotoPreview,
               fetchNote: _fetchMealDiaryNote,
               saveNote: _saveMealDiaryNote,
+              bindKeyboardInput: _ensureKeyboardFocusBinding,
               calendarBuilder:
                   (
                     BuildContext sheetCtx,
@@ -12628,6 +12811,54 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// 설정 패널 스크롤: content는 left/right 8, thumb는 패널 내부 right 8 고정.
+  Widget _buildSettingsPanelManualScrollbar({
+    required ScrollController controller,
+  }) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        if (!_settingsScrollbarThumbVisible) {
+          return const SizedBox.shrink();
+        }
+        if (!controller.hasClients) {
+          return const SizedBox.shrink();
+        }
+
+        final position = controller.position;
+        final viewportHeight = position.viewportDimension;
+        final maxScroll = position.maxScrollExtent;
+        if (maxScroll <= 0) {
+          return const SizedBox.shrink();
+        }
+
+        final contentHeight = viewportHeight + maxScroll;
+        final thumbHeight = (viewportHeight * (viewportHeight / contentHeight))
+            .clamp(24.0, viewportHeight);
+        final maxThumbTop = viewportHeight - thumbHeight;
+        final fraction = (controller.offset / maxScroll).clamp(0.0, 1.0);
+        final thumbTop = fraction * maxThumbTop;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              top: thumbTop,
+              right: 0,
+              width: 3,
+              height: thumbHeight,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0x99000000),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildSettingsPanelScrollArea({
     required ScrollController controller,
     required Widget child,
@@ -12642,11 +12873,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           right: 8,
           top: 0,
           bottom: 0,
-          child: SingleChildScrollView(
-            controller: controller,
-            padding: padding,
-            physics: const ClampingScrollPhysics(),
-            child: child,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              controller: controller,
+              padding: padding,
+              physics: const ClampingScrollPhysics(),
+              child: child,
+            ),
           ),
         ),
         Positioned(
@@ -12654,13 +12888,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           top: 0,
           bottom: 0,
           width: 3,
-          child: RawScrollbar(
-            controller: controller,
-            thumbVisibility: _settingsScrollbarThumbVisible,
-            thickness: 3,
-            radius: const Radius.circular(20),
-            child: const SizedBox.expand(),
-          ),
+          child: _buildSettingsPanelManualScrollbar(controller: controller),
         ),
       ],
     );
@@ -13164,7 +13392,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return _resolvedDisplayEmailLine(l10n);
     }
     final uid = supabase.auth.currentUser?.id ?? '';
-    final prefix = uid.length <= 23 ? uid : uid.substring(0, 23);
+    final prefix = uid.length <= 18 ? uid : uid.substring(0, 18);
     return l10n.settingsGuestUserIdLine(prefix);
   }
 
@@ -15131,11 +15359,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             field: iosFieldShell(
               child: TextField(
                 controller: _nicknameController,
+                focusNode: _nicknameFocusNode,
                 onChanged: (_) {
                   _enforceProfileNicknameMaxLength();
                   setState(() {});
                 },
-                onTapOutside: (_) => _dismissFocus(),
+                onTapOutside: (_) {
+                  if (_dismissKeyboardFirstIfNeeded()) return;
+                },
                 textAlign: TextAlign.left,
                 style: fieldTextStyle,
                 maxLines: 1,
@@ -15912,6 +16143,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required this.saveNote,
     required this.calendarBuilder,
     required this.monthPickerBuilder,
+    this.bindKeyboardInput,
     this.embeddedInGameMenuPanel = false,
     this.onEmbeddedBack,
     this.monthYearCaptionBuilder,
@@ -15938,6 +16170,13 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required String noteText,
   })
   saveNote;
+  final void Function({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    TextInputType keyboardType,
+  })?
+  bindKeyboardInput;
   final Widget Function(
     BuildContext sheetCtx,
     DateTime visibleMonth,
@@ -16093,6 +16332,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
         key: _detailPanelKey,
         date: selectedDate!,
         logs: dayLogs,
+        bindKeyboardInput: widget.bindKeyboardInput,
         signedUrlBuilder: widget.signedUrlBuilder,
         onPhotoTap: widget.onPhotoTap,
         fetchNote: widget.fetchNote,
@@ -16364,6 +16604,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     super.key,
     required this.date,
     required this.logs,
+    this.bindKeyboardInput,
     required this.signedUrlBuilder,
     required this.onPhotoTap,
     required this.fetchNote,
@@ -16374,6 +16615,13 @@ class _DietDiaryDetailPanel extends StatefulWidget {
 
   final DateTime date;
   final List<Map<String, dynamic>> logs;
+  final void Function({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    TextInputType keyboardType,
+  })?
+  bindKeyboardInput;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
   final Future<void> Function(String imageUrl) onPhotoTap;
   final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
@@ -16419,13 +16667,25 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   @override
   void initState() {
     super.initState();
+    widget.bindKeyboardInput?.call(
+      key: 'diet_weight',
+      controller: _weightController,
+      focusNode: _weightFocusNode,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    );
+    widget.bindKeyboardInput?.call(
+      key: 'diet_note',
+      controller: _noteController,
+      focusNode: _noteFocusNode,
+      keyboardType: TextInputType.multiline,
+    );
     _bootstrap();
   }
 
   @override
   void didUpdateWidget(covariant _DietDiaryDetailPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.date != widget.date || oldWidget.logs != widget.logs) {
+    if (oldWidget.date != widget.date) {
       _bootstrap();
     }
   }
@@ -16573,16 +16833,19 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       height: 1.2,
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _photoSlot(
-                label: AppLocalizations.of(context).diaryPhotoBrunchLabel,
+    return GestureDetector(
+      behavior: HitTestBehavior.deferToChild,
+      onTap: () {},
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _photoSlot(
+                  label: AppLocalizations.of(context).diaryPhotoBrunchLabel,
                 url: _brunchUrl,
               ),
               _photoSlot(
@@ -16688,6 +16951,7 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
