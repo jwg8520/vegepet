@@ -6412,13 +6412,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final l10n = AppLocalizations.of(context);
     final isEn = _isEnglishLocale;
 
-    const titleStyle = TextStyle(
+    final titleStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 11,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF000000),
-      height: 1.2,
+      color: const Color(0xFF000000),
+      height: isEn ? 1.0 : 1.2,
     );
+    final emailInviteTitleTop = isEn ? 15.0 : 16.0;
     final bodyStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: isEn ? 9 : 10,
@@ -6455,7 +6456,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const SizedBox(height: 16),
+                          SizedBox(height: emailInviteTitleTop),
                           Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 16,
@@ -6465,11 +6466,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               children: [
                                 Text(
                                   l10n.emailLinkInviteTitle,
-                                    textAlign: TextAlign.left,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: titleStyle,
-                                  ),
+                                  textAlign: TextAlign.left,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: titleStyle,
+                                ),
                                   const SizedBox(height: 4),
                                   Text(
                                     l10n.emailLinkInviteBodyLine1,
