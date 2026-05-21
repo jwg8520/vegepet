@@ -472,6 +472,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _profilePanelSwapInProgress = false;
   bool _profileOpenedFromGameMenu = false; // ignore: unused_field
   bool _isSavingProfilePanel = false;
+  String _profilePanelInitialNickname = '';
+  String? _profilePanelInitialGender;
+  String? _profilePanelInitialAgeRange;
+  String? _profilePanelInitialDietGoal;
   late AnimationController _gameMenuPanelController;
   late Animation<double> _gameMenuPanelCurve;
   late AnimationController _gameProfileSwapController;
@@ -3836,15 +3840,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     _instantResetHelpPanelIfOpen();
-    _gameProfileSwapController.stop();
-    _gameProfileSwapController.value = 0.0;
-    if (mounted) {
-      _safeSetState(() {
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-      });
-    }
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
     if (mounted) {
@@ -3906,15 +3902,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     _instantResetHelpPanelIfOpen();
-    _gameProfileSwapController.stop();
-    _gameProfileSwapController.value = 0.0;
-    if (mounted) {
-      _safeSetState(() {
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-      });
-    }
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
     if (mounted) {
@@ -3995,15 +3983,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_gameStorySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
-    _gameProfileSwapController.stop();
-    _gameProfileSwapController.value = 0.0;
-    if (mounted) {
-      _safeSetState(() {
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-      });
-    }
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
     if (mounted) {
@@ -9049,6 +9029,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Future<void> _openPetInfoBannerClosingGameMenu() async {
+    if (_isProfilePanelOpen) {
+      final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+      if (!canClose) return;
+    }
+    if (!mounted) return;
+    _safeSetState(() {
+      _isPetInfoBannerOpen = true;
+      _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = true;
+      _resetGameProfilePanelStateForMenuClose();
+    });
+    unawaited(_finishGameMenuPanelRetract());
+  }
+
   void _togglePetInfoBanner() {
     if (_activePet == null || _isInteracting) return;
     if (_isToyMenuOpen ||
@@ -9065,13 +9060,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         (_gameMenuPanelOpen ||
             _gameMenuPanelRetracting ||
             _isAnyGameMenuSubPanelOpenOrSwapping())) {
-      _safeSetState(() {
-        _isPetInfoBannerOpen = true;
-        _gameMenuPanelOpen = false;
-        _gameMenuPanelRetracting = true;
-        _resetGameProfilePanelStateForMenuClose();
-      });
-      unawaited(_finishGameMenuPanelRetract());
+      unawaited(_openPetInfoBannerClosingGameMenu());
       return;
     }
 
@@ -12065,6 +12054,121 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     await _persistGameMenuProfilePatch({'nickname': nickname});
   }
 
+  void _captureProfilePanelInitialValues() {
+    _profilePanelInitialNickname = _nicknameController.text.trim();
+    _profilePanelInitialGender = _selectedGender;
+    _profilePanelInitialAgeRange = _selectedAgeRange;
+    _profilePanelInitialDietGoal = _selectedDietGoal;
+  }
+
+  bool _isProfilePanelDirty() {
+    final nickname = _nicknameController.text.trim();
+    return nickname != _profilePanelInitialNickname ||
+        _selectedGender != _profilePanelInitialGender ||
+        _selectedAgeRange != _profilePanelInitialAgeRange ||
+        _selectedDietGoal != _profilePanelInitialDietGoal;
+  }
+
+  Future<bool> _saveProfilePanelIfDirtyBeforeClose() async {
+    if (!_isProfilePanelDirty()) return true;
+    if (_isSavingProfilePanel) return false;
+
+    _dismissFocus();
+    await _closeProfileSelectOverlay(animated: true);
+
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showSnack(AppLocalizations.of(context).snackLoginRequired);
+      return false;
+    }
+
+    _enforceProfileNicknameMaxLength();
+    final nickname = _nicknameController.text.trim();
+
+    if (!_isValidNicknameOrPetName(nickname)) {
+      await _showNameInterlockNotice();
+      return false;
+    }
+
+    final l10n = AppLocalizations.of(context);
+    if (_selectedGender == null) {
+      _showSnack(l10n.snackSelectGender);
+      return false;
+    }
+    if (_selectedAgeRange == null) {
+      _showSnack(l10n.snackSelectAgeRange);
+      return false;
+    }
+    if (_selectedDietGoal == null) {
+      _showSnack(l10n.snackSelectDietGoal);
+      return false;
+    }
+
+    _safeSetState(() => _isSavingProfilePanel = true);
+
+    try {
+      final nowIso = DateTime.now().toIso8601String();
+      final profilePayload = <String, dynamic>{
+        'id': user.id,
+        'nickname': nickname,
+        'gender': _selectedGender,
+        'age_range': _selectedAgeRange,
+        'diet_goal': _selectedDietGoal,
+        'updated_at': nowIso,
+      };
+
+      final savedRows = await supabase
+          .from('profiles')
+          .upsert(profilePayload, onConflict: 'id')
+          .select();
+
+      Map<String, dynamic>? savedProfile;
+      if (savedRows.isNotEmpty) {
+        savedProfile = Map<String, dynamic>.from(savedRows.first);
+      }
+
+      _profile = {
+        ...?_profile,
+        ...profilePayload,
+        if (savedProfile != null) ...savedProfile,
+      };
+
+      _captureProfilePanelInitialValues();
+
+      if (mounted) {
+        _safeSetState(() => _isSavingProfilePanel = false);
+      } else {
+        _isSavingProfilePanel = false;
+      }
+
+      return true;
+    } catch (e, st) {
+      debugPrint('profile panel autosave failed: $e\n$st');
+      if (mounted) {
+        _safeSetState(() => _isSavingProfilePanel = false);
+        _showSnack(l10n.snackProfileSaveFailed(e.toString()));
+      } else {
+        _isSavingProfilePanel = false;
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _closeGameMenuProfilePanelForMenuSwitch() async {
+    if (!_isProfilePanelOpen) return true;
+    if (_profilePanelSwapInProgress) return false;
+    final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+    if (!canClose) return false;
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    _safeSetState(() {
+      _isProfilePanelOpen = false;
+      _profilePanelSwapInProgress = false;
+      _profileOpenedFromGameMenu = false;
+    });
+    return true;
+  }
+
   Future<void> _openProfilePanelFromGameMenu() async {
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
@@ -12103,6 +12207,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _syncProfileFormFromFetched();
+    _captureProfilePanelInitialValues();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     _safeSetState(() {
@@ -12118,7 +12223,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _closeProfilePanelToGameMenu() async {
-    if (_profilePanelSwapInProgress) return;
+    if (_profilePanelSwapInProgress || _isSavingProfilePanel) return;
+    final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+    if (!canClose) return;
     _dismissFocus();
     await _closeProfileSelectOverlay(animated: true);
     _gameProfileSwapController.value = 1.0;
@@ -12201,6 +12308,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     switch (kind) {
       case _GameMenuSubOutsideDismissKind.profile:
         if (_profilePanelSwapInProgress) return;
+        if (_isProfilePanelOpen) {
+          final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+          if (!canClose) return;
+        }
       case _GameMenuSubOutsideDismissKind.dietDiary:
         if (_dietDiaryPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.bag:
@@ -12243,6 +12354,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 게임 메뉴 슬라이드 패널 전체를 닫는다. (베지펫 정보창 닫기와 동일: open=false → 우측 슬라이드)
   Future<void> _closeGameMenuPanel() async {
     if (!_gameMenuPanelOpen || _gameMenuPanelRetracting) return;
+    if (_isProfilePanelOpen) {
+      final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+      if (!canClose) return;
+    }
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _safeSetState(() {
       _gameMenuPanelOpen = false;
@@ -12512,15 +12627,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return _gameSettingsSwapCurve.value >= 1.0;
   }
 
-  /// 설정 패널 Scrollbar: 전환 완료 후에만 thumb 표시.
-  Widget _buildSettingsPanelScrollbar({
+  /// 설정 패널 스크롤: content는 left/right 8, thumb는 패널 내부 right 8 고정.
+  Widget _buildSettingsPanelScrollArea({
     required ScrollController controller,
     required Widget child,
+    EdgeInsets padding = const EdgeInsets.fromLTRB(8, 0, 8, 14),
   }) {
-    return Scrollbar(
-      controller: controller,
-      thumbVisibility: _settingsScrollbarThumbVisible,
-      child: child,
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.hardEdge,
+      children: [
+        Positioned(
+          left: 8,
+          right: 8,
+          top: 0,
+          bottom: 0,
+          child: SingleChildScrollView(
+            controller: controller,
+            padding: padding,
+            physics: const ClampingScrollPhysics(),
+            child: child,
+          ),
+        ),
+        Positioned(
+          right: 8,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          child: RawScrollbar(
+            controller: controller,
+            thumbVisibility: _settingsScrollbarThumbVisible,
+            thickness: 3,
+            radius: const Radius.circular(20),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -12542,15 +12684,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _instantResetHelpPanelIfOpen();
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
-    _gameProfileSwapController.stop();
-    _gameProfileSwapController.value = 0.0;
-    if (mounted) {
-      _safeSetState(() {
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-      });
-    }
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameBagSwapController.stop();
     _gameBagSwapController.value = 0.0;
     if (mounted) {
@@ -12629,6 +12763,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
+    if (_isProfilePanelOpen) {
+      final canClose = await _saveProfilePanelIfDirtyBeforeClose();
+      if (!canClose) return;
+    }
+
     _safeSetState(() {
       _isPetInfoBannerOpen = false;
       _gameMenuPanelOpen = false;
@@ -12663,15 +12802,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_gameSettingsSwapController.isAnimating) return;
     _instantResetStoryPanelIfOpen();
     _instantResetHelpPanelIfOpen();
-    _gameProfileSwapController.stop();
-    _gameProfileSwapController.value = 0.0;
-    if (mounted) {
-      _safeSetState(() {
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-      });
-    }
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
     if (mounted) {
@@ -12800,17 +12931,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
 
     return RepaintBoundary(
-      child: _buildSettingsPanelScrollbar(
+      child: _buildSettingsPanelScrollArea(
         controller: _settingsSupportDocScrollController,
-        child: SingleChildScrollView(
-          controller: _settingsSupportDocScrollController,
-          physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                doc.title,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              doc.title,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -12838,7 +12965,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 const SizedBox(height: 10),
               ],
             ],
-          ),
         ),
       ),
     );
@@ -13226,17 +13352,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           opacity: _activeSettingsSupportDoc == null ? 1 : 0,
                           child: RepaintBoundary(
                             key: const ValueKey('settings-panel-main'),
-                            child: _buildSettingsPanelScrollbar(
+                            child: _buildSettingsPanelScrollArea(
                               controller: _settingsScrollController,
-                              child: SingleChildScrollView(
-                                controller: _settingsScrollController,
-                                padding:
-                                    const EdgeInsets.fromLTRB(8, 0, 8, 14),
-                                physics: const ClampingScrollPhysics(),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.stretch,
+                                children: [
                           const SizedBox(height: 4),
                           sectionTitle(l10n.settingsSectionAccountBullet),
                           const SizedBox(height: 6),
@@ -13447,8 +13568,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             ),
                           ),
                           const SizedBox(height: 14),
-                                  ],
-                                ),
+                                ],
                               ),
                             ),
                           ),
@@ -16476,33 +16596,34 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               SizedBox(
-                width: 62,
-                child: Transform.translate(
-                  offset: const Offset(0, -1),
-                  child: isEnglish
-                      ? Text.rich(
-                          TextSpan(
-                            style: labelStyle,
-                            children: [
-                              const TextSpan(text: '• Weight'),
-                              TextSpan(
-                                text: '(Kg)',
-                                style: labelStyle.copyWith(
-                                  fontSize: labelBaseSize - 2,
-                                ),
+                width: isEnglish ? 76 : 62,
+                child: isEnglish
+                    ? Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '• Weight',
+                              style: labelStyle.copyWith(height: 1.1),
+                            ),
+                            TextSpan(
+                              text: '(kg)',
+                              style: labelStyle.copyWith(
+                                fontSize: 9,
+                                height: 1.1,
                               ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                        )
-                      : Text(
-                          AppLocalizations.of(context).diaryWeightLabel,
-                          style: labelStyle,
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
+                            ),
+                          ],
                         ),
-                ),
+                        maxLines: 1,
+                        overflow: TextOverflow.visible,
+                        softWrap: false,
+                      )
+                    : Text(
+                        AppLocalizations.of(context).diaryWeightLabel,
+                        style: labelStyle,
+                        maxLines: 1,
+                        overflow: TextOverflow.visible,
+                      ),
               ),
               const SizedBox(width: 6),
               Expanded(
