@@ -128,8 +128,8 @@ const List<String> _kSupplementMessagesFallbackEn = <String>[
 ];
 
 const List<String> _kBadMessagesWithFeedbackEn = <String>[
-  "This meal seems a bit low on energy... Next time, let's try adding {feedback}.",
-  "This meal may not have been very satisfying... Next time, let's try adding {feedback}.",
+  "This meal may have been a bit unbalanced. Next time, let's try {feedback}.",
+  "VegePet ate the meal, but it could be better balanced. Next time, try {feedback}.",
 ];
 
 const List<String> _kBadMessagesFallbackEn = <String>[
@@ -1181,6 +1181,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         scope?.locale.languageCode ??
         Localizations.localeOf(context).languageCode;
     return code == 'en' ? 'en' : 'ko';
+  }
+
+  /// meal-evaluate Edge Function 요청용 locale (en | ko).
+  String _currentLocaleCodeForAi() {
+    return _isEnglishLocale ? 'en' : 'ko';
   }
 
   Future<void> _onSettingsLanguageSelected(String label) async {
@@ -2785,11 +2790,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   // 현재 활성 펫의 family('dog'/'cat'/'')를 안전하게 꺼낸다.
   String _activePetFamily() {
-    final species = _activePet?['pet_species'];
-    if (species is Map) {
+    final species = _speciesForPet(_activePet);
+    if (species != null) {
       return _normalizePetFamily(species['family']?.toString() ?? '');
     }
     return '';
+  }
+
+  /// activePet 에서 pet_species 맵을 꺼낸다. embed relation 없으면 _petSpecies 에서 매칭.
+  Map<String, dynamic>? _speciesForPet(Map<String, dynamic>? pet) {
+    if (pet == null) return null;
+
+    final embedded = pet['pet_species'];
+    if (embedded is Map<String, dynamic>) return embedded;
+    if (embedded is Map) return Map<String, dynamic>.from(embedded);
+
+    final rawId = pet['pet_species_id'];
+    final speciesId = rawId is int ? rawId.toString() : rawId?.toString();
+    if (speciesId == null || speciesId.isEmpty) return null;
+
+    for (final species in _petSpecies) {
+      if (species['id']?.toString() == speciesId) {
+        return species;
+      }
+    }
+    return null;
   }
 
   // 도감 entry 에서 종 이름(name_ko)을 안전하게 꺼낸다.
@@ -2799,13 +2824,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final m = Map<String, dynamic>.from(species);
       final nameKo = m['name_ko']?.toString();
       final code = m['code']?.toString();
-      final localized = _localizedPetSpeciesName(
+      final localized = _localizedPetSpeciesNameFromRaw(
         nameKo: nameKo,
         family: m['family']?.toString(),
         code: code,
-        speciesNumber:
-            _extractTrailingNumber(nameKo ?? '') ??
-            _extractTrailingNumber(code ?? ''),
       );
       if (localized.isNotEmpty) return localized;
     }
@@ -5096,13 +5118,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final unlocked = entry != null;
     final speciesName = species['name_ko']?.toString().trim();
     final codeFallback = species['code']?.toString().trim();
-    String unlockedLabel = _localizedPetSpeciesName(
+    String unlockedLabel = _localizedPetSpeciesNameFromRaw(
       nameKo: speciesName,
       family: species['family']?.toString(),
       code: codeFallback,
-      speciesNumber:
-          _extractTrailingNumber(speciesName ?? '') ??
-          _extractTrailingNumber(codeFallback ?? ''),
     );
     if (unlockedLabel.isEmpty) {
       unlockedLabel = l10n.pokedexDefaultPetName;
@@ -9607,14 +9626,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final pet = _activePet;
     if (pet == null) return const SizedBox.shrink();
 
-    final species = pet['pet_species'] is Map
-        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
-        : <String, dynamic>{};
+    final species = _speciesForPet(pet) ?? <String, dynamic>{};
     final family = species['family']?.toString().toLowerCase() ?? '';
     final speciesNameKo = species['name_ko']?.toString() ?? '펫';
-    final typeDisplay = _localizedPetFamilyOrType(species, l10n);
+    final typeDisplay = _localizedPetSpeciesNameFromRaw(
+      nameKo: species['name_ko']?.toString(),
+      family: species['family']?.toString(),
+      code: species['code']?.toString(),
+    );
     final nickname = pet['nickname']?.toString();
-    final speciesDisplayName = _localizedPetSpeciesName(
+    final speciesDisplayName = _localizedPetSpeciesNameFromRaw(
       nameKo: species['name_ko']?.toString(),
       family: species['family']?.toString(),
       code: species['code']?.toString(),
@@ -11487,7 +11508,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   ///
   /// 요청 바디:
   /// ```json
-  /// { "slot": "brunch|dinner", "imagePath": "<storage path>" }
+  /// {
+  ///   "slot": "brunch|dinner",
+  ///   "imagePath": "<storage path>",
+  ///   "locale_code": "ko|en"
+  /// }
   /// ```
   ///
   /// 응답(성공 시) 예시:
@@ -11509,7 +11534,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final res = await supabase.functions.invoke(
         _kMealEvaluateFunction,
-        body: {'slot': slot, 'imagePath': imagePath},
+        body: {
+          'slot': slot,
+          'imagePath': imagePath,
+          'locale_code': _currentLocaleCodeForAi(),
+        },
       );
       final data = res.data;
       if (data is Map) {
@@ -16234,105 +16263,50 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  String _localizedPetTypeValue(String? raw, AppLocalizations l10n) {
-    final value = raw?.trim() ?? '';
-    if (!_isEnglishLocale) return value;
-
-    switch (value) {
-      case '강아지':
-      case '댕족':
-      case 'dog':
-        return 'Dog';
-      case '고양이':
-      case '냥족':
-      case 'cat':
-        return 'Cat';
-      default:
-        return value;
-    }
-  }
-
-  int? _extractTrailingNumber(String raw) {
-    final match = RegExp(r'(\d+)$').firstMatch(raw.trim());
-    if (match == null) return null;
-    return int.tryParse(match.group(1)!);
-  }
-
-  String _localizedPetTypeLabel({
-    String? family,
-    String? nameKo,
-    String? code,
-  }) {
-    final normalizedFamily = family?.trim().toLowerCase() ?? '';
-    final normalizedName = nameKo?.trim() ?? '';
-    final normalizedCode = code?.trim().toLowerCase() ?? '';
-
-    if (!_isEnglishLocale) {
-      if (normalizedFamily == 'dog') return '강아지';
-      if (normalizedFamily == 'cat') return '고양이';
-      if (normalizedName.isNotEmpty) return normalizedName;
-      return '';
-    }
-
-    if (normalizedFamily == 'dog') return 'Dog';
-    if (normalizedFamily == 'cat') return 'Cat';
-
-    if (normalizedName.contains('강아지') || normalizedName.contains('댕')) {
-      return 'Dog';
-    }
-    if (normalizedName.contains('고양이') || normalizedName.contains('냥')) {
-      return 'Cat';
-    }
-    if (normalizedCode.contains('dog')) return 'Dog';
-    if (normalizedCode.contains('cat')) return 'Cat';
-
-    return normalizedName;
-  }
-
-  /// 화면 표시용 종 개체명. DB name_ko 는 그대로 두고 locale 에 따라 변환한다.
+  /// pet_species.name_ko 기반 종류명 표시. 정보창 Type·도감 종 이름에 사용.
+  /// family(강아지/고양이) 분류는 [_normalizePetFamily] · [_familyToKorean] 등에 사용.
   /// 추후 name_en 컬럼이 생기면 여기서 우선 적용하도록 확장 가능.
-  String _localizedPetSpeciesName({
-    String? nameKo,
+  String _localizedPetSpeciesNameFromRaw({
+    required String? nameKo,
     String? family,
     String? code,
-    int? speciesNumber,
   }) {
     final rawName = nameKo?.trim() ?? '';
-
     if (!_isEnglishLocale) return rawName;
 
-    final normalizedFamily = family?.trim().toLowerCase() ?? '';
-    final normalizedCode = code?.trim().toLowerCase() ?? '';
+    final lowerFamily = family?.trim().toLowerCase() ?? '';
+    final lowerCode = code?.trim().toLowerCase() ?? '';
 
-    final familyLabel =
-        normalizedFamily == 'dog' || normalizedCode.contains('dog')
-        ? 'Dog'
-        : normalizedFamily == 'cat' || normalizedCode.contains('cat')
-        ? 'Cat'
-        : rawName.contains('강아지') || rawName.contains('댕')
-        ? 'Dog'
-        : rawName.contains('고양이') || rawName.contains('냥')
-        ? 'Cat'
-        : 'VegePet';
+    int? number;
+    final numberMatch = RegExp(r'(\d+)$').firstMatch(rawName);
+    if (numberMatch != null) {
+      number = int.tryParse(numberMatch.group(1)!);
+    }
 
-    final number =
-        speciesNumber ??
-        _extractTrailingNumber(rawName) ??
-        _extractTrailingNumber(normalizedCode);
+    String familyLabel;
+    if (rawName.contains('고양이') ||
+        rawName.contains('냥') ||
+        lowerFamily == 'cat' ||
+        lowerCode.contains('cat')) {
+      familyLabel = 'Cat';
+    } else if (rawName.contains('강아지') ||
+        rawName.contains('댕') ||
+        lowerFamily == 'dog' ||
+        lowerCode.contains('dog')) {
+      familyLabel = 'Dog';
+    } else {
+      familyLabel = 'VegePet';
+    }
 
-    if (number != null) return '$familyLabel $number';
+    if (number != null) {
+      return '$familyLabel $number';
+    }
+
+    if (rawName.isNotEmpty) {
+      return familyLabel == 'VegePet' ? rawName : familyLabel;
+    }
+
     return familyLabel;
-  }
-
-  String _localizedPetFamilyOrType(
-    Map<String, dynamic>? petSpecies,
-    AppLocalizations l10n,
-  ) {
-    return _localizedPetTypeLabel(
-      family: petSpecies?['family']?.toString(),
-      nameKo: petSpecies?['name_ko']?.toString(),
-      code: petSpecies?['code']?.toString(),
-    );
   }
 
   String _familyToKorean(String family) {
