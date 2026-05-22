@@ -5773,17 +5773,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dismissKeyboardOnly();
   }
 
-  bool _isKeyboardVisible(BuildContext context) {
-    return MediaQuery.viewInsetsOf(context).bottom > 0;
-  }
-
   bool _hasActiveTextInput() {
-    if (_keyboardAccessoryFocusNode.hasFocus) return true;
     for (final node in _keyboardBoundFocusNodes) {
       if (node.hasFocus) return true;
     }
     final focus = FocusManager.instance.primaryFocus;
-    return focus != null && focus.hasFocus;
+    if (focus == null || !focus.hasFocus) return false;
+    final context = focus.context;
+    if (context == null) return false;
+    return context.widget is EditableText ||
+        context.findAncestorWidgetOfExactType<TextField>() != null ||
+        context.findAncestorWidgetOfExactType<TextFormField>() != null;
   }
 
   void _dismissKeyboardOnly() {
@@ -5791,12 +5791,32 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
-  bool _dismissKeyboardFirstIfNeeded() {
-    if (_hasActiveTextInput()) {
-      _dismissKeyboardOnly();
-      return true;
+  void _clearActiveKeyboardInput() {
+    _activeKeyboardInputKey = null;
+    _activeKeyboardController = null;
+    _activeKeyboardFocusNode = null;
+  }
+
+  /// 키보드가 실제로 떠 있고 추적 중인 TextField 포커스일 때만 키보드를 닫고 true.
+  bool _dismissKeyboardIfVisibleOnly() {
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final hasPrimaryFocus = FocusManager.instance.primaryFocus != null;
+    final hasTrackedInput =
+        _activeKeyboardController != null || _activeKeyboardFocusNode != null;
+
+    if (!keyboardVisible || !hasPrimaryFocus || !hasTrackedInput) {
+      return false;
     }
-    return false;
+    if (!_hasActiveTextInput()) {
+      return false;
+    }
+
+    _dismissKeyboardOnly();
+    _clearActiveKeyboardInput();
+    if (mounted) {
+      _safeSetState(() {});
+    }
+    return true;
   }
 
   void _registerActiveKeyboardInput({
@@ -5814,9 +5834,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _clearActiveKeyboardInputIfNeeded(FocusNode focusNode) {
     if (_activeKeyboardFocusNode != focusNode) return;
-    _activeKeyboardInputKey = null;
-    _activeKeyboardController = null;
-    _activeKeyboardFocusNode = null;
+    _clearActiveKeyboardInput();
     _safeSetState(() {});
   }
 
@@ -5841,7 +5859,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (_hasActiveTextInput()) return;
+        if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
         _clearActiveKeyboardInputIfNeeded(focusNode);
       });
     });
@@ -5855,48 +5873,46 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     controller.addListener(onTextChanged);
   }
 
+  static const double _kKeyboardAccessoryHorizontalInset = 54;
+
   Widget _buildKeyboardAccessoryOverlay(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final controller = _activeKeyboardController;
-    if (!_isKeyboardVisible(context) ||
-        controller == null ||
-        !_hasActiveTextInput()) {
+    if (bottomInset <= 0 || controller == null) {
       return const SizedBox.shrink();
     }
+    final previewMaxLines = _activeKeyboardInputKey == 'diet_note' ? 2 : 1;
     return Positioned(
-      left: 0,
-      right: 0,
+      left: _kKeyboardAccessoryHorizontalInset,
+      right: _kKeyboardAccessoryHorizontalInset,
       bottom: bottomInset,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
-            ),
-            alignment: Alignment.centerLeft,
-            child: TextField(
-              controller: controller,
-              focusNode: _keyboardAccessoryFocusNode,
-              keyboardType: _activeKeyboardInputType,
-              style: const TextStyle(
-                fontFamily: 'Pretendard',
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF4A4A4A),
-                height: 1.2,
+        padding: const EdgeInsets.only(bottom: 6),
+        child: IgnorePointer(
+          ignoring: true,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
               ),
-              decoration: const InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                controller.text,
+                maxLines: previewMaxLines,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4A4A4A),
+                  height: 1.2,
+                ),
               ),
-              maxLines: _activeKeyboardInputKey == 'diet_note' ? 2 : 1,
             ),
           ),
         ),
@@ -7373,7 +7389,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: () {
-                if (_dismissKeyboardFirstIfNeeded()) return;
+                if (_dismissKeyboardIfVisibleOnly()) return;
                 _safeSetState(() {
                   _resetEmailLinkPanelOtpFlow();
                   _isEmailLinkPanelOpen = false;
@@ -7407,7 +7423,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: () {
-                if (_dismissKeyboardFirstIfNeeded()) return;
+                if (_dismissKeyboardIfVisibleOnly()) return;
                 _safeSetState(() => _isCustomerCenterPanelOpen = false);
               },
               child: const SizedBox.expand(),
@@ -8032,7 +8048,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
-          if (_dismissKeyboardFirstIfNeeded()) return;
+          if (_dismissKeyboardIfVisibleOnly()) return;
           unawaited(_closeProfileSelectOverlay());
         },
         child: ClipRRect(
@@ -8663,7 +8679,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   errorText: null,
                                 ),
                                 onTapOutside: (_) {
-                                  if (_dismissKeyboardFirstIfNeeded()) return;
+                                  if (_dismissKeyboardIfVisibleOnly()) return;
                                 },
                                 onSubmitted: (_) {
                                   unawaited(_submitPetNaming());
@@ -11363,7 +11379,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final closingMeal = _isMealPanelOpen;
     if (!closingToy && !closingMeal) return;
 
-    if (_dismissKeyboardFirstIfNeeded()) return;
+    if (_dismissKeyboardIfVisibleOnly()) return;
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
 
@@ -12554,7 +12570,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 가방 설명창 오버레이가 터치를 못 받는 경우에 한해 여기서 설명창만 닫는다.
   /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 마당까지 닫는다.
   Future<void> _closeActiveGameMenuFromOutsideBackdropTap() async {
-    if (_dismissKeyboardFirstIfNeeded()) return;
+    if (_dismissKeyboardIfVisibleOnly()) return;
     if (_isDietDiaryPanelOpen) {
       final handled =
           await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??
@@ -15365,7 +15381,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   setState(() {});
                 },
                 onTapOutside: (_) {
-                  if (_dismissKeyboardFirstIfNeeded()) return;
+                  if (_dismissKeyboardIfVisibleOnly()) return;
                 },
                 textAlign: TextAlign.left,
                 style: fieldTextStyle,
