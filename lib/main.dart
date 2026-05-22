@@ -114,30 +114,30 @@ const List<String> _kBadMessagesFallback = <String>[
 const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요. 다시 촬영해보세요!';
 
 const List<String> _kGoodMessagesEn = <String>[
-  'Maybe it was the healthy meal? VegePet looks happy!',
-  'VegePet had a satisfying meal! Keeping this balance would be great!',
+  'Looks like VegePet enjoyed the meal! This balance seems great.',
+  "VegePet looks happy after that meal! Let's keep this balance going.",
 ];
 
 const List<String> _kSupplementMessagesWithFeedbackEn = <String>[
-  'VegePet seems to have enjoyed the meal! Next time, how about adding {feedback}?',
-  "VegePet looks pretty happy! Next time, let's try adding {feedback}.",
+  'Looks like VegePet enjoyed the meal! Next time, try adding {feedback}.',
+  'VegePet seems pretty happy! Adding {feedback} next time could make it even better.',
 ];
 
 const List<String> _kSupplementMessagesFallbackEn = <String>[
-  'VegePet enjoyed the meal! Next time, a little more nutritional balance would be even better.',
+  'VegePet enjoyed the meal! Next time, a little more balance would make it even better.',
 ];
 
 const List<String> _kBadMessagesWithFeedbackEn = <String>[
-  "This meal may have been a bit unbalanced. Next time, let's try {feedback}.",
-  "VegePet ate the meal, but it could be better balanced. Next time, try {feedback}.",
+  'This meal could use a little more balance. Next time, try going with {feedback}.',
+  'VegePet ate the meal, but it could be better balanced. Next time, {feedback} may be a better choice.',
 ];
 
 const List<String> _kBadMessagesFallbackEn = <String>[
-  'VegePet ate the meal, but next time it may be better to adjust the balance a bit.',
+  'VegePet ate the meal, but next time, a more balanced meal would be better.',
 ];
 
 const String _kUncertainMessageEn =
-    'The photo is hard to read. Please try taking it again!';
+    'The photo is a little hard to read. Please try taking it again.';
 
 final Random _mealMessageRandom = Random();
 
@@ -153,6 +153,22 @@ enum _GameMenuSubOutsideDismissKind {
   help,
 }
 
+/// English locale: comma-separated feedback phrases → natural "and" list.
+String _formatFeedbackForEnglishSentence(String feedback) {
+  final parts = feedback
+      .split(',')
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+
+  if (parts.length <= 1) return feedback.trim();
+  if (parts.length == 2) {
+    return '${parts[0]} and ${parts[1]}';
+  }
+
+  return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}';
+}
+
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
 ///
 /// feedback_text가 비어 있거나 null 이면 fallback 메시지 세트에서 선택한다.
@@ -162,7 +178,10 @@ String _buildAiStatusMessage(
   String localeCode = 'ko',
 }) {
   final isEn = localeCode == 'en';
-  final feedback = feedbackText?.trim() ?? '';
+  final rawFeedback = feedbackText?.trim() ?? '';
+  final feedback = isEn
+      ? _formatFeedbackForEnglishSentence(rawFeedback)
+      : rawFeedback;
   final hasFeedback = feedback.isNotEmpty;
 
   List<String> pickList;
