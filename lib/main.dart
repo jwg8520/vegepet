@@ -1136,6 +1136,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return label == 'English' ? const Locale('en') : const Locale('ko');
   }
 
+  /// 설정 고객지원 문서창 렌더링용. [_LocaleControllerScope.of]의 `!`를 피한다.
+  String _safeLocaleCodeForBuild(BuildContext context) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_LocaleControllerScope>();
+    final code =
+        scope?.locale.languageCode ??
+        Localizations.localeOf(context).languageCode;
+    return code == 'en' ? 'en' : 'ko';
+  }
+
   Future<void> _onSettingsLanguageSelected(String label) async {
     try {
       await _applyAppLocaleFromLanguageLabel(label);
@@ -6954,6 +6964,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailLinkSuccessNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
+      _settingsSupportDocSwapInProgress = false;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
     });
@@ -12477,6 +12488,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _storyPanelSwapInProgress = false;
     _activeSettingsSupportDoc = null;
     _renderingSettingsSupportDoc = null;
+    _settingsSupportDocSwapInProgress = false;
     _resetEmailLinkPanelOtpFlow();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
   }
@@ -12495,6 +12507,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
+      _settingsSupportDocSwapInProgress = false;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -12824,22 +12837,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool get _settingsScrollbarThumbVisible {
     if (!_isSettingsPanelOpen) return false;
     if (_settingsPanelSwapInProgress) return false;
+    if (_settingsSupportDocSwapInProgress) return false;
     if (_gameSettingsSwapController.isAnimating) return false;
     if (_gameMenuSubOutsideDismissKind !=
         _GameMenuSubOutsideDismissKind.none) {
       return false;
     }
+    final hasSupportDoc =
+        _activeSettingsSupportDoc != null ||
+        _renderingSettingsSupportDoc != null;
+    if (hasSupportDoc) return false;
+    return _gameSettingsSwapCurve.value >= 1.0;
+  }
+
+  /// 설정 고객지원 문서창 스크롤 thumb (본문 스크롤바와 분리).
+  bool get _settingsSupportDocScrollbarThumbVisible {
+    if (!_isSettingsPanelOpen) return false;
+    if (_settingsPanelSwapInProgress) return false;
+    if (_gameSettingsSwapController.isAnimating) return false;
+    if (_gameMenuSubOutsideDismissKind !=
+        _GameMenuSubOutsideDismissKind.none) {
+      return false;
+    }
+    final hasSupportDoc =
+        _activeSettingsSupportDoc != null ||
+        _renderingSettingsSupportDoc != null;
+    if (!hasSupportDoc) return false;
     return _gameSettingsSwapCurve.value >= 1.0;
   }
 
   /// 설정 패널 스크롤: content는 left/right 8, thumb는 패널 내부 right 8 고정.
   Widget _buildSettingsPanelManualScrollbar({
     required ScrollController controller,
+    required bool thumbVisible,
   }) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        if (!_settingsScrollbarThumbVisible) {
+        if (!thumbVisible) {
           return const SizedBox.shrink();
         }
         if (!controller.hasClients) {
@@ -12885,7 +12920,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required ScrollController controller,
     required Widget child,
     EdgeInsets padding = const EdgeInsets.fromLTRB(8, 0, 8, 14),
+    bool forSupportDoc = false,
   }) {
+    final thumbVisible = forSupportDoc
+        ? _settingsSupportDocScrollbarThumbVisible
+        : _settingsScrollbarThumbVisible;
     return Stack(
       fit: StackFit.expand,
       clipBehavior: Clip.hardEdge,
@@ -12910,7 +12949,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           top: 0,
           bottom: 0,
           width: 3,
-          child: _buildSettingsPanelManualScrollbar(controller: controller),
+          child: _buildSettingsPanelManualScrollbar(
+            controller: controller,
+            thumbVisible: thumbVisible,
+          ),
         ),
       ],
     );
@@ -13097,6 +13139,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isSettingsPanelOpen = true;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
+      _settingsSupportDocSwapInProgress = false;
     });
 
     unawaited(
@@ -13128,6 +13171,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
+      _settingsSupportDocSwapInProgress = false;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -13135,6 +13179,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _openSettingsSupportDocPanel(_SupportDocType type) {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+    debugPrint('open support doc: active=$type rendering=$type');
     _safeSetState(() {
       _isCustomerCenterPanelOpen = false;
       _isEmailLinkPanelOpen = false;
@@ -13150,12 +13195,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _closeSettingsSupportDocToSettings() {
-    final doc = _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
-    if (doc == null) return;
+    final docForRender =
+        _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
+    if (docForRender == null) return;
+    debugPrint(
+      'close support doc: active=$_activeSettingsSupportDoc '
+      'rendering=$_renderingSettingsSupportDoc',
+    );
     _safeSetState(() {
       _settingsSupportDocSwapInProgress = true;
       _activeSettingsSupportDoc = null;
-      _renderingSettingsSupportDoc = doc;
+      _renderingSettingsSupportDoc = docForRender;
     });
     Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
@@ -13169,6 +13219,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _closeSettingsSupportDocFromOutsideTap() async {
     await _dismissGameSubPanelWithCenterExit(
       _GameMenuSubOutsideDismissKind.settings,
+    );
+  }
+
+  Widget _buildSettingsSupportDocAnimatedLayer({
+    required _SupportDocType docType,
+    required AppLocalizations l10n,
+    required bool layerVisible,
+  }) {
+    final safeLocaleCode = _safeLocaleCodeForBuild(context);
+    final document = _buildSupportDocument(docType, safeLocaleCode, l10n);
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      opacity: layerVisible ? 1 : 0,
+      child: RepaintBoundary(
+        key: ValueKey('settings-support-doc-${docType.name}'),
+        child: _buildSettingsSupportDocScrollBody(document),
+      ),
     );
   }
 
@@ -13191,6 +13259,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return RepaintBoundary(
       child: _buildSettingsPanelScrollArea(
         controller: _settingsSupportDocScrollController,
+        forSupportDoc: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -13520,6 +13589,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final supportDocForRender =
         _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
     final supportDocBlur = supportDocForRender != null ? 10.0 : 6.0;
+    Widget? supportDocLayer;
+    if (supportDocForRender != null) {
+      debugPrint(
+        'render support doc: '
+        'active=$_activeSettingsSupportDoc '
+        'rendering=$_renderingSettingsSupportDoc '
+        'supportDocForRender=$supportDocForRender',
+      );
+      supportDocLayer = _buildSettingsSupportDocAnimatedLayer(
+        docType: supportDocForRender,
+        l10n: l10n,
+        layerVisible: _activeSettingsSupportDoc != null,
+      );
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -13835,26 +13918,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
-                    if (supportDocForRender != null)
-                      AnimatedOpacity(
-                        duration: const Duration(milliseconds: 240),
-                        curve: Curves.easeOutCubic,
-                        opacity: _activeSettingsSupportDoc != null ? 1 : 0,
-                        child: RepaintBoundary(
-                          key: ValueKey(
-                            'settings-support-doc-${supportDocForRender.name}',
-                          ),
-                          child: _buildSettingsSupportDocScrollBody(
-                            _buildSupportDocument(
-                              supportDocForRender,
-                              _LocaleControllerScope.of(context)
-                                  .locale
-                                  .languageCode,
-                              l10n,
-                            ),
-                          ),
-                        ),
-                      ),
+                    ?supportDocLayer,
                   ],
                 ),
               ),
@@ -14331,6 +14395,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _settingsPanelSwapInProgress = false;
         _activeSettingsSupportDoc = null;
         _renderingSettingsSupportDoc = null;
+        _settingsSupportDocSwapInProgress = false;
         _isEmailLinkPanelOpen = false;
         _isCustomerCenterPanelOpen = false;
         _instantCloseYardConfirmOverlays();
