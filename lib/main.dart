@@ -523,6 +523,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late Animation<double> _gameHelpSwapCurve;
   final ScrollController _settingsScrollController = ScrollController();
   _SupportDocType? _activeSettingsSupportDoc;
+  _SupportDocType? _renderingSettingsSupportDoc;
   bool _settingsSupportDocSwapInProgress = false;
   final ScrollController _settingsSupportDocScrollController =
       ScrollController();
@@ -6952,6 +6953,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailLinkInviteNoticeOpen = false;
       _isEmailLinkSuccessNoticeOpen = false;
       _activeSettingsSupportDoc = null;
+      _renderingSettingsSupportDoc = null;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
     });
@@ -8107,6 +8109,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _settingsPanelSwapInProgress ||
         _settingsSupportDocSwapInProgress ||
         _activeSettingsSupportDoc != null ||
+        _renderingSettingsSupportDoc != null ||
         _isHelpPanelOpen ||
         _helpPanelSwapInProgress;
   }
@@ -12473,6 +12476,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isStoryPanelOpen = false;
     _storyPanelSwapInProgress = false;
     _activeSettingsSupportDoc = null;
+    _renderingSettingsSupportDoc = null;
     _resetEmailLinkPanelOtpFlow();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
   }
@@ -12490,6 +12494,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isCustomerCenterPanelOpen = false;
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
+      _renderingSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -12617,7 +12622,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
-    if (_activeSettingsSupportDoc != null) {
+    if (_activeSettingsSupportDoc != null ||
+        _renderingSettingsSupportDoc != null) {
       await _dismissGameSubPanelWithCenterExit(
         _GameMenuSubOutsideDismissKind.settings,
       );
@@ -13090,6 +13096,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _settingsPanelSwapInProgress = true;
       _isSettingsPanelOpen = true;
       _activeSettingsSupportDoc = null;
+      _renderingSettingsSupportDoc = null;
     });
 
     unawaited(
@@ -13120,6 +13127,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isCustomerCenterPanelOpen = false;
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
+      _renderingSettingsSupportDoc = null;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -13131,8 +13139,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isCustomerCenterPanelOpen = false;
       _isEmailLinkPanelOpen = false;
       _resetEmailLinkPanelOtpFlow();
-      _settingsSupportDocSwapInProgress = true;
       _activeSettingsSupportDoc = type;
+      _renderingSettingsSupportDoc = type;
+      _settingsSupportDocSwapInProgress = true;
     });
     Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
@@ -13141,14 +13150,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _closeSettingsSupportDocToSettings() {
-    if (_activeSettingsSupportDoc == null) return;
+    final doc = _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
+    if (doc == null) return;
     _safeSetState(() {
       _settingsSupportDocSwapInProgress = true;
       _activeSettingsSupportDoc = null;
+      _renderingSettingsSupportDoc = doc;
     });
     Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
-      _safeSetState(() => _settingsSupportDocSwapInProgress = false);
+      _safeSetState(() {
+        _settingsSupportDocSwapInProgress = false;
+        _renderingSettingsSupportDoc = null;
+      });
     });
   }
 
@@ -13503,7 +13517,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
-    final supportDocBlur = _activeSettingsSupportDoc != null ? 10.0 : 6.0;
+    final supportDocForRender =
+        _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
+    final supportDocBlur = supportDocForRender != null ? 10.0 : 6.0;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -13542,7 +13558,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   color: Colors.transparent,
                   child: InkWell(
                     onTap: () {
-                      if (_activeSettingsSupportDoc != null) {
+                      if (supportDocForRender != null) {
                         _closeSettingsSupportDocToSettings();
                         return;
                       }
@@ -13587,13 +13603,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   clipBehavior: Clip.hardEdge,
                   children: [
                     Offstage(
-                      offstage: _activeSettingsSupportDoc != null,
+                      offstage: supportDocForRender != null,
                       child: IgnorePointer(
-                        ignoring: _activeSettingsSupportDoc != null,
+                        ignoring: supportDocForRender != null,
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 240),
                           curve: Curves.easeOutCubic,
-                          opacity: _activeSettingsSupportDoc == null ? 1 : 0,
+                          opacity: supportDocForRender == null ? 1 : 0,
                           child: RepaintBoundary(
                             key: const ValueKey('settings-panel-main'),
                             child: _buildSettingsPanelScrollArea(
@@ -13819,18 +13835,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
-                    if (_activeSettingsSupportDoc != null)
+                    if (supportDocForRender != null)
                       AnimatedOpacity(
                         duration: const Duration(milliseconds: 240),
                         curve: Curves.easeOutCubic,
-                        opacity: 1,
+                        opacity: _activeSettingsSupportDoc != null ? 1 : 0,
                         child: RepaintBoundary(
                           key: ValueKey(
-                            'settings-support-doc-${_activeSettingsSupportDoc!.name}',
+                            'settings-support-doc-${supportDocForRender.name}',
                           ),
                           child: _buildSettingsSupportDocScrollBody(
                             _buildSupportDocument(
-                              _activeSettingsSupportDoc!,
+                              supportDocForRender,
                               _LocaleControllerScope.of(context)
                                   .locale
                                   .languageCode,
@@ -14314,6 +14330,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
         _activeSettingsSupportDoc = null;
+        _renderingSettingsSupportDoc = null;
         _isEmailLinkPanelOpen = false;
         _isCustomerCenterPanelOpen = false;
         _instantCloseYardConfirmOverlays();
