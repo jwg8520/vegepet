@@ -78,7 +78,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pushNoticeEvent => '공지 및 이벤트';
 
   @override
-  String get pushMealReminder => '먹이(식단사진)';
+  String get pushMealReminder => '먹이(식단인증)';
 
   @override
   String get pushNoticeEventDescription => '운영자가 보내는 공지와 이벤트 알림을 받아요.';
@@ -592,6 +592,15 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get emailLinkSuccessConfirm => '확인';
+
+  @override
+  String get emailFormatErrorTitle => '이메일 형식 오류';
+
+  @override
+  String get emailFormatErrorBody => '※ 올바른 이메일 형식을 입력해주세요!';
+
+  @override
+  String get emailFormatErrorConfirm => '확인';
 
   @override
   String get saveLabel => '저장';

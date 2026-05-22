@@ -239,7 +239,7 @@ abstract class AppLocalizations {
   /// No description provided for @pushMealReminder.
   ///
   /// In ko, this message translates to:
-  /// **'먹이(식단사진)'**
+  /// **'먹이(식단인증)'**
   String get pushMealReminder;
 
   /// No description provided for @pushNoticeEventDescription.
@@ -1243,6 +1243,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'확인'**
   String get emailLinkSuccessConfirm;
+
+  /// No description provided for @emailFormatErrorTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'이메일 형식 오류'**
+  String get emailFormatErrorTitle;
+
+  /// No description provided for @emailFormatErrorBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'※ 올바른 이메일 형식을 입력해주세요!'**
+  String get emailFormatErrorBody;
+
+  /// No description provided for @emailFormatErrorConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get emailFormatErrorConfirm;
 
   /// No description provided for @saveLabel.
   ///

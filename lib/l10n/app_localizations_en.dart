@@ -613,6 +613,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailLinkSuccessConfirm => 'OK';
 
   @override
+  String get emailFormatErrorTitle => 'Invalid Email Format';
+
+  @override
+  String get emailFormatErrorBody => 'Please enter a valid email address!';
+
+  @override
+  String get emailFormatErrorConfirm => 'OK';
+
+  @override
   String get saveLabel => 'Save';
 
   @override
@@ -625,7 +634,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get diaryWeightLabel => '• Weight(Kg)';
 
   @override
-  String get diaryNoteLabel => '• Post-meal mood & issues';
+  String get diaryNoteLabel => '• Post-meal mood & Issues';
 
   @override
   String get snackSelectGender => 'Please choose a gender.';

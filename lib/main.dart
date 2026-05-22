@@ -113,6 +113,32 @@ const List<String> _kBadMessagesFallback = <String>[
 // uncertain은 고정 문구 1개만 사용한다.
 const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요. 다시 촬영해보세요!';
 
+const List<String> _kGoodMessagesEn = <String>[
+  'Maybe it was the healthy meal? VegePet looks happy!',
+  'VegePet had a satisfying meal! Keeping this balance would be great!',
+];
+
+const List<String> _kSupplementMessagesWithFeedbackEn = <String>[
+  'VegePet seems to have enjoyed the meal! Next time, how about adding {feedback}?',
+  "VegePet looks pretty happy! Next time, let's try adding {feedback}.",
+];
+
+const List<String> _kSupplementMessagesFallbackEn = <String>[
+  'VegePet enjoyed the meal! Next time, a little more nutritional balance would be even better.',
+];
+
+const List<String> _kBadMessagesWithFeedbackEn = <String>[
+  "This meal seems a bit low on energy... Next time, let's try adding {feedback}.",
+  "This meal may not have been very satisfying... Next time, let's try adding {feedback}.",
+];
+
+const List<String> _kBadMessagesFallbackEn = <String>[
+  'VegePet ate the meal, but next time it may be better to adjust the balance a bit.',
+];
+
+const String _kUncertainMessageEn =
+    'The photo is hard to read. Please try taking it again!';
+
 final Random _mealMessageRandom = Random();
 
 /// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 페이드 퇴장 모션을 적용할 대상.
@@ -130,28 +156,37 @@ enum _GameMenuSubOutsideDismissKind {
 /// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
 ///
 /// feedback_text가 비어 있거나 null 이면 fallback 메시지 세트에서 선택한다.
-String _buildAiStatusMessage(String? resultType, String? feedbackText) {
+String _buildAiStatusMessage(
+  String? resultType,
+  String? feedbackText, {
+  String localeCode = 'ko',
+}) {
+  final isEn = localeCode == 'en';
   final feedback = feedbackText?.trim() ?? '';
   final hasFeedback = feedback.isNotEmpty;
 
   List<String> pickList;
   switch (resultType) {
     case 'good':
-      pickList = _kGoodMessages;
+      pickList = isEn ? _kGoodMessagesEn : _kGoodMessages;
       break;
     case 'supplement_needed':
       pickList = hasFeedback
-          ? _kSupplementMessagesWithFeedback
-          : _kSupplementMessagesFallback;
+          ? (isEn
+                ? _kSupplementMessagesWithFeedbackEn
+                : _kSupplementMessagesWithFeedback)
+          : (isEn
+                ? _kSupplementMessagesFallbackEn
+                : _kSupplementMessagesFallback);
       break;
     case 'bad':
       pickList = hasFeedback
-          ? _kBadMessagesWithFeedback
-          : _kBadMessagesFallback;
+          ? (isEn ? _kBadMessagesWithFeedbackEn : _kBadMessagesWithFeedback)
+          : (isEn ? _kBadMessagesFallbackEn : _kBadMessagesFallback);
       break;
     case 'uncertain':
     default:
-      return _kUncertainMessage;
+      return isEn ? _kUncertainMessageEn : _kUncertainMessage;
   }
 
   final template = pickList[_mealMessageRandom.nextInt(pickList.length)];
@@ -525,6 +560,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   _SupportDocType? _activeSettingsSupportDoc;
   _SupportDocType? _renderingSettingsSupportDoc;
   bool _settingsSupportDocSwapInProgress = false;
+  bool _settingsSupportDocScrollbarReady = false;
   final ScrollController _settingsSupportDocScrollController =
       ScrollController();
   bool _settingsNoticePushBusy = false;
@@ -553,6 +589,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 이메일 연동 성공 직후 안내 (240×116 · 마당 좌표계).
   bool _isEmailLinkSuccessNoticeOpen = false;
+  bool _isEmailFormatErrorNoticeOpen = false;
 
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
@@ -1658,7 +1695,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return l10n?.noLinkedEmail ?? '연동된 이메일 없음';
   }
 
-  bool _looksLikeEmail(String raw) => raw.contains('@') && raw.contains('.');
+  bool _looksLikeEmail(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || trimmed.contains(' ')) return false;
+    final at = trimmed.indexOf('@');
+    if (at <= 0 || at >= trimmed.length - 1) return false;
+    final local = trimmed.substring(0, at);
+    final domain = trimmed.substring(at + 1);
+    if (local.isEmpty || domain.isEmpty) return false;
+    if (!domain.contains('.')) return false;
+    if (domain.startsWith('.') || domain.endsWith('.')) return false;
+    return true;
+  }
 
   String _formatAuthError(Object e) {
     if (e is AuthException) return e.message;
@@ -1782,6 +1830,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     await _dismissYardConfirmOverlayAnimated(
       () => _isEmailLinkSuccessNoticeOpen = false,
     );
+  }
+
+  Future<void> _showEmailFormatErrorNotice() async {
+    if (_isEmailFormatErrorNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isEmailFormatErrorNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideEmailFormatErrorNotice() async {
+    if (!_isEmailFormatErrorNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isEmailFormatErrorNoticeOpen = false,
+    );
+  }
+
+  void _closeEmailFormatErrorNoticeOverlay() {
+    if (!_isEmailFormatErrorNoticeOpen) return;
+    unawaited(_hideEmailFormatErrorNotice());
+  }
+
+  Future<bool> _promptEmailFormatErrorIfNeeded(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) return false;
+    if (_looksLikeEmail(trimmed)) return false;
+    await _showEmailFormatErrorNotice();
+    return true;
   }
 
   void _closeEmailLinkSuccessNoticeOverlay() {
@@ -2272,8 +2348,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return false;
     }
     final trimmed = email.trim();
-    if (trimmed.isEmpty || !_looksLikeEmail(trimmed)) {
-      _showSnack(l10n.snackInvalidEmail);
+    if (trimmed.isEmpty) {
+      _showSnack(l10n.snackEmailRequired);
       return false;
     }
     try {
@@ -2720,8 +2796,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _pokedexSpeciesNameOf(Map<String, dynamic> entry) {
     final species = entry['pet_species'];
     if (species is Map) {
-      final n = species['name_ko']?.toString().trim();
-      if (n != null && n.isNotEmpty) return n;
+      final m = Map<String, dynamic>.from(species);
+      final nameKo = m['name_ko']?.toString();
+      final code = m['code']?.toString();
+      final localized = _localizedPetSpeciesName(
+        nameKo: nameKo,
+        family: m['family']?.toString(),
+        code: code,
+        speciesNumber:
+            _extractTrailingNumber(nameKo ?? '') ??
+            _extractTrailingNumber(code ?? ''),
+      );
+      if (localized.isNotEmpty) return localized;
     }
     return AppLocalizations.of(context).pokedexDefaultPetName;
   }
@@ -5010,13 +5096,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final unlocked = entry != null;
     final speciesName = species['name_ko']?.toString().trim();
     final codeFallback = species['code']?.toString().trim();
-    final label = unlocked
-        ? ((speciesName != null && speciesName.isNotEmpty)
-              ? speciesName
-              : (codeFallback != null && codeFallback.isNotEmpty)
-              ? codeFallback
-              : l10n.pokedexDefaultPetName)
-        : l10n.pokedexUnknownLabel;
+    String unlockedLabel = _localizedPetSpeciesName(
+      nameKo: speciesName,
+      family: species['family']?.toString(),
+      code: codeFallback,
+      speciesNumber:
+          _extractTrailingNumber(speciesName ?? '') ??
+          _extractTrailingNumber(codeFallback ?? ''),
+    );
+    if (unlockedLabel.isEmpty) {
+      unlockedLabel = l10n.pokedexDefaultPetName;
+    }
+    final label = unlocked ? unlockedLabel : l10n.pokedexUnknownLabel;
     final iconData = familyNorm == 'cat'
         ? Icons.pets
         : familyNorm == 'dog'
@@ -5993,6 +6084,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isNameInterlockNoticeOpen = false;
     _isEmailLinkInviteNoticeOpen = false;
     _isEmailLinkSuccessNoticeOpen = false;
+    _isEmailFormatErrorNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6402,6 +6494,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildEmailLinkInviteNoticeGlobalOverlay(),
         _buildEmailLinkSuccessNoticeGlobalOverlay(),
+        _buildEmailFormatErrorNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
       ],
     );
@@ -6951,6 +7044,127 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildEmailFormatErrorNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.emailFormatErrorTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.emailFormatErrorBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFB92020),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _closeEmailFormatErrorNoticeOverlay,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.emailFormatErrorConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmailFormatErrorNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isEmailFormatErrorNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => unawaited(_hideEmailFormatErrorNotice()),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildEmailFormatErrorNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openWithdrawConfirmPanel() {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
@@ -6962,9 +7176,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isNameInterlockNoticeOpen = false;
       _isEmailLinkInviteNoticeOpen = false;
       _isEmailLinkSuccessNoticeOpen = false;
+      _isEmailFormatErrorNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
+      _settingsSupportDocScrollbarReady = false;
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = true;
     });
@@ -7644,10 +7860,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _showSnack(l10n.snackEmailRequired);
         return;
       }
-      if (!_looksLikeEmail(raw)) {
-        _showSnack(l10n.snackInvalidEmail);
-        return;
-      }
+      if (await _promptEmailFormatErrorIfNeeded(raw)) return;
       _safeSetState(() => _emailLinkPanelSendBusy = true);
       final ok = await _sendEmailLinkOtp(raw);
       if (!mounted) return;
@@ -7668,10 +7881,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return;
       }
       final raw = _emailLinkController.text.trim();
-      if (raw.isEmpty || !_looksLikeEmail(raw)) {
-        _showSnack(l10n.snackInvalidEmail);
+      if (raw.isEmpty) {
+        _showSnack(l10n.snackEmailRequired);
         return;
       }
+      if (await _promptEmailFormatErrorIfNeeded(raw)) return;
       final code = _emailLinkOtpController.text.trim();
       if (code.isEmpty) {
         _showSnack(l10n.snackOtpRequired);
@@ -7696,10 +7910,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _onEmailLinkPanelResendOtp() async {
     if (_emailLinkPanelResendBusy || _isEmailOtpCooldownActive()) return;
     final raw = _emailLinkController.text.trim();
-    if (raw.isEmpty || !_looksLikeEmail(raw)) {
-      _showSnack(AppLocalizations.of(context).snackInvalidEmail);
+    if (raw.isEmpty) {
+      _showSnack(AppLocalizations.of(context).snackEmailRequired);
       return;
     }
+    if (await _promptEmailFormatErrorIfNeeded(raw)) return;
     _safeSetState(() => _emailLinkPanelResendBusy = true);
     final ok = await _sendEmailLinkOtp(raw);
     if (!mounted) return;
@@ -9396,11 +9611,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? Map<String, dynamic>.from(pet['pet_species'] as Map)
         : <String, dynamic>{};
     final family = species['family']?.toString().toLowerCase() ?? '';
-    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final speciesNameKo = species['name_ko']?.toString() ?? '펫';
     final typeDisplay = _localizedPetFamilyOrType(species, l10n);
     final nickname = pet['nickname']?.toString();
+    final speciesDisplayName = _localizedPetSpeciesName(
+      nameKo: species['name_ko']?.toString(),
+      family: species['family']?.toString(),
+      code: species['code']?.toString(),
+    );
     final displayName = (nickname == null || nickname.isEmpty)
-        ? speciesName
+        ? (_isEnglishLocale && speciesDisplayName.isNotEmpty
+              ? speciesDisplayName
+              : speciesNameKo)
         : nickname;
     final stage = pet['stage']?.toString() ?? 'baby';
     final stageKo = _stageToKorean(stage);
@@ -10462,10 +10684,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         color: Colors.transparent,
         elevation: 0,
         shadowColor: Colors.transparent,
-        child: SizedBox(
-          width: 48,
-          height: 48,
-          child: _buildToyMenuIconVisual(toy, true),
+        child: Transform.translate(
+          offset: const Offset(0, -20),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: _buildToyMenuIconVisual(toy, true),
+          ),
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.35, child: child),
@@ -11310,9 +11535,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _kMealAffectionGainByResult[resultType] ??
         0;
 
+    final localeCode = _isEnglishLocale ? 'en' : 'ko';
     final statusMessage = ok
-        ? _buildAiStatusMessage(resultType, feedbackText)
-        : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.';
+        ? _buildAiStatusMessage(
+            resultType,
+            feedbackText,
+            localeCode: localeCode,
+          )
+        : (_isEnglishLocale
+              ? 'Could not load the evaluation result. Please try again later.'
+              : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.');
 
     // 서버에서 affection 이 갱신되기 전의 단계를 기억해 둔다.
     final beforeStage = _activePet?['stage']?.toString();
@@ -12489,6 +12721,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _activeSettingsSupportDoc = null;
     _renderingSettingsSupportDoc = null;
     _settingsSupportDocSwapInProgress = false;
+    _settingsSupportDocScrollbarReady = false;
     _resetEmailLinkPanelOtpFlow();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
   }
@@ -12508,6 +12741,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
+      _settingsSupportDocScrollbarReady = false;
       _resetEmailLinkPanelOtpFlow();
     });
   }
@@ -12606,6 +12840,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_isEmailLinkInviteNoticeOpen) {
+      return;
+    }
+
+    if (_isEmailFormatErrorNoticeOpen) {
+      unawaited(_hideEmailFormatErrorNotice());
       return;
     }
 
@@ -12843,27 +13082,38 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _GameMenuSubOutsideDismissKind.none) {
       return false;
     }
-    final hasSupportDoc =
-        _activeSettingsSupportDoc != null ||
-        _renderingSettingsSupportDoc != null;
-    if (hasSupportDoc) return false;
+    final docForRender =
+        _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
+    if (docForRender != null) return false;
     return _gameSettingsSwapCurve.value >= 1.0;
   }
 
   /// 설정 고객지원 문서창 스크롤 thumb (본문 스크롤바와 분리).
   bool get _settingsSupportDocScrollbarThumbVisible {
+    final docForRender =
+        _activeSettingsSupportDoc ?? _renderingSettingsSupportDoc;
+
     if (!_isSettingsPanelOpen) return false;
+    if (docForRender == null) return false;
+    if (!_settingsSupportDocScrollbarReady) return false;
+    if (_settingsSupportDocSwapInProgress) return false;
     if (_settingsPanelSwapInProgress) return false;
     if (_gameSettingsSwapController.isAnimating) return false;
     if (_gameMenuSubOutsideDismissKind !=
         _GameMenuSubOutsideDismissKind.none) {
       return false;
     }
-    final hasSupportDoc =
-        _activeSettingsSupportDoc != null ||
-        _renderingSettingsSupportDoc != null;
-    if (!hasSupportDoc) return false;
-    return _gameSettingsSwapCurve.value >= 1.0;
+    if (!_settingsSupportDocScrollController.hasClients) return false;
+
+    final position = _settingsSupportDocScrollController.position;
+    if (!position.hasContentDimensions) return false;
+
+    final viewportHeight = position.viewportDimension;
+    final maxScroll = position.maxScrollExtent;
+    if (!viewportHeight.isFinite || viewportHeight <= 0) return false;
+    if (!maxScroll.isFinite || maxScroll <= 0) return false;
+
+    return true;
   }
 
   /// 설정 패널 스크롤: content는 left/right 8, thumb는 패널 내부 right 8 고정.
@@ -12874,44 +13124,65 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        if (!thumbVisible) {
-          return const SizedBox.shrink();
-        }
-        if (!controller.hasClients) {
-          return const SizedBox.shrink();
-        }
+        try {
+          if (!thumbVisible) return const SizedBox.shrink();
+          if (!controller.hasClients) return const SizedBox.shrink();
 
-        final position = controller.position;
-        final viewportHeight = position.viewportDimension;
-        final maxScroll = position.maxScrollExtent;
-        if (maxScroll <= 0) {
-          return const SizedBox.shrink();
-        }
+          final position = controller.position;
+          if (!position.hasContentDimensions) return const SizedBox.shrink();
 
-        final contentHeight = viewportHeight + maxScroll;
-        final thumbHeight = (viewportHeight * (viewportHeight / contentHeight))
-            .clamp(24.0, viewportHeight);
-        final maxThumbTop = viewportHeight - thumbHeight;
-        final fraction = (controller.offset / maxScroll).clamp(0.0, 1.0);
-        final thumbTop = fraction * maxThumbTop;
+          final viewportHeight = position.viewportDimension;
+          final maxScroll = position.maxScrollExtent;
+          if (!viewportHeight.isFinite || viewportHeight <= 0) {
+            return const SizedBox.shrink();
+          }
+          if (!maxScroll.isFinite || maxScroll <= 0) {
+            return const SizedBox.shrink();
+          }
 
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned(
-              top: thumbTop,
-              right: 0,
-              width: 3,
-              height: thumbHeight,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0x99000000),
-                  borderRadius: BorderRadius.circular(20),
+          final contentHeight = viewportHeight + maxScroll;
+          if (!contentHeight.isFinite || contentHeight <= 0) {
+            return const SizedBox.shrink();
+          }
+
+          final rawThumbHeight =
+              viewportHeight * (viewportHeight / contentHeight);
+          if (!rawThumbHeight.isFinite) return const SizedBox.shrink();
+
+          final thumbHeight = rawThumbHeight.clamp(24.0, viewportHeight);
+          final maxThumbTop = viewportHeight - thumbHeight;
+          if (!maxThumbTop.isFinite || maxThumbTop < 0) {
+            return const SizedBox.shrink();
+          }
+
+          final offset = controller.offset;
+          if (!offset.isFinite) return const SizedBox.shrink();
+
+          final fraction = (offset / maxScroll).clamp(0.0, 1.0);
+          final thumbTop = fraction * maxThumbTop;
+          if (!thumbTop.isFinite) return const SizedBox.shrink();
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: thumbTop,
+                right: 0,
+                width: 3,
+                height: thumbHeight,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0x99000000),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
               ),
-            ),
-          ],
-        );
+            ],
+          );
+        } catch (e, st) {
+          debugPrint('settings manual scrollbar skipped: $e\n$st');
+          return const SizedBox.shrink();
+        }
       },
     );
   }
@@ -13140,6 +13411,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
+      _settingsSupportDocScrollbarReady = false;
     });
 
     unawaited(
@@ -13172,7 +13444,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
+      _settingsSupportDocScrollbarReady = false;
       _resetEmailLinkPanelOtpFlow();
+    });
+  }
+
+  void _scheduleSettingsSupportDocScrollbarReady(_SupportDocType type) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Future<void>.delayed(const Duration(milliseconds: 80), () {
+        if (!mounted) return;
+        final stillSameDoc =
+            (_activeSettingsSupportDoc ?? _renderingSettingsSupportDoc) ==
+            type;
+        if (!stillSameDoc) return;
+        _safeSetState(() => _settingsSupportDocScrollbarReady = true);
+      });
     });
   }
 
@@ -13187,7 +13474,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _activeSettingsSupportDoc = type;
       _renderingSettingsSupportDoc = type;
       _settingsSupportDocSwapInProgress = true;
+      _settingsSupportDocScrollbarReady = false;
     });
+    _scheduleSettingsSupportDocScrollbarReady(type);
     Future<void>.delayed(const Duration(milliseconds: 240), () {
       if (!mounted) return;
       _safeSetState(() => _settingsSupportDocSwapInProgress = false);
@@ -13204,6 +13493,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
     _safeSetState(() {
       _settingsSupportDocSwapInProgress = true;
+      _settingsSupportDocScrollbarReady = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = docForRender;
     });
@@ -13212,11 +13502,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _safeSetState(() {
         _settingsSupportDocSwapInProgress = false;
         _renderingSettingsSupportDoc = null;
+        _settingsSupportDocScrollbarReady = false;
       });
     });
   }
 
   Future<void> _closeSettingsSupportDocFromOutsideTap() async {
+    _safeSetState(() => _settingsSupportDocScrollbarReady = false);
     await _dismissGameSubPanelWithCenterExit(
       _GameMenuSubOutsideDismissKind.settings,
     );
@@ -14396,6 +14688,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _activeSettingsSupportDoc = null;
         _renderingSettingsSupportDoc = null;
         _settingsSupportDocSwapInProgress = false;
+        _settingsSupportDocScrollbarReady = false;
         _isEmailLinkPanelOpen = false;
         _isCustomerCenterPanelOpen = false;
         _instantCloseYardConfirmOverlays();
@@ -15959,22 +16252,87 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  int? _extractTrailingNumber(String raw) {
+    final match = RegExp(r'(\d+)$').firstMatch(raw.trim());
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
+  String _localizedPetTypeLabel({
+    String? family,
+    String? nameKo,
+    String? code,
+  }) {
+    final normalizedFamily = family?.trim().toLowerCase() ?? '';
+    final normalizedName = nameKo?.trim() ?? '';
+    final normalizedCode = code?.trim().toLowerCase() ?? '';
+
+    if (!_isEnglishLocale) {
+      if (normalizedFamily == 'dog') return '강아지';
+      if (normalizedFamily == 'cat') return '고양이';
+      if (normalizedName.isNotEmpty) return normalizedName;
+      return '';
+    }
+
+    if (normalizedFamily == 'dog') return 'Dog';
+    if (normalizedFamily == 'cat') return 'Cat';
+
+    if (normalizedName.contains('강아지') || normalizedName.contains('댕')) {
+      return 'Dog';
+    }
+    if (normalizedName.contains('고양이') || normalizedName.contains('냥')) {
+      return 'Cat';
+    }
+    if (normalizedCode.contains('dog')) return 'Dog';
+    if (normalizedCode.contains('cat')) return 'Cat';
+
+    return normalizedName;
+  }
+
+  /// 화면 표시용 종 개체명. DB name_ko 는 그대로 두고 locale 에 따라 변환한다.
+  /// 추후 name_en 컬럼이 생기면 여기서 우선 적용하도록 확장 가능.
+  String _localizedPetSpeciesName({
+    String? nameKo,
+    String? family,
+    String? code,
+    int? speciesNumber,
+  }) {
+    final rawName = nameKo?.trim() ?? '';
+
+    if (!_isEnglishLocale) return rawName;
+
+    final normalizedFamily = family?.trim().toLowerCase() ?? '';
+    final normalizedCode = code?.trim().toLowerCase() ?? '';
+
+    final familyLabel =
+        normalizedFamily == 'dog' || normalizedCode.contains('dog')
+        ? 'Dog'
+        : normalizedFamily == 'cat' || normalizedCode.contains('cat')
+        ? 'Cat'
+        : rawName.contains('강아지') || rawName.contains('댕')
+        ? 'Dog'
+        : rawName.contains('고양이') || rawName.contains('냥')
+        ? 'Cat'
+        : 'VegePet';
+
+    final number =
+        speciesNumber ??
+        _extractTrailingNumber(rawName) ??
+        _extractTrailingNumber(normalizedCode);
+
+    if (number != null) return '$familyLabel $number';
+    return familyLabel;
+  }
+
   String _localizedPetFamilyOrType(
     Map<String, dynamic>? petSpecies,
     AppLocalizations l10n,
   ) {
-    final family = petSpecies?['family']?.toString().toLowerCase().trim() ?? '';
-    final nameKo = petSpecies?['name_ko']?.toString();
-
-    if (!_isEnglishLocale) {
-      if (family == 'dog') return '강아지';
-      if (family == 'cat') return '고양이';
-      return nameKo?.trim().isNotEmpty == true ? nameKo!.trim() : '';
-    }
-
-    if (family == 'dog') return 'Dog';
-    if (family == 'cat') return 'Cat';
-    return _localizedPetTypeValue(nameKo, l10n);
+    return _localizedPetTypeLabel(
+      family: petSpecies?['family']?.toString(),
+      nameKo: petSpecies?['name_ko']?.toString(),
+      code: petSpecies?['code']?.toString(),
+    );
   }
 
   String _familyToKorean(String family) {
