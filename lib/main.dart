@@ -8544,7 +8544,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     tooltip: l10n.gameMenuTooltip,
                     iconSize: 28,
                     padding: 18,
-                    onTap: _openMenuSheet,
+                    onTap: _onGameMenuHudIconTap,
+                    suppressInkSplash: _isPetInfoBannerOpen,
                   ),
                 ),
               ),
@@ -9554,6 +9555,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() {
       _isPetInfoBannerOpen = false;
     });
+  }
+
+  /// 베지펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다(ripple 없음).
+  void _onGameMenuHudIconTap() {
+    if (_isPetInfoBannerOpen) {
+      _closePetInfoBanner();
+      return;
+    }
+    unawaited(_openMenuSheet());
   }
 
   String? _validateToyPlayEligibility() {
@@ -10788,6 +10798,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required VoidCallback onTap,
     double iconSize = 22,
     double padding = 10,
+    bool suppressInkSplash = false,
   }) {
     final theme = Theme.of(context);
     return Material(
@@ -10797,6 +10808,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
+        splashFactory: suppressInkSplash ? NoSplash.splashFactory : null,
+        highlightColor:
+            suppressInkSplash ? Colors.transparent : null,
+        hoverColor: suppressInkSplash ? Colors.transparent : null,
         child: Padding(
           padding: EdgeInsets.all(padding),
           child: Tooltip(
@@ -13421,7 +13436,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
-    // 베지펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다.
     if (_isPetInfoBannerOpen) {
       _closePetInfoBanner();
       return;
