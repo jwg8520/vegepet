@@ -1364,6 +1364,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required bool enabled,
     String Function(String raw)? optionLabelBuilder,
     double fieldWidth = 176,
+    double? englishFieldFontSize,
   }) {
     final link = _profileSelectLinks.putIfAbsent(selectKey, LayerLink.new);
     final isOpen = _openProfileSelectKey == selectKey;
@@ -1371,6 +1372,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? ''
         : (optionLabelBuilder?.call(value) ?? value);
     final isEn = _isEnglishLocale;
+    final enValueFontSize = englishFieldFontSize ?? 10;
 
     final fieldChild = Container(
       width: fieldWidth,
@@ -1392,10 +1394,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       displayValue,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 10,
+                      style: TextStyle(
+                        fontSize: enValueFontSize,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF4A4A4A),
+                        color: const Color(0xFF4A4A4A),
                       ),
                     ),
                   )
@@ -11496,9 +11498,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 실시간 카메라로 식단 사진 1장을 촬영한다.
   /// 사진첩(갤러리) 선택은 허용하지 않는다.
+  ///
+  /// 앱은 [main]에서 이미 가로 고정이므로 카메라 열기 전 lock 은 하지 않는다.
+  /// 네이티브 카메라 종료 후 [finally]에서 가로 lock 을 1회만 재적용해
+  /// 중복 호출로 인한 추가 회전 애니메이션을 줄인다.
   Future<XFile?> _pickMealPhoto() async {
-    await _lockLandscapeOrientation();
-
     XFile? xfile;
     try {
       final picker = ImagePicker();
@@ -11509,25 +11513,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         maxWidth: 1600,
       );
     } catch (e) {
+      if (!mounted) return null;
       _showSnack(
         AppLocalizations.of(context).snackCameraUnavailable(e.toString()),
       );
       xfile = null;
     } finally {
-      await _lockLandscapeOrientation();
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_lockLandscapeOrientation());
-      });
-
-      unawaited(
-        Future<void>.delayed(const Duration(milliseconds: 120), () {
-          unawaited(_lockLandscapeOrientation());
-        }),
-      );
-    }
-
-    if (xfile == null) {
       await _lockLandscapeOrientation();
     }
 
@@ -12208,6 +12199,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                         ),
                                       ),
                                     ),
+                                    labelFontSize: isEn ? 9 : null,
                                   ),
                                   const SizedBox(height: 8),
                                   rowForWidth(
@@ -15814,7 +15806,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       required double top,
       required String label,
       required Widget field,
+      double? labelFontSize,
     }) {
+      final rowLabelStyle = labelFontSize == null
+          ? labelStyle
+          : labelStyle.copyWith(fontSize: labelFontSize);
       return Positioned(
         top: top,
         left: 0,
@@ -15824,7 +15820,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           children: [
             SizedBox(
               width: 60,
-              child: Text(label, textAlign: TextAlign.left, style: labelStyle),
+              child: Text(
+                label,
+                textAlign: TextAlign.left,
+                style: rowLabelStyle,
+              ),
             ),
             const SizedBox(width: 8),
             SizedBox(width: 176, height: 26, child: field),
@@ -15904,6 +15904,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           row(
             top: 90,
             label: l10n.ageRange,
+            labelFontSize: _isEnglishLocale ? 10 : null,
             field: _buildCompactProfileSelect(
               selectKey: 'ageRange',
               value: _selectedAgeRange,
@@ -15911,6 +15912,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               enabled: !_isSavingProfile,
               optionLabelBuilder: (v) => _localizedAgeRangeValue(v, l10n),
               onChanged: (value) => setState(() => _selectedAgeRange = value),
+              englishFieldFontSize: _isEnglishLocale ? 9 : null,
             ),
           ),
           row(
