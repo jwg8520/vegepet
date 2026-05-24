@@ -8777,10 +8777,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildInYardPetNamingPanel() {
     final l10n = AppLocalizations.of(context);
-    const titleStyle = TextStyle(
-      fontSize: 16,
+    final titleStyle = TextStyle(
+      fontSize: _isEnglishLocale ? 15 : 16,
       fontWeight: FontWeight.w700,
-      color: Color(0xFF000000),
+      color: const Color(0xFF000000),
       height: 1.0,
     );
     const subtitleStyle = TextStyle(
@@ -13418,6 +13418,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_gameMenuPanelOpen) {
       await _closeGameMenuPanel();
+      return;
+    }
+
+    // 베지펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다.
+    if (_isPetInfoBannerOpen) {
+      _closePetInfoBanner();
       return;
     }
 
