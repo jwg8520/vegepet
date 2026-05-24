@@ -659,6 +659,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailDuplicateNoticeConfirm => 'OK';
 
   @override
+  String get duplicatePetNameNoticeTitle => 'Duplicate Name';
+
+  @override
+  String get duplicatePetNameNoticeBody =>
+      'A VegePet with this name already exists. Please choose a different name!';
+
+  @override
+  String get duplicatePetNameNoticeConfirm => 'OK';
+
+  @override
   String get saveLabel => 'Save';
 
   @override

@@ -1328,6 +1328,24 @@ abstract class AppLocalizations {
   /// **'확인'**
   String get emailDuplicateNoticeConfirm;
 
+  /// No description provided for @duplicatePetNameNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'중복 이름'**
+  String get duplicatePetNameNoticeTitle;
+
+  /// No description provided for @duplicatePetNameNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'이미 해당 이름의 베지펫이 존재합니다. 다른 이름으로 지어주세요!'**
+  String get duplicatePetNameNoticeBody;
+
+  /// No description provided for @duplicatePetNameNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get duplicatePetNameNoticeConfirm;
+
   /// No description provided for @saveLabel.
   ///
   /// In ko, this message translates to:
@@ -1349,7 +1367,7 @@ abstract class AppLocalizations {
   /// No description provided for @diaryWeightLabel.
   ///
   /// In ko, this message translates to:
-  /// **'• 체중(Kg)'**
+  /// **'• 체중(kg)'**
   String get diaryWeightLabel;
 
   /// No description provided for @diaryNoteLabel.

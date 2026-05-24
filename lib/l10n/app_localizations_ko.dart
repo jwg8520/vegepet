@@ -636,6 +636,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailDuplicateNoticeConfirm => '확인';
 
   @override
+  String get duplicatePetNameNoticeTitle => '중복 이름';
+
+  @override
+  String get duplicatePetNameNoticeBody =>
+      '이미 해당 이름의 베지펫이 존재합니다. 다른 이름으로 지어주세요!';
+
+  @override
+  String get duplicatePetNameNoticeConfirm => '확인';
+
+  @override
   String get saveLabel => '저장';
 
   @override
@@ -645,7 +655,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get diaryPhotoDinnerLabel => '(저녁)';
 
   @override
-  String get diaryWeightLabel => '• 체중(Kg)';
+  String get diaryWeightLabel => '• 체중(kg)';
 
   @override
   String get diaryNoteLabel => '• 식후 감정 & 실패 요인';

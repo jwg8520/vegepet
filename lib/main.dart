@@ -628,6 +628,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _isEmailFormatErrorNoticeOpen = false;
   bool _isEmailDuplicateNoticeOpen = false;
 
+  /// 도감 등록 펫과 동일한 이름으로 분양 펫 이름 저장 시도 시 (240×116 · 마당 좌표계).
+  bool _isDuplicatePetNameNoticeOpen = false;
+
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
   bool _isDeletingAccount = false;
@@ -1797,6 +1800,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     unawaited(_hideEmailDuplicateNotice());
   }
 
+  Future<void> _showDuplicatePetNameNotice() async {
+    if (_isDuplicatePetNameNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isDuplicatePetNameNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideDuplicatePetNameNotice() async {
+    if (!_isDuplicatePetNameNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isDuplicatePetNameNoticeOpen = false,
+    );
+  }
+
+  void _closeDuplicatePetNameNoticeOverlay() {
+    if (!_isDuplicatePetNameNoticeOpen) return;
+    unawaited(_hideDuplicatePetNameNotice());
+  }
+
   Future<void> _showEmailAlreadyUsedDialog() async {
     await _showEmailDuplicateNotice();
   }
@@ -1838,6 +1861,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _resetEmailLinkPanelOtpFlow() {
     _emailLinkOtpSent = false;
     _emailLinkOtpSentForEmail = '';
+    _emailLinkController.clear();
     _emailLinkOtpController.clear();
     _emailLinkPanelSendBusy = false;
     _emailLinkPanelVerifyBusy = false;
@@ -2874,6 +2898,51 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (nickname != null && nickname.isNotEmpty) return nickname;
     }
     return '이름 없음';
+  }
+
+  /// 도감(pokedex_entries)에 등록된 펫 닉네임과 동일한 이름인지 확인한다.
+  /// 조회 실패 시 false(저장 흐름 유지), 정상 조회 시 중복이면 true.
+  Future<bool> _hasDuplicatePokedexPetName(String rawName) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    final name = rawName.trim();
+    if (name.isEmpty) return false;
+
+    try {
+      final rawEntries = await supabase
+          .from('pokedex_entries')
+          .select('source_user_pet_id')
+          .eq('user_id', user.id);
+
+      final sourcePetIds = (rawEntries as List)
+          .map((e) => (e as Map)['source_user_pet_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.trim().isNotEmpty)
+          .toSet()
+          .toList();
+
+      if (sourcePetIds.isEmpty) return false;
+
+      final quoted = sourcePetIds.map((id) => '"$id"').join(',');
+      final sourcePetRows = await supabase
+          .from('user_pets')
+          .select('nickname')
+          .filter('id', 'in', '($quoted)');
+
+      final normalizedTarget = name.toLowerCase();
+      for (final p in (sourcePetRows as List).whereType<Map>()) {
+        final nickname = p['nickname']?.toString().trim();
+        if (nickname == null || nickname.isEmpty) continue;
+        if (nickname.toLowerCase() == normalizedTarget) {
+          return true;
+        }
+      }
+      return false;
+    } catch (e, st) {
+      debugPrint('duplicate pokedex pet name check failed: $e\n$st');
+      return false;
+    }
   }
 
   // 같은 pet_species_id 가 여러 건 등록되어 있어도 도감 화면에는 종당 1마리만
@@ -6136,6 +6205,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isEmailLinkSuccessNoticeOpen = false;
     _isEmailFormatErrorNoticeOpen = false;
     _isEmailDuplicateNoticeOpen = false;
+    _isDuplicatePetNameNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6547,6 +6617,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailLinkSuccessNoticeGlobalOverlay(),
         _buildEmailFormatErrorNoticeGlobalOverlay(),
         _buildEmailDuplicateNoticeGlobalOverlay(),
+        _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
       ],
     );
@@ -7338,6 +7409,127 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildDuplicatePetNameNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.duplicatePetNameNoticeTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.duplicatePetNameNoticeBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFB92020),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _closeDuplicatePetNameNoticeOverlay,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.duplicatePetNameNoticeConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isDuplicatePetNameNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeDuplicatePetNameNoticeOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildDuplicatePetNameNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openWithdrawConfirmPanel() {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
@@ -7351,6 +7543,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailLinkSuccessNoticeOpen = false;
       _isEmailFormatErrorNoticeOpen = false;
       _isEmailDuplicateNoticeOpen = false;
+      _isDuplicatePetNameNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
@@ -8907,6 +9100,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       return;
     }
+
+    final duplicated = await _hasDuplicatePokedexPetName(text);
+    if (!mounted) return;
+    if (duplicated) {
+      await _showDuplicatePetNameNotice();
+      return;
+    }
+
     await _closePetNamingPanel(result: text);
   }
 
@@ -13094,6 +13295,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isEmailDuplicateNoticeOpen) {
       _closeEmailDuplicateNoticeOverlay();
+      return;
+    }
+
+    if (_isDuplicatePetNameNoticeOpen) {
+      _closeDuplicatePetNameNoticeOverlay();
       return;
     }
 
