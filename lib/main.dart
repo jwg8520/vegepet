@@ -612,6 +612,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 마당 공통 알림창: 상점 MVP 준비중 안내.
   bool _isShopNoticeOpen = false;
+
+  /// 가방 랜덤 분양권 사용 확인 (240×116 · 마당 좌표계).
+  bool _isRandomTicketUseConfirmOpen = false;
+  Completer<bool>? _randomTicketUseConfirmCompleter;
+
   bool _isNameInterlockNoticeOpen = false;
 
   /// 설정 > 회원 탈퇴 1차 확인 (240×116 · 마당 좌표계).
@@ -976,6 +981,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _petNamingFocusNode.dispose();
     if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
       _petNamingCompleter!.complete(null);
+    }
+    if (_randomTicketUseConfirmCompleter != null &&
+        !_randomTicketUseConfirmCompleter!.isCompleted) {
+      _randomTicketUseConfirmCompleter!.complete(false);
     }
     super.dispose();
   }
@@ -5804,19 +5813,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  /// 랜덤 분양권 사용 확인 다이얼로그.
-  /// 확인을 누르면 true, 취소/dismiss 면 false.
+  /// 랜덤 분양권 사용 확인 (마당 공통 알림창). 사용 → true, 취소/바깥 터치 → false.
   Future<bool> _confirmUseRandomTicket() async {
     if (!mounted) return false;
-    final l10n = AppLocalizations.of(context);
-    return _showVegePetConfirmDialog(
-      message: l10n.randomTicketUseConfirmMessage,
-      description: l10n.randomTicketUseConfirmDesc,
-      primaryLabel: l10n.useLabel,
-      secondaryLabel: l10n.cancelLabel,
-      barrierDismissible: true,
-      dimBarrier: false,
+    if (_isRandomTicketUseConfirmOpen) {
+      return _randomTicketUseConfirmCompleter?.future ?? Future.value(false);
+    }
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    final completer = Completer<bool>();
+    _randomTicketUseConfirmCompleter = completer;
+    _safeSetState(() => _isRandomTicketUseConfirmOpen = true);
+    _playYardConfirmOverlayEnter();
+    return completer.future;
+  }
+
+  void _cancelRandomTicketUseConfirmPending() {
+    final completer = _randomTicketUseConfirmCompleter;
+    _randomTicketUseConfirmCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(false);
+    }
+  }
+
+  Future<void> _resolveRandomTicketUseConfirm(bool confirmed) async {
+    if (!_isRandomTicketUseConfirmOpen) return;
+    final completer = _randomTicketUseConfirmCompleter;
+    _randomTicketUseConfirmCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(confirmed);
+    }
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isRandomTicketUseConfirmOpen = false,
     );
+  }
+
+  void _closeRandomTicketUseConfirmOverlay() {
+    if (!_isRandomTicketUseConfirmOpen) return;
+    unawaited(_resolveRandomTicketUseConfirm(false));
   }
 
   /// 가방에서 랜덤 분양권을 실제로 사용해 새 베지펫을 분양받는다.
@@ -6206,6 +6240,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isEmailFormatErrorNoticeOpen = false;
     _isEmailDuplicateNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
+    if (_isRandomTicketUseConfirmOpen) {
+      _cancelRandomTicketUseConfirmPending();
+    }
+    _isRandomTicketUseConfirmOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6611,6 +6649,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
         _buildShopNoticeGlobalOverlay(),
+        _buildRandomTicketUseConfirmGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildEmailLinkInviteNoticeGlobalOverlay(),
@@ -7544,6 +7583,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailFormatErrorNoticeOpen = false;
       _isEmailDuplicateNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
+      if (_isRandomTicketUseConfirmOpen) {
+        _cancelRandomTicketUseConfirmPending();
+      }
+      _isRandomTicketUseConfirmOpen = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
@@ -7571,6 +7614,171 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isDeletingAccount = false;
       }
     }
+  }
+
+  Widget _buildRandomTicketUseConfirmGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isRandomTicketUseConfirmOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeRandomTicketUseConfirmOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildRandomTicketUseConfirmDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRandomTicketUseConfirmDialog() {
+    final l10n = AppLocalizations.of(context);
+    const titleStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.25,
+    );
+    const descStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 10,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.25,
+    );
+
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.randomTicketUseConfirmMessage,
+                      style: titleStyle,
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      l10n.randomTicketUseConfirmDesc,
+                      style: descStyle,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: () =>
+                          unawaited(_resolveRandomTicketUseConfirm(true)),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Ink(
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFFF1F1F1),
+                            width: 0.8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: _buildPastelBlueGradientButtonText(
+                            l10n.useLabel,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _closeRandomTicketUseConfirmOverlay,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Ink(
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFFF1F1F1),
+                            width: 0.8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: _buildVegePetPastelRedGradientButtonText(
+                            l10n.cancelLabel,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildWithdrawConfirmGlobalOverlay() {
@@ -8721,6 +8929,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameSettingsSwapController.isAnimating ||
         _gameHelpSwapController.isAnimating ||
         _isShopNoticeOpen ||
+        _isRandomTicketUseConfirmOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
         _isEmailLinkInviteNoticeOpen ||
@@ -8747,6 +8956,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return _gameMenuPanelOpen ||
         _isAnyGameMenuSubPanelOpenOrSwapping() ||
         _isShopNoticeOpen ||
+        _isRandomTicketUseConfirmOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
         _isEmailLinkInviteNoticeOpen ||
@@ -13281,6 +13491,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isShopNoticeOpen) {
       _closeShopNoticeOverlay();
+      return;
+    }
+
+    if (_isRandomTicketUseConfirmOpen) {
+      _closeRandomTicketUseConfirmOverlay();
       return;
     }
 
