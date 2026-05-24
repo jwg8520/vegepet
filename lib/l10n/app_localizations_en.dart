@@ -36,13 +36,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get english => 'English';
 
   @override
-  String get selectLanguage => 'Select Language';
+  String get selectLanguage => 'Choose Language';
 
   @override
-  String get languageDescription => 'Choose the language to use in the app.';
+  String get languageDescription => 'Choose the app language.';
 
   @override
-  String get languageChanged => 'Language has been changed.';
+  String get languageChanged => 'Language changed.';
 
   @override
   String get languageKorean => '한국어';
@@ -63,16 +63,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailAccountLink => 'Link Email';
 
   @override
-  String get emailLinkCompleted => 'Email linked';
+  String get emailLinkCompleted => 'Linked';
 
   @override
-  String get guestAccount => 'Guest Account';
+  String get guestAccount => 'Guest';
 
   @override
-  String get emailLinkedAccount => 'Linked Email Account';
+  String get emailLinkedAccount => 'Linked Email';
 
   @override
-  String get noLinkedEmail => 'No linked email';
+  String get noLinkedEmail => 'No email linked';
 
   @override
   String get pushNoticeEvent => 'Announcements & Events';
@@ -149,10 +149,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get supportCenter => 'Support';
 
   @override
-  String get contactAndFeedback => 'Inquiries & Feedback';
+  String get contactAndFeedback => 'Contact & Feedback';
 
   @override
-  String get supportEmail => 'Contact: acoustic.jwg@gmail.com';
+  String get supportEmail => 'Email: acoustic.jwg@gmail.com';
 
   @override
   String get copyEmail => 'Copy Email';
@@ -161,7 +161,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailCopied => 'Email copied.';
 
   @override
-  String get termsOfService => 'Terms';
+  String get termsOfService => 'Terms of Service';
 
   @override
   String get privacyPolicy => 'Privacy Policy';
@@ -173,7 +173,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get guardianGuide => 'Parent/Guardian Guide';
 
   @override
-  String get accountDataDeletionGuide => 'Account & Data Deletion';
+  String get accountDataDeletionGuide => 'Account & Data Deletion Guide';
 
   @override
   String get legalNoticeDraft =>
@@ -192,7 +192,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoTooltip => 'Pet Info';
 
   @override
-  String get petInfoTitle => 'VegePet Info';
+  String get petInfoTitle => 'VegePet';
 
   @override
   String get petInfoNameLabel => 'Name';
@@ -222,25 +222,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoStatusAvailable => 'Available';
 
   @override
-  String get petInfoCurrentAffection => 'Current Affection';
+  String get petInfoCurrentAffection => 'Affection';
 
   @override
-  String get petInfoStageComplete => 'Reached Adult Stage';
+  String get petInfoStageComplete => 'Adult Stage Reached';
 
   @override
-  String get petInfoUntilAdult => 'Until Adult Stage';
+  String get petInfoUntilAdult => 'Until Adult';
 
   @override
-  String get petInfoUntilGrown => 'Until Growing Stage';
+  String get petInfoUntilGrown => 'Until Growth';
 
   @override
-  String get petInfoUntilChild => 'Until Child Stage';
+  String get petInfoUntilChild => 'Until Child';
 
   @override
   String get petInfoFeedShort => 'Feed';
 
   @override
-  String get petInfoMealCheckBubble => 'Meal Check!';
+  String get petInfoMealCheckBubble => 'Meal Check';
 
   @override
   String get gameMenuTooltip => 'Game Menu';
@@ -273,7 +273,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuLabelSettings => 'Settings';
 
   @override
-  String get profileSetupTitle => 'Set up your profile!';
+  String get profileSetupTitle => 'Set Up Your Profile';
 
   @override
   String get nickname => 'Nickname';
@@ -301,7 +301,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retry => 'Retry';
 
   @override
-  String get initialAdoptionTitle => 'Time to adopt a baby VegePet!';
+  String get initialAdoptionTitle => 'Adopt a Baby VegePet!';
 
   @override
   String get initialAdoptionDescription =>
@@ -320,7 +320,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mealPanelTitle => 'Feed';
 
   @override
-  String get mealPanelTodayCertLabel => 'Today\'s Meal Check-in!';
+  String get mealPanelTodayCertLabel => 'Today\'s Meal Check';
 
   @override
   String get mealPanelBrunchButton => 'Brunch';
@@ -330,7 +330,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealPanelFootnote1 =>
-      '• Brunch: 06:00-14:00 / Dinner: 17:00-22:00';
+      '• Brunch: 06:00–14:00 / Dinner: 17:00–22:00';
 
   @override
   String get mealPanelFootnote2 =>
@@ -352,10 +352,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get profileAutoSaveHint =>
-      '• Changes are saved automatically when you close this panel.';
+      '• Your changes are saved automatically when you close this panel.';
 
   @override
-  String get petNamingTitle => 'A baby VegePet has arrived 🥹';
+  String get petNamingTitle => 'A Baby VegePet Has Arrived 🥹';
 
   @override
   String get petNamingSubtitle => 'Give your new VegePet a cute name!';
@@ -379,7 +379,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dietDiaryPanelTitle => 'Diet Diary';
 
   @override
-  String get dietDiaryMonthPickerTitle => 'Choose month';
+  String get dietDiaryMonthPickerTitle => 'Choose a Month';
 
   @override
   String get dietDiarySavedSnackbar => 'Diet diary saved.';
@@ -407,7 +407,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Earned when a VegePet reaches adulthood. Use it to adopt one random VegePet!';
 
   @override
-  String get bagItemBoneDollName => 'Bone Doll';
+  String get bagItemBoneDollName => 'Bone Toy';
 
   @override
   String get bagItemBoneDollDesc =>
@@ -418,7 +418,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bagItemYarnBallDesc =>
-      'A yarn ball that cat VegePets love. Watching them bat it around helps affection grow.';
+      'A yarn ball that cat VegePets love. Batting it around helps affection grow.';
 
   @override
   String get randomTicketUseConfirmMessage => 'Use the Random Adoption Ticket?';
@@ -457,7 +457,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get helpPanelTitle => 'Help';
 
   @override
-  String get shopNoticeTitle => 'Coming Soon...';
+  String get shopNoticeTitle => 'Coming soon...';
 
   @override
   String get shopNoticeDescription => 'Please stay tuned!';
@@ -486,7 +486,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nameInterlockMain => 'Please try again.';
 
   @override
-  String get nameInterlockSub => 'Use 2–8 characters / No special characters!';
+  String get nameInterlockSub => 'Use 2–8 characters. No special characters!';
 
   @override
   String get stageBaby => 'Baby';
@@ -516,10 +516,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adoptionReceiveButtonExclaim => 'Adopt!';
 
   @override
-  String get snackLoginRequired => 'Login required.';
+  String get snackLoginRequired => 'Please log in first.';
 
   @override
-  String get snackInvalidEmail => 'Please enter a valid email address.';
+  String get snackInvalidEmail => '※ Please enter a valid email address.';
 
   @override
   String get snackEmailRequired => 'Please enter your email.';
@@ -532,14 +532,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This account is already linked to an email.';
 
   @override
-  String get snackEmailLinkCompleted => 'Email link completed.';
+  String get snackEmailLinkCompleted => 'Email linked.';
 
   @override
-  String get snackTicketEmpty => 'No random adoption tickets available.';
+  String get snackTicketEmpty => 'You don\'t have any Random Adoption Tickets.';
 
   @override
   String get snackTicketBlockedDuringGrowth =>
-      'A VegePet is still growing. Use this after it reaches adulthood.';
+      'A VegePet is still growing. You can use this after it reaches adulthood.';
 
   @override
   String get snackTicketDuplicatePokedex =>
@@ -547,19 +547,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snackAdoptError =>
-      'Could not parse the adoption result. Please try again later.';
+      'Could not read the adoption result. Please try again later.';
 
   @override
   String get snackPetActionInvalid => 'Pet info is unavailable.';
 
   @override
-  String get snackAdoptFirst => 'Please adopt a pet first.';
+  String get snackAdoptFirst => 'Please adopt a VegePet first.';
 
   @override
   String get snackPlayedToday => 'You already played with your VegePet today.';
 
   @override
-  String get snackRandomTicketGranted => 'You earned a random adoption ticket!';
+  String get snackRandomTicketGranted => 'You earned a Random Adoption Ticket!';
 
   @override
   String get snackStageReachedAdult =>
@@ -586,7 +586,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get emailLinkSendOtpButton => 'Get Code';
+  String get emailLinkSendOtpButton => 'Send Code';
 
   @override
   String get emailLinkEmailRowLabel => '• Email';
@@ -627,10 +627,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailLinkInviteLater => 'Later';
 
   @override
-  String get emailLinkInviteNow => 'Link';
+  String get emailLinkInviteNow => 'Link Email';
 
   @override
-  String get emailLinkSuccessTitle => 'Email Linked💫';
+  String get emailLinkSuccessTitle => 'Email Linked 💫';
 
   @override
   String get emailLinkSuccessBody =>
@@ -643,10 +643,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailFormatErrorTitle => 'Invalid Email';
 
   @override
-  String get emailFormatErrorBody => 'Please enter a valid email address.';
+  String get emailFormatErrorBody => '※ Please enter a valid email address.';
 
   @override
   String get emailFormatErrorConfirm => 'OK';
+
+  @override
+  String get emailDuplicateNoticeTitle => 'Email Already in Use';
+
+  @override
+  String get emailDuplicateNoticeBody =>
+      'This email is already in use. Please use a different email.';
+
+  @override
+  String get emailDuplicateNoticeConfirm => 'OK';
 
   @override
   String get saveLabel => 'Save';
@@ -739,7 +749,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String snackPlayActionSuccess(String label) {
-    return '$label successful! Affection +1';
+    return '$label complete! Affection +1';
   }
 
   @override
@@ -751,7 +761,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get snackAlreadyRaising => 'You already have a VegePet in training.';
 
   @override
-  String get snackPetSelectInvalid => 'Pet selection is invalid.';
+  String get snackPetSelectInvalid => 'Please select a valid VegePet.';
 
   @override
   String snackAdoptSaveFailed(String error) {
@@ -759,7 +769,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackNameSaved => 'Name saved!';
+  String get snackNameSaved => 'Name saved.';
 
   @override
   String snackNameSaveFailed(String error) {
@@ -774,12 +784,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String snackTicketUseFailed(String error) {
-    return 'Failed to use the ticket: $error';
+    return 'Failed to use ticket: $error';
   }
 
   @override
   String snackOldPetDeactivateFailed(String error) {
-    return 'Failed to deactivate the previous pet: $error';
+    return 'Failed to deactivate the previous VegePet: $error';
   }
 
   @override
@@ -788,10 +798,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackNewPetAdopted => 'A new VegePet has been adopted!';
+  String get snackNewPetAdopted => 'You\'ve adopted a new VegePet!';
 
   @override
-  String get snackToyNotUsable => 'This toy can\'t be used on this VegePet.';
+  String get snackToyNotUsable => 'This toy can\'t be used with this VegePet.';
 
   @override
   String get snackEnterName => 'Please enter a name.';
@@ -803,7 +813,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snackWithdrawCannotLogin =>
-      'Cannot proceed with deletion when not signed in.';
+      'Please log in before deleting your account.';
 
   @override
   String get snackWithdrawCompleted => 'Your account has been deleted.';
@@ -814,7 +824,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackWeightNumberOnly => 'Please enter weight as a number.';
+  String get snackWeightNumberOnly => 'Please enter a valid weight.';
 
   @override
   String snackDiarySaveFailed(String error) {
@@ -826,7 +836,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snackStageGrewToGrown =>
-      'Your VegePet grew into the Growing stage!';
+      'Your VegePet grew into the Growth stage!';
 
   @override
   String get snackStageGrewToAdult =>
@@ -834,7 +844,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String snackGraduationFailed(String error) {
-    return 'Failed to update adult-stage status: $error';
+    return 'Failed to update Adult stage status: $error';
   }
 
   @override

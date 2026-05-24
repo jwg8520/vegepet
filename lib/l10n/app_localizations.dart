@@ -1079,7 +1079,7 @@ abstract class AppLocalizations {
   /// No description provided for @snackInvalidEmail.
   ///
   /// In ko, this message translates to:
-  /// **'올바른 이메일 형식으로 입력해주세요.'**
+  /// **'※ 올바른 이메일 형식으로 입력해주세요.'**
   String get snackInvalidEmail;
 
   /// No description provided for @snackEmailRequired.
@@ -1309,6 +1309,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'확인'**
   String get emailFormatErrorConfirm;
+
+  /// No description provided for @emailDuplicateNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'중복 이메일'**
+  String get emailDuplicateNoticeTitle;
+
+  /// No description provided for @emailDuplicateNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'※ 이미 사용된 이메일입니다. 다른 이메일로 인증해 주세요.'**
+  String get emailDuplicateNoticeBody;
+
+  /// No description provided for @emailDuplicateNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get emailDuplicateNoticeConfirm;
 
   /// No description provided for @saveLabel.
   ///

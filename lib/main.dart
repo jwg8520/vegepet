@@ -114,26 +114,26 @@ const List<String> _kBadMessagesFallback = <String>[
 const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요. 다시 촬영해보세요!';
 
 const List<String> _kGoodMessagesEn = <String>[
-  'Looks like VegePet enjoyed the meal! This balance seems great.',
-  "VegePet looks happy after that meal! Let's keep this balance going.",
+  'Looks like VegePet enjoyed the meal! The balance looks great.',
+  "VegePet looks happy after that meal! Let's keep that balance going.",
 ];
 
 const List<String> _kSupplementMessagesWithFeedbackEn = <String>[
   'Looks like VegePet enjoyed the meal! Next time, try adding {feedback}.',
-  'VegePet seems pretty happy! Next time, adding {feedback} could make it better.',
+  'VegePet seems happy with this meal! Adding {feedback} next time could make it even better.',
 ];
 
 const List<String> _kSupplementMessagesFallbackEn = <String>[
-  'VegePet enjoyed the meal! Next time, a little more balance would make it even better.',
+  'VegePet enjoyed the meal! A little more balance next time would make it even better.',
 ];
 
 const List<String> _kBadMessagesWithFeedbackEn = <String>[
   'This meal could use a little more balance. Next time, try going with {feedback}.',
-  'VegePet ate the meal, but it could be better balanced. Next time, adding {feedback} could be a better choice.',
+  'VegePet ate the meal, but it could be better balanced. Next time, going with {feedback} may help.',
 ];
 
 const List<String> _kBadMessagesFallbackEn = <String>[
-  'VegePet ate the meal, but next time, a more balanced meal would be better.',
+  'VegePet ate the meal, but a more balanced meal would be better next time.',
 ];
 
 const String _kUncertainMessageEn =
@@ -155,13 +155,30 @@ enum _GameMenuSubOutsideDismissKind {
 
 /// English locale: comma-separated feedback phrases → natural "and" list.
 String _formatFeedbackForEnglishSentence(String feedback) {
-  final parts = feedback
+  final cleaned = feedback
+      .trim()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(RegExp(r'\band\s+and\s+and\b', caseSensitive: false), 'and')
+      .replaceAll(RegExp(r'\band\s+and\b', caseSensitive: false), 'and');
+
+  if (cleaned.isEmpty) return '';
+
+  if (!cleaned.contains(',')) {
+    return cleaned;
+  }
+
+  final parts = cleaned
       .split(',')
-      .map((part) => part.trim())
+      .map((part) {
+        return part
+            .trim()
+            .replaceFirst(RegExp(r'^(and\s+)+', caseSensitive: false), '')
+            .trim();
+      })
       .where((part) => part.isNotEmpty)
       .toList();
 
-  if (parts.length <= 1) return feedback.trim();
+  if (parts.length <= 1) return cleaned;
   if (parts.length == 2) {
     return '${parts[0]} and ${parts[1]}';
   }
@@ -609,6 +626,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 이메일 연동 성공 직후 안내 (240×116 · 마당 좌표계).
   bool _isEmailLinkSuccessNoticeOpen = false;
   bool _isEmailFormatErrorNoticeOpen = false;
+  bool _isEmailDuplicateNoticeOpen = false;
 
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
@@ -1222,7 +1240,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final localeScope = _LocaleControllerScope.of(context);
     final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
     final changedMessage = targetCode == 'en'
-        ? 'Language has been changed.'
+        ? 'Language changed.'
         : '언어가 변경되었어요.';
     await localeScope.setLocale(Locale(targetCode));
     if (!mounted) return;
@@ -1714,11 +1732,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   String _resolvedDisplayEmailLine([AppLocalizations? l10n]) {
+    final isEn = _isEnglishLocale;
     final auth = _currentAuthEmail()?.trim();
-    if (auth != null && auth.isNotEmpty) return '연결된 이메일: $auth';
+    if (auth != null && auth.isNotEmpty) {
+      return isEn ? 'Linked email: $auth' : '연결된 이메일: $auth';
+    }
     final pe = _profile?['email']?.toString().trim() ?? '';
-    if (pe.isNotEmpty) return '연결된 이메일: $pe';
-    return l10n?.noLinkedEmail ?? '연동된 이메일 없음';
+    if (pe.isNotEmpty) {
+      return isEn ? 'Linked email: $pe' : '연결된 이메일: $pe';
+    }
+    return l10n?.noLinkedEmail ?? (isEn ? 'No email linked' : '연동된 이메일 없음');
   }
 
   bool _looksLikeEmail(String raw) {
@@ -1754,30 +1777,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         message.contains('already exists');
   }
 
-  Future<void> _showEmailAlreadyUsedDialog() async {
-    final ctx = _rootNavigatorKey.currentContext ?? context;
-    if (!mounted) return;
+  Future<void> _showEmailDuplicateNotice() async {
+    if (_isEmailDuplicateNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isEmailDuplicateNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
 
-    await showDialog<void>(
-      context: ctx,
-      barrierDismissible: true,
-      builder: (dialogCtx) {
-        final l10n = AppLocalizations.of(dialogCtx);
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Text(l10n.emailAlreadyUsedTitle),
-          content: Text(l10n.emailAlreadyUsedBody),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: Text(l10n.confirmLabel),
-            ),
-          ],
-        );
-      },
+  Future<void> _hideEmailDuplicateNotice() async {
+    if (!_isEmailDuplicateNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isEmailDuplicateNoticeOpen = false,
     );
+  }
+
+  void _closeEmailDuplicateNoticeOverlay() {
+    if (!_isEmailDuplicateNoticeOpen) return;
+    unawaited(_hideEmailDuplicateNotice());
+  }
+
+  Future<void> _showEmailAlreadyUsedDialog() async {
+    await _showEmailDuplicateNotice();
   }
 
   void _startEmailOtpCooldown() {
@@ -2389,19 +2410,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return true;
     } catch (e) {
       if (_isEmailAlreadyUsedError(e)) {
-        try {
-          await supabase.auth.signInWithOtp(email: trimmed);
-          if (mounted) {
-            _safeSetState(() => _emailLinkRestoreMode = true);
-          } else {
-            _emailLinkRestoreMode = true;
-          }
-          _showSnack(l10n.snackOtpSent);
-          return true;
-        } catch (restoreErr) {
-          _showSnack(l10n.snackOtpSendFailed(_formatAuthError(restoreErr)));
-          return false;
-        }
+        await _showEmailDuplicateNotice();
+        return false;
       }
       _showSnack(l10n.snackOtpSendFailed(_formatAuthError(e)));
       return false;
@@ -6125,6 +6135,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isEmailLinkInviteNoticeOpen = false;
     _isEmailLinkSuccessNoticeOpen = false;
     _isEmailFormatErrorNoticeOpen = false;
+    _isEmailDuplicateNoticeOpen = false;
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -6535,6 +6546,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailLinkInviteNoticeGlobalOverlay(),
         _buildEmailLinkSuccessNoticeGlobalOverlay(),
         _buildEmailFormatErrorNoticeGlobalOverlay(),
+        _buildEmailDuplicateNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
       ],
     );
@@ -7205,6 +7217,127 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildEmailDuplicateNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.emailDuplicateNoticeTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.emailDuplicateNoticeBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFB92020),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _closeEmailDuplicateNoticeOverlay,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.emailDuplicateNoticeConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmailDuplicateNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isEmailDuplicateNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeEmailDuplicateNoticeOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildEmailDuplicateNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openWithdrawConfirmPanel() {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
@@ -7217,6 +7350,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailLinkInviteNoticeOpen = false;
       _isEmailLinkSuccessNoticeOpen = false;
       _isEmailFormatErrorNoticeOpen = false;
+      _isEmailDuplicateNoticeOpen = false;
       _activeSettingsSupportDoc = null;
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
@@ -9997,7 +10131,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 width: 0.6,
               ),
             ),
-            // 영어 "Meal Check!" 는 폭이 좁아 잘릴 수 있어 FittedBox 로 자동 축소.
+            // 영어 "Meal Check" 는 폭이 좁아 잘릴 수 있어 FittedBox 로 자동 축소.
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: FittedBox(
@@ -11641,7 +11775,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             localeCode: localeCode,
           )
         : (_isEnglishLocale
-              ? 'Could not load the evaluation result. Please try again later.'
+              ? "We couldn't load the meal result. Please try again later."
               : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.');
 
     // 서버에서 affection 이 갱신되기 전의 단계를 기억해 둔다.
@@ -12955,6 +13089,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isEmailFormatErrorNoticeOpen) {
       unawaited(_hideEmailFormatErrorNotice());
+      return;
+    }
+
+    if (_isEmailDuplicateNoticeOpen) {
+      _closeEmailDuplicateNoticeOverlay();
       return;
     }
 
@@ -14355,9 +14494,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   : '베지펫 서비스 이용 조건과 기본 규칙을 안내합니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '2. Service Scope' : '2. 서비스 내용',
+              title: isEn ? '2. What VegePet Provides' : '2. 서비스 내용',
               body: isEn
-                  ? 'VegePet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be MVP-limited or added later.'
+                  ? 'VegePet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be limited during the MVP phase or added later.'
                   : '식단 사진 인증, AI 기반 식단 평가, 펫 육성, 도감/가방/식단일지/설정 기능을 제공합니다. 일부 기능은 MVP 단계 또는 추후 업데이트 대상일 수 있습니다.',
             ),
             _SupportDocumentSection(
@@ -14391,7 +14530,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   : '기능 개선, 오류 수정, 운영상 필요에 따라 서비스 내용이 변경되거나 중단될 수 있습니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '8. Restriction of Use' : '8. 이용 제한',
+              title: isEn ? '8. Use Restrictions' : '8. 이용 제한',
               body: isEn
                   ? 'VegePet may restrict service use for abuse, policy violations, or infringement of others’ rights.'
                   : '비정상 이용, 시스템 악용, 타인 권리 침해 시 서비스 이용이 제한될 수 있습니다.',
@@ -14507,7 +14646,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   : '타인 계정/이메일 사용, 데이터 변조, 비정상 요청, 허위 인증 반복 등은 금지됩니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '4. Data Operations' : '4. 데이터 및 기록 관리',
+              title: isEn ? '4. Data Management' : '4. 데이터 및 기록 관리',
               body: isEn
                   ? 'Meal photos, diary entries, and pet data are managed per user account; logs may be used for error analysis.'
                   : '식단 사진/일지/펫 데이터는 계정 기준으로 관리되며, 오류 분석을 위해 일부 로그를 활용할 수 있습니다.',
@@ -14515,11 +14654,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _SupportDocumentSection(
               title: isEn ? '5. AI Evaluation Operations' : '5. AI 식단 평가 운영 기준',
               body: isEn
-                  ? 'AI feedback is reference-only and may vary by photo quality or environment. Re-capture guidance may be shown for uncertain results.'
+                  ? 'AI meal feedback is for reference only and may vary depending on photo quality or the surrounding environment. Re-capture guidance may be shown for uncertain results.'
                   : 'AI 결과는 참고용이며 사진 품질/조명 등에 따라 달라질 수 있습니다. 불확실 판정 시 재촬영 안내가 제공될 수 있습니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '6. Notification Operations' : '6. 알림 운영',
+              title: isEn ? '6. Notifications' : '6. 알림 운영',
               body: isEn
                   ? 'Meal reminders can be toggled by users. Announcement/event notifications may be sent in later updates.'
                   : '먹이 알림은 사용자가 ON/OFF할 수 있으며, 공지/이벤트 알림은 추후 운영자가 발송할 수 있습니다.',
@@ -14537,7 +14676,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   : '심각한 악용, 보안 위협, 권리 침해 행위에 대해 이용 제한 조치가 이뤄질 수 있습니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '9. Policy Changes' : '9. 정책 변경',
+              title: isEn ? '9. Policy Updates' : '9. 정책 변경',
               body: isEn
                   ? 'Operational policies may change as needed for service sustainability.'
                   : '서비스 운영상 필요에 따라 운영정책이 변경될 수 있습니다.',
@@ -14587,7 +14726,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _SupportDocumentSection(
               title: isEn ? '6. Notification Control' : '6. 알림 관리',
               body: isEn
-                  ? 'Meal and announcement notifications can be turned on/off in settings.'
+                  ? 'Meal and announcement notifications can be turned on or off in Settings.'
                   : '먹이 알림과 공지 알림은 설정에서 ON/OFF할 수 있어 보호자가 이용 상태를 확인할 수 있습니다.',
             ),
             _SupportDocumentSection(
@@ -14597,7 +14736,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   : '설정 > 계정 > 회원 탈퇴로 데이터 삭제가 가능하며, 보호자는 이메일로 삭제를 요청할 수 있습니다.',
             ),
             _SupportDocumentSection(
-              title: isEn ? '8. Healthy Usage Habits' : '8. 안전한 이용 습관',
+              title: isEn ? '8. Healthy Use Habits' : '8. 안전한 이용 습관',
               body: isEn
                   ? 'Avoid excessive use and review meal habits together. Prioritize real health status and professional guidance.'
                   : '과도한 사용을 피하고 보호자와 함께 식단을 점검하세요. 앱 결과보다 실제 건강 상태를 우선하세요.',
@@ -17386,33 +17525,12 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
             children: [
               SizedBox(
                 width: isEnglish ? 76 : 62,
-                child: isEnglish
-                    ? Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(
-                              text: '• Weight',
-                              style: labelStyle.copyWith(height: 1.1),
-                            ),
-                            TextSpan(
-                              text: '(kg)',
-                              style: labelStyle.copyWith(
-                                fontSize: 9,
-                                height: 1.1,
-                              ),
-                            ),
-                          ],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.visible,
-                        softWrap: false,
-                      )
-                    : Text(
-                        AppLocalizations.of(context).diaryWeightLabel,
-                        style: labelStyle,
-                        maxLines: 1,
-                        overflow: TextOverflow.visible,
-                      ),
+                child: Text(
+                  AppLocalizations.of(context).diaryWeightLabel,
+                  style: labelStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.visible,
+                ),
               ),
               const SizedBox(width: 6),
               Expanded(

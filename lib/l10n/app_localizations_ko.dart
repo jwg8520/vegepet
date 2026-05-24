@@ -504,7 +504,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackLoginRequired => '로그인이 필요해요.';
 
   @override
-  String get snackInvalidEmail => '올바른 이메일 형식으로 입력해주세요.';
+  String get snackInvalidEmail => '※ 올바른 이메일 형식으로 입력해주세요.';
 
   @override
   String get snackEmailRequired => '이메일을 입력해주세요.';
@@ -625,6 +625,15 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get emailFormatErrorConfirm => '확인';
+
+  @override
+  String get emailDuplicateNoticeTitle => '중복 이메일';
+
+  @override
+  String get emailDuplicateNoticeBody => '※ 이미 사용된 이메일입니다. 다른 이메일로 인증해 주세요.';
+
+  @override
+  String get emailDuplicateNoticeConfirm => '확인';
 
   @override
   String get saveLabel => '저장';
