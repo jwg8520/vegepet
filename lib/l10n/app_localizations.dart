@@ -752,6 +752,54 @@ abstract class AppLocalizations {
   /// **'• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!'**
   String get profilePanelFootnoteAi;
 
+  /// No description provided for @profileAutoSaveHint.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 프로필 변경 후 창을 나가면 자동으로 저장돼요!'**
+  String get profileAutoSaveHint;
+
+  /// No description provided for @petNamingTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'아기 베지펫이 분양 되었어요🥹'**
+  String get petNamingTitle;
+
+  /// No description provided for @petNamingSubtitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'귀여운 이름을 지어주세요!'**
+  String get petNamingSubtitle;
+
+  /// No description provided for @petNamingHint.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름을 지어주세요.'**
+  String get petNamingHint;
+
+  /// No description provided for @petNamingSave.
+  ///
+  /// In ko, this message translates to:
+  /// **'저장'**
+  String get petNamingSave;
+
+  /// No description provided for @petNamingEnterNameError.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름을 입력해주세요.'**
+  String get petNamingEnterNameError;
+
+  /// No description provided for @petNamingLengthError.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름은 2~8자로 입력해주세요.'**
+  String get petNamingLengthError;
+
+  /// No description provided for @petNamingSpecialCharError.
+  ///
+  /// In ko, this message translates to:
+  /// **'특수문자는 사용할 수 없어요.'**
+  String get petNamingSpecialCharError;
+
   /// No description provided for @dietDiaryPanelTitle.
   ///
   /// In ko, this message translates to:

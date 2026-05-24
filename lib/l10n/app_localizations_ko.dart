@@ -338,6 +338,30 @@ class AppLocalizationsKo extends AppLocalizations {
   String get profilePanelFootnoteAi => '• 성별/나이대/식단 목적 기반으로 식단이 피드백돼요!';
 
   @override
+  String get profileAutoSaveHint => '• 프로필 변경 후 창을 나가면 자동으로 저장돼요!';
+
+  @override
+  String get petNamingTitle => '아기 베지펫이 분양 되었어요🥹';
+
+  @override
+  String get petNamingSubtitle => '귀여운 이름을 지어주세요!';
+
+  @override
+  String get petNamingHint => '이름을 지어주세요.';
+
+  @override
+  String get petNamingSave => '저장';
+
+  @override
+  String get petNamingEnterNameError => '이름을 입력해주세요.';
+
+  @override
+  String get petNamingLengthError => '이름은 2~8자로 입력해주세요.';
+
+  @override
+  String get petNamingSpecialCharError => '특수문자는 사용할 수 없어요.';
+
+  @override
   String get dietDiaryPanelTitle => '식단일지';
 
   @override

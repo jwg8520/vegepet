@@ -349,6 +349,31 @@ class AppLocalizationsEn extends AppLocalizations {
       '• Meal feedback uses your gender, age, and diet goals.';
 
   @override
+  String get profileAutoSaveHint =>
+      '• Changes are saved automatically when you leave this panel!';
+
+  @override
+  String get petNamingTitle => 'A baby VegePet has arrived🥹';
+
+  @override
+  String get petNamingSubtitle => 'Give your cute VegePet a name!';
+
+  @override
+  String get petNamingHint => 'Enter a name';
+
+  @override
+  String get petNamingSave => 'Save';
+
+  @override
+  String get petNamingEnterNameError => 'Please enter a name.';
+
+  @override
+  String get petNamingLengthError => 'Use 2–8 characters.';
+
+  @override
+  String get petNamingSpecialCharError => 'Special characters are not allowed.';
+
+  @override
   String get dietDiaryPanelTitle => 'Diet Diary';
 
   @override

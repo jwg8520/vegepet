@@ -120,7 +120,7 @@ const List<String> _kGoodMessagesEn = <String>[
 
 const List<String> _kSupplementMessagesWithFeedbackEn = <String>[
   'Looks like VegePet enjoyed the meal! Next time, try adding {feedback}.',
-  'VegePet seems pretty happy! Adding {feedback} next time could make it even better.',
+  'VegePet seems pretty happy! Next time, adding {feedback} could make it better.',
 ];
 
 const List<String> _kSupplementMessagesFallbackEn = <String>[
@@ -129,7 +129,7 @@ const List<String> _kSupplementMessagesFallbackEn = <String>[
 
 const List<String> _kBadMessagesWithFeedbackEn = <String>[
   'This meal could use a little more balance. Next time, try going with {feedback}.',
-  'VegePet ate the meal, but it could be better balanced. Next time, {feedback} may be a better choice.',
+  'VegePet ate the meal, but it could be better balanced. Next time, adding {feedback} could be a better choice.',
 ];
 
 const List<String> _kBadMessagesFallbackEn = <String>[
@@ -8757,14 +8757,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _submitPetNaming() async {
     if (_isPetNamingPanelClosing || _isNameInterlockNoticeOpen) return;
     final text = _petNamingController.text.trim();
+    final l10n = AppLocalizations.of(context);
+    if (text.isEmpty) {
+      _showSnack(l10n.petNamingEnterNameError);
+      return;
+    }
     if (!_isValidNicknameOrPetName(text)) {
-      await _showNameInterlockNotice();
+      if (text.length < 2 || text.length > 8) {
+        _showSnack(l10n.petNamingLengthError);
+      } else {
+        _showSnack(l10n.petNamingSpecialCharError);
+      }
       return;
     }
     await _closePetNamingPanel(result: text);
   }
 
   Widget _buildInYardPetNamingPanel() {
+    final l10n = AppLocalizations.of(context);
     const titleStyle = TextStyle(
       fontSize: 16,
       fontWeight: FontWeight.w700,
@@ -8788,6 +8798,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       fontWeight: FontWeight.w600,
       color: Color(0xFF4A4A4A),
       height: 1.0,
+    );
+    const fieldHintStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
     );
 
     final panelInteractive =
@@ -8835,22 +8850,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const Positioned(
+                    Positioned(
                       left: 14,
                       top: 14,
                       right: 14,
                       child: Text(
-                        '아기 베지펫이 분양 되었어요🥹',
+                        l10n.petNamingTitle,
                         textAlign: TextAlign.left,
                         style: titleStyle,
                       ),
                     ),
-                    const Positioned(
+                    Positioned(
                       left: 14,
                       top: 40,
                       right: 14,
                       child: Text(
-                        '건강하게 키워주세요!',
+                        l10n.petNamingSubtitle,
                         textAlign: TextAlign.left,
                         style: subtitleStyle,
                       ),
@@ -8884,10 +8899,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       height: 26,
                       child: Row(
                         children: [
-                          const SizedBox(
+                          SizedBox(
                             width: 36,
                             child: Text(
-                              '이름',
+                              l10n.petInfoNameLabel,
                               textAlign: TextAlign.left,
                               style: labelStyle,
                             ),
@@ -8933,16 +8948,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     }) {
                                       return null;
                                     },
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   isDense: true,
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.zero,
-                                  hintText: '이름을 지어주세요.',
-                                  hintStyle: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF4A4A4A),
-                                  ),
+                                  hintText: l10n.petNamingHint,
+                                  hintStyle: fieldHintStyle,
                                   errorText: null,
                                 ),
                                 onTapOutside: (_) {
@@ -9006,10 +9017,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               ],
                             ).createShader(bounds),
                             blendMode: BlendMode.srcIn,
-                            child: const Text(
-                              '저장',
+                            child: Text(
+                              l10n.petNamingSave,
                               textAlign: TextAlign.center,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFFAFCFFF),
@@ -9109,8 +9120,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }) {
     if (species == null) return const SizedBox(width: 76);
     final id = species['id']?.toString();
-    final speciesName = species['name_ko']?.toString().trim().isNotEmpty == true
-        ? species['name_ko']?.toString().trim() ?? '-'
+    final localizedSpeciesName = _localizedPetSpeciesNameFromRaw(
+      nameKo: species['name_ko']?.toString(),
+      family: species['family']?.toString(),
+      code: species['code']?.toString(),
+    );
+    final speciesName = localizedSpeciesName.trim().isNotEmpty
+        ? localizedSpeciesName
         : species['code']?.toString().trim().isNotEmpty == true
         ? species['code']?.toString().trim() ?? '-'
         : '-';
@@ -11471,23 +11487,51 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _lockLandscapeOrientation() async {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
   /// 실시간 카메라로 식단 사진 1장을 촬영한다.
   /// 사진첩(갤러리) 선택은 허용하지 않는다.
   Future<XFile?> _pickMealPhoto() async {
+    await _lockLandscapeOrientation();
+
+    XFile? xfile;
     try {
       final picker = ImagePicker();
-      final xfile = await picker.pickImage(
+      xfile = await picker.pickImage(
         source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.rear,
         imageQuality: 85,
         maxWidth: 1600,
       );
-      return xfile;
     } catch (e) {
       _showSnack(
         AppLocalizations.of(context).snackCameraUnavailable(e.toString()),
       );
-      return null;
+      xfile = null;
+    } finally {
+      await _lockLandscapeOrientation();
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_lockLandscapeOrientation());
+      });
+
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 120), () {
+          unawaited(_lockLandscapeOrientation());
+        }),
+      );
     }
+
+    if (xfile == null) {
+      await _lockLandscapeOrientation();
+    }
+
+    return xfile;
   }
 
   /// 촬영한 사진을 Supabase Storage(`meal-photos`) 버킷에 업로드한다.
@@ -12248,6 +12292,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   const SizedBox(height: 12),
                                   Text(
                                     l10n.profilePanelFootnoteAi,
+                                    softWrap: true,
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF4A4A4A),
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    l10n.profileAutoSaveHint,
                                     softWrap: true,
                                     style: const TextStyle(
                                       fontSize: 9,
