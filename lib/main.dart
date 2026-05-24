@@ -656,9 +656,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   TextEditingController? _activeKeyboardController;
   String? _activeKeyboardInputKey;
   TextInputType _activeKeyboardInputType = TextInputType.text;
-  final Set<FocusNode> _keyboardBoundFocusNodes = <FocusNode>{};
+  final Set<String> _keyboardBoundInputKeys = <String>{};
   final Map<String, List<TextInputFormatter>> _keyboardAccessoryFormattersByKey =
       {};
+
+  static const double _kKeyboardAccessoryBarHeight = 46;
 
   /// 게임 메뉴 하위 패널 외부 탭 → 마당: 슬라이드 없이 전체 페이드 아웃.
   late AnimationController _gameMenuSubOutsideDismissController;
@@ -795,6 +797,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
+    _nicknameFocusNode.canRequestFocus = false;
+    _petNamingFocusNode.canRequestFocus = false;
+    _emailLinkFocusNode.canRequestFocus = false;
+    _emailLinkOtpFocusNode.canRequestFocus = false;
     _ensureKeyboardFocusBinding(
       key: 'profile_nickname',
       controller: _nicknameController,
@@ -826,6 +832,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
       ],
     );
+    _emailLinkController.addListener(_onEmailLinkControllerChangedForOtpSession);
     _ensureKeyboardFocusBinding(
       key: 'email_link_otp',
       controller: _emailLinkOtpController,
@@ -6136,17 +6143,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dismissKeyboardOnly();
   }
 
+  bool _isKeyboardSessionActive(BuildContext context) {
+    return MediaQuery.viewInsetsOf(context).bottom > 0 &&
+        _activeKeyboardController != null;
+  }
+
   bool _hasActiveTextInput() {
-    for (final node in _keyboardBoundFocusNodes) {
-      if (node.hasFocus) return true;
-    }
+    if (_keyboardAccessoryFocusNode.hasFocus) return true;
     final focus = FocusManager.instance.primaryFocus;
     if (focus == null || !focus.hasFocus) return false;
-    final context = focus.context;
-    if (context == null) return false;
-    return context.widget is EditableText ||
-        context.findAncestorWidgetOfExactType<TextField>() != null ||
-        context.findAncestorWidgetOfExactType<TextFormField>() != null;
+    final focusContext = focus.context;
+    if (focusContext == null) return false;
+    return focusContext.widget is EditableText ||
+        focusContext.findAncestorWidgetOfExactType<TextField>() != null ||
+        focusContext.findAncestorWidgetOfExactType<TextFormField>() != null;
+  }
+
+  void _onEmailLinkControllerChangedForOtpSession() {
+    if (!_emailLinkOtpSent) return;
+    final cur = _emailLinkController.text.trim();
+    if (cur != _emailLinkOtpSentForEmail.trim()) {
+      _safeSetState(_clearEmailLinkOtpSession);
+    }
   }
 
   void _dismissKeyboardOnly() {
@@ -6160,26 +6178,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _activeKeyboardFocusNode = null;
   }
 
-  /// 키보드가 실제로 떠 있고 추적 중인 TextField 포커스일 때만 키보드를 닫고 true.
+  /// 키보드 세션(상단 입력칸)이 활성일 때 키보드만 닫고 true.
   bool _dismissKeyboardIfVisibleOnly() {
-    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final hasPrimaryFocus = FocusManager.instance.primaryFocus != null;
-    final hasTrackedInput =
-        _activeKeyboardController != null || _activeKeyboardFocusNode != null;
-
-    if (!keyboardVisible || !hasPrimaryFocus || !hasTrackedInput) {
-      return false;
-    }
-    if (!_hasActiveTextInput()) {
-      return false;
-    }
-
+    if (!_isKeyboardSessionActive(context)) return false;
     _dismissKeyboardOnly();
     _clearActiveKeyboardInput();
     if (mounted) {
       _safeSetState(() {});
     }
     return true;
+  }
+
+  void _dismissKeyboardSessionOnly() {
+    _dismissKeyboardOnly();
+    _clearActiveKeyboardInput();
+    if (mounted) {
+      _safeSetState(() {});
+    }
   }
 
   void _registerActiveKeyboardInput({
@@ -6197,8 +6212,55 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _clearActiveKeyboardInputIfNeeded(FocusNode focusNode) {
     if (_activeKeyboardFocusNode != focusNode) return;
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
+    if (_keyboardAccessoryFocusNode.hasFocus) return;
     _clearActiveKeyboardInput();
     _safeSetState(() {});
+  }
+
+  void _openKeyboardAccessoryForInput({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode sourceFocusNode,
+    TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter> inputFormatters = const [],
+  }) {
+    if (!mounted) return;
+    _keyboardAccessoryFormattersByKey[key] = inputFormatters;
+    final alreadyActive =
+        _activeKeyboardController == controller &&
+        _activeKeyboardInputKey == key &&
+        _keyboardAccessoryFocusNode.hasFocus;
+    _registerActiveKeyboardInput(
+      key: key,
+      controller: controller,
+      focusNode: sourceFocusNode,
+      keyboardType: keyboardType,
+    );
+    if (alreadyActive) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_keyboardAccessoryFocusNode.hasFocus) {
+        _keyboardAccessoryFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _handleKeyboardAccessorySubmitted() {
+    switch (_activeKeyboardInputKey) {
+      case 'profile_nickname':
+        _enforceProfileNicknameMaxLength();
+        if (_isProfilePanelOpen) {
+          unawaited(_submitGameMenuProfileNickname());
+        }
+        break;
+      case 'pet_naming':
+        unawaited(_submitPetNaming());
+        return;
+      default:
+        break;
+    }
+    _dismissKeyboardSessionOnly();
   }
 
   void _ensureKeyboardFocusBinding({
@@ -6207,29 +6269,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required FocusNode focusNode,
     TextInputType keyboardType = TextInputType.text,
     List<TextInputFormatter> inputFormatters = const [],
+    ValueChanged<String>? onChanged,
   }) {
-    if (_keyboardBoundFocusNodes.contains(focusNode)) return;
+    if (_keyboardBoundInputKeys.contains(key)) return;
+    _keyboardBoundInputKeys.add(key);
     _keyboardAccessoryFormattersByKey[key] = inputFormatters;
-    _keyboardBoundFocusNodes.add(focusNode);
-    focusNode.addListener(() {
-      if (!mounted) return;
-      if (focusNode.hasFocus) {
-        _registerActiveKeyboardInput(
-          key: key,
-          controller: controller,
-          focusNode: focusNode,
-          keyboardType: keyboardType,
-        );
-        return;
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
-        _clearActiveKeyboardInputIfNeeded(focusNode);
-      });
-    });
     void onTextChanged() {
       if (!mounted) return;
+      onChanged?.call(controller.text);
       if (_activeKeyboardController == controller) {
         _safeSetState(() {});
       }
@@ -6238,7 +6285,101 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     controller.addListener(onTextChanged);
   }
 
+  Widget _buildKeyboardAccessoryTriggerField({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode sourceFocusNode,
+    required TextInputType keyboardType,
+    List<TextInputFormatter> inputFormatters = const [],
+    bool enabled = true,
+    required TextStyle style,
+    TextStyle? hintStyle,
+    int maxLines = 1,
+    String hintText = '',
+    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10),
+    Alignment alignment = Alignment.centerLeft,
+    BoxDecoration? decoration,
+    double? height,
+  }) {
+    final shellDecoration =
+        decoration ??
+        BoxDecoration(
+          color: enabled
+              ? Colors.white.withValues(alpha: 0.92)
+              : const Color(0xFFEFEFEF),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: enabled
+                ? const Color(0xFFE6E6E6)
+                : const Color(0xFFDADADA),
+            width: 1,
+          ),
+        );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled
+            ? () {
+                _openKeyboardAccessoryForInput(
+                  key: key,
+                  controller: controller,
+                  sourceFocusNode: sourceFocusNode,
+                  keyboardType: keyboardType,
+                  inputFormatters: inputFormatters,
+                );
+              }
+            : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          height: height,
+          padding: padding,
+          decoration: shellDecoration,
+          child: Align(
+            alignment: alignment,
+            child: ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, value, _) {
+              final text = value.text;
+              final isEmpty = text.isEmpty;
+              final displayText = isEmpty && hintText.isNotEmpty
+                  ? hintText
+                  : text;
+              return Text(
+                displayText,
+                maxLines: maxLines,
+                overflow: TextOverflow.ellipsis,
+                style: isEmpty && hintText.isNotEmpty
+                    ? (hintStyle ?? style.copyWith(color: const Color(0xFFB0B0B0)))
+                    : style,
+              );
+            },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   static const double _kKeyboardAccessoryHorizontalInset = 54;
+
+  Widget _buildKeyboardDismissBarrier(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    if (bottomInset <= 0 || _activeKeyboardController == null) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: bottomInset + _kKeyboardAccessoryBarHeight,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _dismissKeyboardSessionOnly,
+        child: const ColoredBox(color: Colors.transparent),
+      ),
+    );
+  }
 
   Widget _buildKeyboardAccessoryOverlay(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -6295,6 +6436,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               textInputAction: isDietNote
                   ? TextInputAction.newline
                   : TextInputAction.done,
+              onSubmitted: (_) => _handleKeyboardAccessorySubmitted(),
               decoration: const InputDecoration(
                 border: InputBorder.none,
                 isDense: true,
@@ -6720,6 +6862,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ),
           ),
+          _buildKeyboardDismissBarrier(context),
           _buildKeyboardAccessoryOverlay(context),
         ],
       ),
@@ -8678,45 +8821,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     Widget shellTextField({
+      required String key,
       required TextEditingController controller,
       required FocusNode focusNode,
       required bool enabled,
       required TextInputType keyboardType,
       required List<TextInputFormatter> formatters,
-      ValueChanged<String>? onChanged,
     }) {
-      return Container(
+      return _buildKeyboardAccessoryTriggerField(
+        key: key,
+        controller: controller,
+        sourceFocusNode: focusNode,
+        keyboardType: keyboardType,
+        inputFormatters: formatters,
+        enabled: enabled,
+        style: fieldTextStyle,
         height: 28,
         padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: enabled
-              ? Colors.white.withValues(alpha: 0.92)
-              : const Color(0xFFEFEFEF),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: enabled
-                ? const Color(0xFFE6E6E6)
-                : const Color(0xFFDADADA),
-            width: 1,
-          ),
-        ),
-        alignment: Alignment.centerLeft,
-        child: TextField(
-          controller: controller,
-          focusNode: focusNode,
-          enabled: enabled,
-          keyboardType: keyboardType,
-          inputFormatters: formatters,
-          onChanged: onChanged,
-          style: fieldTextStyle,
-          textAlign: TextAlign.left,
-          maxLines: 1,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
       );
     }
 
@@ -8749,6 +8870,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       labeledSection(
         label: l10n.emailLinkEmailRowLabel,
         field: shellTextField(
+          key: 'email_link',
           controller: _emailLinkController,
           focusNode: _emailLinkFocusNode,
           enabled: true,
@@ -8756,18 +8878,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           formatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
           ],
-          onChanged: (_) {
-            if (!_emailLinkOtpSent) return;
-            final cur = _emailLinkController.text.trim();
-            if (cur != _emailLinkOtpSentForEmail.trim()) {
-              _safeSetState(_clearEmailLinkOtpSession);
-            }
-          },
         ),
       ),
       labeledSection(
         label: l10n.emailLinkOtpRowLabel,
         field: shellTextField(
+          key: 'email_link_otp',
           controller: _emailLinkOtpController,
           focusNode: _emailLinkOtpFocusNode,
           enabled: otpEnabled,
@@ -9599,15 +9715,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 ),
                               ),
                               alignment: Alignment.centerLeft,
-                              child: TextField(
+                              child: _buildKeyboardAccessoryTriggerField(
+                                key: 'pet_naming',
                                 controller: _petNamingController,
-                                focusNode: _petNamingFocusNode,
-                                autofocus: false,
-                                maxLines: 1,
-                                maxLength: 8,
-                                maxLengthEnforcement:
-                                    MaxLengthEnforcement.enforced,
-                                style: fieldTextStyle,
+                                sourceFocusNode: _petNamingFocusNode,
+                                keyboardType: TextInputType.text,
                                 inputFormatters: [
                                   LengthLimitingTextInputFormatter(
                                     8,
@@ -9615,29 +9727,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                         MaxLengthEnforcement.enforced,
                                   ),
                                 ],
-                                buildCounter:
-                                    (
-                                      BuildContext context, {
-                                      required int currentLength,
-                                      required bool isFocused,
-                                      required int? maxLength,
-                                    }) {
-                                      return null;
-                                    },
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.zero,
-                                  hintText: l10n.petNamingHint,
-                                  hintStyle: fieldHintStyle,
-                                  errorText: null,
+                                style: fieldTextStyle,
+                                hintStyle: fieldHintStyle,
+                                hintText: l10n.petNamingHint,
+                                height: 26,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
                                 ),
-                                onTapOutside: (_) {
-                                  if (_dismissKeyboardIfVisibleOnly()) return;
-                                },
-                                onSubmitted: (_) {
-                                  unawaited(_submitPetNaming());
-                                },
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(10),
+                                  ),
+                                  border: Border.fromBorderSide(
+                                    BorderSide(
+                                      color: Color(0xFFE6E6E6),
+                                      width: 1,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -12831,39 +12939,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     fieldW,
                                     l10n.nickname,
                                     fieldShell(
-                                      TextField(
+                                      _buildKeyboardAccessoryTriggerField(
+                                        key: 'profile_nickname',
                                         controller: _nicknameController,
-                                        focusNode: _nicknameFocusNode,
+                                        sourceFocusNode: _nicknameFocusNode,
                                         enabled: fieldsEnabled,
-                                        onChanged: (_) {
-                                          _enforceProfileNicknameMaxLength();
-                                          setState(() {});
-                                        },
-                                        onEditingComplete: () {
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
-                                          unawaited(
-                                            _submitGameMenuProfileNickname(),
-                                          );
-                                        },
-                                        onSubmitted: (_) {
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
-                                          unawaited(
-                                            _submitGameMenuProfileNickname(),
-                                          );
-                                        },
-                                        textInputAction: TextInputAction.done,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF4A4A4A),
-                                          height: 1.1,
-                                        ),
-                                        maxLines: 1,
-                                        maxLength: _kProfileNicknameMaxLength,
-                                        maxLengthEnforcement:
-                                            MaxLengthEnforcement.enforced,
+                                        keyboardType: TextInputType.text,
                                         inputFormatters: [
                                           LengthLimitingTextInputFormatter(
                                             _kProfileNicknameMaxLength,
@@ -12871,19 +12952,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                                 MaxLengthEnforcement.enforced,
                                           ),
                                         ],
-                                        buildCounter:
-                                            (
-                                              BuildContext context, {
-                                              required int currentLength,
-                                              required bool isFocused,
-                                              required int? maxLength,
-                                            }) {
-                                              return null;
-                                            },
-                                        decoration: const InputDecoration(
-                                          isDense: true,
-                                          border: InputBorder.none,
-                                          contentPadding: EdgeInsets.zero,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF4A4A4A),
+                                          height: 1.1,
+                                        ),
+                                        maxLines: 1,
+                                        padding: EdgeInsets.zero,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.transparent,
                                         ),
                                       ),
                                     ),
@@ -13787,6 +13865,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               fetchNote: _fetchMealDiaryNote,
               saveNote: _saveMealDiaryNote,
               bindKeyboardInput: _ensureKeyboardFocusBinding,
+              buildKeyboardTriggerField: _buildKeyboardAccessoryTriggerField,
               calendarBuilder:
                   (
                     BuildContext sheetCtx,
@@ -16556,41 +16635,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             top: 30,
             label: l10n.nickname,
             field: iosFieldShell(
-              child: TextField(
+              child: _buildKeyboardAccessoryTriggerField(
+                key: 'profile_nickname',
                 controller: _nicknameController,
-                focusNode: _nicknameFocusNode,
-                onChanged: (_) {
-                  _enforceProfileNicknameMaxLength();
-                  setState(() {});
-                },
-                onTapOutside: (_) {
-                  if (_dismissKeyboardIfVisibleOnly()) return;
-                },
-                textAlign: TextAlign.left,
-                style: fieldTextStyle,
-                maxLines: 1,
-                maxLength: _kProfileNicknameMaxLength,
-                maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                sourceFocusNode: _nicknameFocusNode,
+                keyboardType: TextInputType.text,
                 inputFormatters: [
                   LengthLimitingTextInputFormatter(
                     _kProfileNicknameMaxLength,
                     maxLengthEnforcement: MaxLengthEnforcement.enforced,
                   ),
                 ],
-                buildCounter:
-                    (
-                      BuildContext context, {
-                      required int currentLength,
-                      required bool isFocused,
-                      required int? maxLength,
-                    }) {
-                      return null;
-                    },
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                ),
+                style: fieldTextStyle,
+                maxLines: 1,
+                padding: EdgeInsets.zero,
+                decoration: const BoxDecoration(color: Colors.transparent),
               ),
             ),
           ),
@@ -17355,6 +17414,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required this.calendarBuilder,
     required this.monthPickerBuilder,
     this.bindKeyboardInput,
+    this.buildKeyboardTriggerField,
     this.embeddedInGameMenuPanel = false,
     this.onEmbeddedBack,
     this.monthYearCaptionBuilder,
@@ -17389,6 +17449,20 @@ class _DietDiarySheetPanel extends StatefulWidget {
     List<TextInputFormatter> inputFormatters,
   })?
   bindKeyboardInput;
+  final Widget Function({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode sourceFocusNode,
+    required TextInputType keyboardType,
+    List<TextInputFormatter> inputFormatters,
+    bool enabled,
+    required TextStyle style,
+    int maxLines,
+    String hintText,
+    EdgeInsets padding,
+    Alignment alignment,
+  })?
+  buildKeyboardTriggerField;
   final Widget Function(
     BuildContext sheetCtx,
     DateTime visibleMonth,
@@ -17545,6 +17619,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
         date: selectedDate!,
         logs: dayLogs,
         bindKeyboardInput: widget.bindKeyboardInput,
+        buildKeyboardTriggerField: widget.buildKeyboardTriggerField,
         signedUrlBuilder: widget.signedUrlBuilder,
         onPhotoTap: widget.onPhotoTap,
         fetchNote: widget.fetchNote,
@@ -17823,6 +17898,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     required this.saveNote,
     required this.onMoveDate,
     required this.onSavedSuccess,
+    this.buildKeyboardTriggerField,
   });
 
   final DateTime date;
@@ -17835,6 +17911,20 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     List<TextInputFormatter> inputFormatters,
   })?
   bindKeyboardInput;
+  final Widget Function({
+    required String key,
+    required TextEditingController controller,
+    required FocusNode sourceFocusNode,
+    required TextInputType keyboardType,
+    List<TextInputFormatter> inputFormatters,
+    bool enabled,
+    required TextStyle style,
+    int maxLines,
+    String hintText,
+    EdgeInsets padding,
+    Alignment alignment,
+  })?
+  buildKeyboardTriggerField;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
   final Future<void> Function(String imageUrl) onPhotoTap;
   final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
@@ -17880,6 +17970,8 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   @override
   void initState() {
     super.initState();
+    _weightFocusNode.canRequestFocus = false;
+    _noteFocusNode.canRequestFocus = false;
     widget.bindKeyboardInput?.call(
       key: 'diet_weight',
       controller: _weightController,
@@ -18090,21 +18182,23 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
               const SizedBox(width: 6),
               Expanded(
                 child: _diaryFieldShell(
-                  child: TextField(
-                    controller: _weightController,
-                    focusNode: _weightFocusNode,
-                    enabled: !_isSaving && !_isLoadingNote,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [_weightFormatter],
-                    style: fieldStyle,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
+                  child:
+                      widget.buildKeyboardTriggerField?.call(
+                        key: 'diet_weight',
+                        controller: _weightController,
+                        sourceFocusNode: _weightFocusNode,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [_weightFormatter],
+                        enabled: !_isSaving && !_isLoadingNote,
+                        style: fieldStyle,
+                        maxLines: 1,
+                        hintText: '',
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                      ) ??
+                      const SizedBox.shrink(),
                 ),
               ),
             ],
@@ -18120,33 +18214,26 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
               height: double.infinity,
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               alignment: Alignment.topLeft,
-              child: TextField(
-                controller: _noteController,
-                focusNode: _noteFocusNode,
-                enabled: !_isSaving && !_isLoadingNote,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                minLines: 4,
-                maxLines: 4,
-                maxLength: 64,
-                maxLengthEnforcement: MaxLengthEnforcement.enforced,
-                buildCounter:
-                    (
-                      BuildContext context, {
-                      required int currentLength,
-                      required bool isFocused,
-                      required int? maxLength,
-                    }) {
-                      return null;
-                    },
-                scrollPhysics: const NeverScrollableScrollPhysics(),
-                style: fieldStyle,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
+              child:
+                  widget.buildKeyboardTriggerField?.call(
+                    key: 'diet_note',
+                    controller: _noteController,
+                    sourceFocusNode: _noteFocusNode,
+                    keyboardType: TextInputType.multiline,
+                    inputFormatters: [
+                      LengthLimitingTextInputFormatter(
+                        64,
+                        maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                      ),
+                    ],
+                    enabled: !_isSaving && !_isLoadingNote,
+                    style: fieldStyle,
+                    maxLines: 4,
+                    hintText: '',
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.topLeft,
+                  ) ??
+                  const SizedBox.shrink(),
             ),
           ),
         ],
