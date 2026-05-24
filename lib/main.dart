@@ -644,6 +644,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _emailLinkPanelResendBusy = false;
   bool _emailLinkOtpSent = false;
   String _emailLinkOtpSentForEmail = '';
+  DateTime? _emailLinkOtpSentAt;
+  Timer? _emailLinkOtpSessionTimer;
   final TextEditingController _emailLinkController = TextEditingController();
   final TextEditingController _emailLinkOtpController = TextEditingController();
   final FocusNode _emailLinkFocusNode = FocusNode();
@@ -655,6 +657,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _activeKeyboardInputKey;
   TextInputType _activeKeyboardInputType = TextInputType.text;
   final Set<FocusNode> _keyboardBoundFocusNodes = <FocusNode>{};
+  final Map<String, List<TextInputFormatter>> _keyboardAccessoryFormattersByKey =
+      {};
 
   /// 게임 메뉴 하위 패널 외부 탭 → 마당: 슬라이드 없이 전체 페이드 아웃.
   late AnimationController _gameMenuSubOutsideDismissController;
@@ -778,6 +782,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   static const double _kEmailLinkPanelW = 230;
   static const double _kEmailLinkPanelH = 212;
 
+  /// 이메일 OTP 발송 후 인증코드 입력란 활성 유지 시간(창 닫았다 다시 열어도 유지).
+  static const Duration _kEmailLinkOtpSessionDuration = Duration(hours: 1);
+
   static const String _kCustomerCenterEmail = 'acoustic.jwg@gmail.com';
   static const double _kCustomerCenterPanelLeft = 567;
   static const double _kCustomerCenterPanelTop = 130;
@@ -792,29 +799,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       key: 'profile_nickname',
       controller: _nicknameController,
       focusNode: _nicknameFocusNode,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(
+          _kProfileNicknameMaxLength,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
     );
     _ensureKeyboardFocusBinding(
       key: 'pet_naming',
       controller: _petNamingController,
       focusNode: _petNamingFocusNode,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(
+          8,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
     );
     _ensureKeyboardFocusBinding(
       key: 'email_link',
       controller: _emailLinkController,
       focusNode: _emailLinkFocusNode,
       keyboardType: TextInputType.emailAddress,
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
+      ],
     );
     _ensureKeyboardFocusBinding(
       key: 'email_link_otp',
       controller: _emailLinkOtpController,
       focusNode: _emailLinkOtpFocusNode,
       keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+        LengthLimitingTextInputFormatter(8),
+      ],
     );
     _keyboardAccessoryFocusNode.addListener(() {
       if (!mounted) return;
       if (_keyboardAccessoryFocusNode.hasFocus) {
         _safeSetState(() {});
+        return;
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
+        if (_hasActiveTextInput()) return;
+        _clearActiveKeyboardInput();
+        _safeSetState(() {});
+      });
     });
     _petToySwapController = AnimationController(
       vsync: this,
@@ -952,6 +986,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _profileSelectScrollController?.dispose();
     _closeProfileSelectOverlay(notify: false, animated: false);
     _emailOtpCooldownTimer?.cancel();
+    _emailLinkOtpSessionTimer?.cancel();
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
     _nicknameController.dispose();
@@ -1867,15 +1902,88 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return _emailOtpCooldownSeconds > 0;
   }
 
-  void _resetEmailLinkPanelOtpFlow() {
+  void _clearEmailLinkOtpSession() {
+    _emailLinkOtpSessionTimer?.cancel();
+    _emailLinkOtpSessionTimer = null;
     _emailLinkOtpSent = false;
     _emailLinkOtpSentForEmail = '';
+    _emailLinkOtpSentAt = null;
+    _emailLinkOtpController.clear();
+    _emailLinkRestoreMode = false;
+  }
+
+  /// OTP 세션이 1시간을 넘기면 인증코드 입력란을 다시 비활성화한다.
+  bool _expireEmailLinkOtpSessionIfNeeded() {
+    if (!_emailLinkOtpSent) return false;
+    final sentAt = _emailLinkOtpSentAt;
+    if (sentAt == null ||
+        DateTime.now().difference(sentAt) >= _kEmailLinkOtpSessionDuration) {
+      _clearEmailLinkOtpSession();
+      return true;
+    }
+    return false;
+  }
+
+  void _scheduleEmailLinkOtpSessionExpiry() {
+    _emailLinkOtpSessionTimer?.cancel();
+    _emailLinkOtpSessionTimer = null;
+    if (!_emailLinkOtpSent) return;
+    final sentAt = _emailLinkOtpSentAt;
+    if (sentAt == null) return;
+
+    final remaining = _kEmailLinkOtpSessionDuration - DateTime.now().difference(sentAt);
+    if (remaining <= Duration.zero) {
+      if (_expireEmailLinkOtpSessionIfNeeded() && mounted) {
+        _safeSetState(() {});
+      }
+      return;
+    }
+
+    _emailLinkOtpSessionTimer = Timer(remaining, () {
+      if (!mounted) return;
+      if (_expireEmailLinkOtpSessionIfNeeded()) {
+        _safeSetState(() {});
+      }
+    });
+  }
+
+  void _markEmailLinkOtpSessionActive(String email) {
+    _emailLinkOtpSent = true;
+    _emailLinkOtpSentForEmail = email;
+    _emailLinkOtpSentAt = DateTime.now();
+    _scheduleEmailLinkOtpSessionExpiry();
+  }
+
+  /// 연동창만 닫는다. OTP 세션(인증코드 입력 활성)은 1시간 동안 유지.
+  void _closeEmailLinkPanel() {
+    _emailLinkPanelSendBusy = false;
+    _emailLinkPanelVerifyBusy = false;
+    _emailLinkPanelResendBusy = false;
     _emailLinkController.clear();
     _emailLinkOtpController.clear();
+    _isEmailLinkPanelOpen = false;
+  }
+
+  void _prepareEmailLinkPanelForOpen() {
+    _expireEmailLinkOtpSessionIfNeeded();
     _emailLinkPanelSendBusy = false;
     _emailLinkPanelVerifyBusy = false;
     _emailLinkPanelResendBusy = false;
     _emailLinkRestoreMode = false;
+    _emailLinkController.clear();
+    _emailLinkOtpController.clear();
+    if (_emailLinkOtpSent && _emailLinkOtpSentForEmail.isNotEmpty) {
+      _emailLinkController.text = _emailLinkOtpSentForEmail;
+    }
+    _scheduleEmailLinkOtpSessionExpiry();
+  }
+
+  void _resetEmailLinkPanelOtpFlow() {
+    _clearEmailLinkOtpSession();
+    _emailLinkController.clear();
+    _emailLinkPanelSendBusy = false;
+    _emailLinkPanelVerifyBusy = false;
+    _emailLinkPanelResendBusy = false;
   }
 
   Future<void> _refreshAllUserDataAfterAuthChange() async {
@@ -3354,7 +3462,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!mounted) return;
     _dismissFocus();
     _safeSetState(() {
-      _resetEmailLinkPanelOtpFlow();
+      _prepareEmailLinkPanelForOpen();
       _isCustomerCenterPanelOpen = false;
       _isEmailLinkPanelOpen = true;
     });
@@ -6098,8 +6206,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     required TextEditingController controller,
     required FocusNode focusNode,
     TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter> inputFormatters = const [],
   }) {
     if (_keyboardBoundFocusNodes.contains(focusNode)) return;
+    _keyboardAccessoryFormattersByKey[key] = inputFormatters;
     _keyboardBoundFocusNodes.add(focusNode);
     focusNode.addListener(() {
       if (!mounted) return;
@@ -6133,40 +6243,62 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget _buildKeyboardAccessoryOverlay(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final controller = _activeKeyboardController;
-    if (bottomInset <= 0 || controller == null) {
+    final inputKey = _activeKeyboardInputKey;
+    if (bottomInset <= 0 || controller == null || inputKey == null) {
       return const SizedBox.shrink();
     }
-    final previewMaxLines = _activeKeyboardInputKey == 'diet_note' ? 2 : 1;
+    final isDietNote = inputKey == 'diet_note';
+    final maxLines = isDietNote ? 2 : 1;
+    final formatters =
+        _keyboardAccessoryFormattersByKey[inputKey] ?? const <TextInputFormatter>[];
+    const fieldStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.2,
+    );
+
     return Positioned(
       left: _kKeyboardAccessoryHorizontalInset,
       right: _kKeyboardAccessoryHorizontalInset,
       bottom: bottomInset,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 6),
-        child: IgnorePointer(
-          ignoring: true,
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
-              ),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                controller.text,
-                maxLines: previewMaxLines,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF4A4A4A),
-                  height: 1.2,
-                ),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+            ),
+            alignment: isDietNote ? Alignment.topLeft : Alignment.centerLeft,
+            child: TextField(
+              controller: controller,
+              focusNode: _keyboardAccessoryFocusNode,
+              keyboardType: _activeKeyboardInputType,
+              enableInteractiveSelection: true,
+              readOnly: false,
+              autocorrect: false,
+              enableSuggestions: false,
+              maxLines: maxLines,
+              minLines: 1,
+              inputFormatters: formatters,
+              style: fieldStyle,
+              textAlignVertical: isDietNote
+                  ? TextAlignVertical.top
+                  : TextAlignVertical.center,
+              scrollPadding: EdgeInsets.zero,
+              textInputAction: isDietNote
+                  ? TextInputAction.newline
+                  : TextInputAction.done,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
           ),
@@ -8194,10 +8326,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               behavior: HitTestBehavior.translucent,
               onTap: () {
                 if (_dismissKeyboardIfVisibleOnly()) return;
-                _safeSetState(() {
-                  _resetEmailLinkPanelOtpFlow();
-                  _isEmailLinkPanelOpen = false;
-                });
+                _safeSetState(_closeEmailLinkPanel);
               },
               child: const SizedBox.expand(),
             ),
@@ -8442,8 +8571,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _safeSetState(() {
         _emailLinkPanelSendBusy = false;
         if (ok) {
-          _emailLinkOtpSent = true;
-          _emailLinkOtpSentForEmail = raw;
+          _markEmailLinkOtpSessionActive(raw);
         }
       });
       if (ok) {
@@ -8493,7 +8621,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() => _emailLinkPanelResendBusy = true);
     final ok = await _sendEmailLinkOtp(raw);
     if (!mounted) return;
-    _safeSetState(() => _emailLinkPanelResendBusy = false);
+    _safeSetState(() {
+      _emailLinkPanelResendBusy = false;
+      if (ok) {
+        _markEmailLinkOtpSessionActive(raw);
+      }
+    });
     if (ok) {
       _startEmailOtpCooldown();
     }
@@ -8627,12 +8760,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             if (!_emailLinkOtpSent) return;
             final cur = _emailLinkController.text.trim();
             if (cur != _emailLinkOtpSentForEmail.trim()) {
-              _safeSetState(() {
-                _emailLinkOtpSent = false;
-                _emailLinkOtpSentForEmail = '';
-                _emailLinkOtpController.clear();
-                _emailLinkRestoreMode = false;
-              });
+              _safeSetState(_clearEmailLinkOtpSession);
             }
           },
         ),
@@ -13554,10 +13682,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isEmailLinkPanelOpen) {
       _dismissFocus();
-      _safeSetState(() {
-        _isEmailLinkPanelOpen = false;
-        _resetEmailLinkPanelOtpFlow();
-      });
+      _safeSetState(_closeEmailLinkPanel);
       return;
     }
 
@@ -14731,7 +14856,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 if (_hasEffectiveEmailLink()) return;
                                 _dismissFocus();
                                 _safeSetState(() {
-                                  _resetEmailLinkPanelOtpFlow();
+                                  _prepareEmailLinkPanelForOpen();
                                   _isCustomerCenterPanelOpen = false;
                                   _isEmailLinkPanelOpen = true;
                                 });
@@ -17261,6 +17386,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required TextEditingController controller,
     required FocusNode focusNode,
     TextInputType keyboardType,
+    List<TextInputFormatter> inputFormatters,
   })?
   bindKeyboardInput;
   final Widget Function(
@@ -17706,6 +17832,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     required TextEditingController controller,
     required FocusNode focusNode,
     TextInputType keyboardType,
+    List<TextInputFormatter> inputFormatters,
   })?
   bindKeyboardInput;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
@@ -17758,12 +17885,19 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       controller: _weightController,
       focusNode: _weightFocusNode,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [_weightFormatter],
     );
     widget.bindKeyboardInput?.call(
       key: 'diet_note',
       controller: _noteController,
       focusNode: _noteFocusNode,
       keyboardType: TextInputType.multiline,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(
+          64,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
     );
     _bootstrap();
   }
