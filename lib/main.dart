@@ -636,6 +636,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 도감 등록 펫과 동일한 이름으로 분양 펫 이름 저장 시도 시 (240×116 · 마당 좌표계).
   bool _isDuplicatePetNameNoticeOpen = false;
 
+  /// 현재 육성 펫 성숙기 달성 축하 안내 (240×116 · 마당 좌표계).
+  bool _isMaturityCompleteNoticeOpen = false;
+
+  /// 도감 완성 후 랜덤 분양권 사용 안내 (240×116 · 마당 좌표계).
+  bool _isPokedexCompleteTicketNoticeOpen = false;
+
+  /// 다른 기기에서 동일 이메일 연동 시 기존 기기 로그아웃 안내 (240×116).
+  bool _isRemoteEmailLinkedLogoutNoticeOpen = false;
+  bool _isResettingToGuestAfterRemoteLogout = false;
+
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
   bool _isDeletingAccount = false;
@@ -1798,6 +1808,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return e.toString();
   }
 
+  Future<bool> _isEmailAlreadyLinkedInProfiles(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    final currentUserId = supabase.auth.currentUser?.id;
+
+    try {
+      final rows = await supabase
+          .from('profiles')
+          .select('id,email,account_type')
+          .eq('account_type', 'email')
+          .eq('email', normalized)
+          .limit(5);
+
+      for (final row in rows as List) {
+        final profileId = row['id']?.toString();
+        if (currentUserId != null && profileId == currentUserId) continue;
+        return true;
+      }
+      return false;
+    } catch (e, st) {
+      debugPrint('email duplicate profile check failed: $e\n$st');
+      return false;
+    }
+  }
+
   bool _isEmailAlreadyUsedError(Object e) {
     final message = _formatAuthError(e).toLowerCase();
 
@@ -1816,7 +1851,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _showEmailDuplicateNotice() async {
     if (_isEmailDuplicateNoticeOpen) return;
     _dismissFocus();
-    _instantCloseYardConfirmOverlays();
     _safeSetState(() => _isEmailDuplicateNoticeOpen = true);
     _playYardConfirmOverlayEnter();
   }
@@ -1831,6 +1865,156 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _closeEmailDuplicateNoticeOverlay() {
     if (!_isEmailDuplicateNoticeOpen) return;
     unawaited(_hideEmailDuplicateNotice());
+  }
+
+  Future<void> _showRemoteEmailLinkedLogoutNotice() async {
+    if (_isRemoteEmailLinkedLogoutNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isRemoteEmailLinkedLogoutNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideRemoteEmailLinkedLogoutNotice() async {
+    if (!_isRemoteEmailLinkedLogoutNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isRemoteEmailLinkedLogoutNoticeOpen = false,
+    );
+  }
+
+  /// 추후 백엔드/DB 감지 로직에서 호출할 hook.
+  Future<void> _handleRemoteEmailLinkedDetected() async {
+    if (_isRemoteEmailLinkedLogoutNoticeOpen) return;
+    if (_isResettingToGuestAfterRemoteLogout) return;
+    await _showRemoteEmailLinkedLogoutNotice();
+  }
+
+  Future<void> _confirmRemoteEmailLinkedLogoutAndReset() async {
+    if (_isResettingToGuestAfterRemoteLogout) return;
+
+    _safeSetState(() => _isResettingToGuestAfterRemoteLogout = true);
+
+    try {
+      _dismissFocus();
+      _instantCloseYardConfirmOverlays();
+
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        debugPrint('remote logout signOut failed: $e');
+      }
+
+      _resetEmailLinkPanelOtpFlow();
+      _emailLinkRestoreMode = false;
+      _emailLinkController.clear();
+      _emailLinkOtpController.clear();
+
+      if (!mounted) return;
+      _safeSetState(() {
+        _emailOtpCooldownTimer?.cancel();
+        _emailOtpCooldownTimer = null;
+        _emailOtpCooldownSeconds = 0;
+        _lastResultType = null;
+        _lastFeedbackText = null;
+        _lastStatusMessage = null;
+        _lastAffectionGain = null;
+        _lastImagePath = null;
+
+        _isUploadingMeal = false;
+        _uploadingSlot = null;
+        _isInteracting = false;
+        _isUsingRandomTicket = false;
+        _isInitialAdoptionPanelVisible = false;
+        _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionInFlight = false;
+        _isNamingDialogOpen = false;
+        _canShowActivePetDuringNaming = false;
+        _isAdopting = false;
+        _isSavingProfile = false;
+        _isLoggingMeal = false;
+        _firstMealPopupShownThisSession = false;
+        _randomTicketCount = 0;
+        _pokedexEntries = [];
+        _isLoadingPokedex = false;
+        _pokedexPanelSelectedEntry = null;
+        _residentPets = [];
+        _activePet = null;
+        _todayMealLogs = [];
+        _profile = null;
+        _diaryVisibleMonth = _todayDiaryMonth();
+        _diaryLogsByDate = {};
+        _isToyMenuOpen = false;
+        _isToyDropHovering = false;
+        _isCompletingToyPlay = false;
+        _petToySwapInProgress = false;
+        _toyOpenedFromPetBanner = false;
+        _isMealPanelOpen = false;
+        _petMealSwapInProgress = false;
+        _mealOpenedFromPetBanner = false;
+        _petChildPanelDismissingToYard = false;
+        _gameMenuPanelOpen = false;
+        _gameMenuPanelRetracting = false;
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _isSettingsPanelOpen = false;
+        _settingsPanelSwapInProgress = false;
+        _isEmailLinkPanelOpen = false;
+        _isCustomerCenterPanelOpen = false;
+        _isHelpPanelOpen = false;
+        _helpPanelSwapInProgress = false;
+        _isStoryPanelOpen = false;
+        _storyPanelSwapInProgress = false;
+        _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
+        _isRemoteEmailLinkedLogoutNoticeOpen = false;
+
+        _selectedSpeciesId = null;
+        _nicknameController.clear();
+        _selectedGender = null;
+        _selectedAgeRange = null;
+        _selectedDietGoal = null;
+        _isProfileSetupPanelVisible = true;
+        _isProfileSetupClosing = false;
+        _status = _ViewStatus.loading;
+      });
+
+      _petToySwapController.value = 0;
+      _petMealSwapController.value = 0;
+      _gameMenuPanelController.value = 0;
+      _gameProfileSwapController.value = 0;
+      _gameDietDiarySwapController.value = 0;
+      _gameBagSwapController.value = 0;
+      _gamePokedexSwapController.value = 0;
+      _gameSettingsSwapController.value = 0;
+      _gameHelpSwapController.value = 0;
+      _gameMenuSubOutsideDismissController.value = 0;
+
+      await supabase.auth.signInAnonymously();
+
+      if (!mounted) return;
+      _safeSetState(() => _isResettingToGuestAfterRemoteLogout = false);
+
+      await _bootstrap();
+    } catch (e, st) {
+      debugPrint('remote email linked logout reset failed: $e\n$st');
+      if (!mounted) return;
+      _safeSetState(() {
+        _isResettingToGuestAfterRemoteLogout = false;
+        _isRemoteEmailLinkedLogoutNoticeOpen = false;
+      });
+      try {
+        await _bootstrap();
+      } catch (bootError) {
+        debugPrint('remote logout fallback bootstrap failed: $bootError');
+      }
+    }
   }
 
   Future<void> _showDuplicatePetNameNotice() async {
@@ -2529,19 +2713,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _showSnack(l10n.snackEmailRequired);
       return false;
     }
-    try {
-      await supabase.auth.updateUser(UserAttributes(email: trimmed));
+
+    final alreadyLinkedInProfiles = await _isEmailAlreadyLinkedInProfiles(
+      trimmed,
+    );
+    if (alreadyLinkedInProfiles) {
       if (mounted) {
-        _safeSetState(() => _emailLinkRestoreMode = false);
+        _safeSetState(() => _emailLinkRestoreMode = true);
       } else {
-        _emailLinkRestoreMode = false;
+        _emailLinkRestoreMode = true;
+      }
+      await _showEmailDuplicateNotice();
+    }
+
+    try {
+      if (alreadyLinkedInProfiles) {
+        await supabase.auth.signInWithOtp(email: trimmed);
+      } else {
+        await supabase.auth.updateUser(UserAttributes(email: trimmed));
+        if (mounted) {
+          _safeSetState(() => _emailLinkRestoreMode = false);
+        } else {
+          _emailLinkRestoreMode = false;
+        }
       }
       _showSnack(l10n.snackOtpSent);
       return true;
     } catch (e) {
-      if (_isEmailAlreadyUsedError(e)) {
-        await _showEmailDuplicateNotice();
-        return false;
+      if (_isEmailAlreadyUsedError(e) && !alreadyLinkedInProfiles) {
+        try {
+          if (mounted) {
+            _safeSetState(() => _emailLinkRestoreMode = true);
+          } else {
+            _emailLinkRestoreMode = true;
+          }
+          await _showEmailDuplicateNotice();
+          await supabase.auth.signInWithOtp(email: trimmed);
+          _showSnack(l10n.snackOtpSent);
+          return true;
+        } catch (restoreError) {
+          _showSnack(l10n.snackOtpSendFailed(_formatAuthError(restoreError)));
+          return false;
+        }
       }
       _showSnack(l10n.snackOtpSendFailed(_formatAuthError(e)));
       return false;
@@ -3332,10 +3545,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     final alreadyGraduatedFlag = payload?['already_graduated'] == true;
-    // ticket_granted 키가 명시적으로 false 가 아닌 한 지급된 것으로 간주한다.
-    final ticketGranted = payload == null
-        ? true
-        : payload['ticket_granted'] != false;
 
     final l10n = AppLocalizations.of(context);
     if (alreadyGraduatedFlag) {
@@ -3343,10 +3552,96 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
-    _showSnack(l10n.snackStageReachedAdult);
-    if (ticketGranted) {
-      _showSnack(l10n.snackRandomTicketGranted);
+    _showMaturityCompleteAlert();
+  }
+
+  bool _isCurrentPetMature() {
+    if (_activePet == null) return false;
+    final stage = _activePet!['stage']?.toString() ?? 'baby';
+    if (stage == 'adult') return true;
+    final affection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
+    return affection >= 110;
+  }
+
+  void _showMaturityCompleteAlert() {
+    if (_isMaturityCompleteNoticeOpen) return;
+    if (!mounted) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isMaturityCompleteNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  void _closeMaturityCompleteNoticeOverlay() {
+    if (!_isMaturityCompleteNoticeOpen) return;
+    unawaited(
+      _dismissYardConfirmOverlayAnimated(
+        () => _isMaturityCompleteNoticeOpen = false,
+      ),
+    );
+  }
+
+  /// 성숙기 펫의 먹이/놀이/쓰다듬기 시도 시 true — 애정도 증가 없이 안내창만 표시.
+  bool _handleMaturePetBlockedInteraction() {
+    if (!_isCurrentPetMature()) return false;
+    _showMaturityCompleteAlert();
+    return true;
+  }
+
+  Future<bool> _isPokedexCompleteForCurrentUser() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    try {
+      if (_petSpecies.isEmpty) {
+        await _fetchPetSpecies();
+      }
+
+      final allSpeciesIds = _petSpecies
+          .map((s) => s['id'])
+          .where((id) => id != null)
+          .map((id) => int.tryParse(id.toString()))
+          .whereType<int>()
+          .toSet();
+
+      if (allSpeciesIds.isEmpty) return false;
+
+      final rows = await supabase
+          .from('pokedex_entries')
+          .select('pet_species_id')
+          .eq('user_id', user.id);
+
+      final registeredSpeciesIds = <int>{};
+      for (final row in rows as List) {
+        final id = int.tryParse(row['pet_species_id']?.toString() ?? '');
+        if (id != null) registeredSpeciesIds.add(id);
+      }
+
+      return allSpeciesIds.difference(registeredSpeciesIds).isEmpty;
+    } catch (e, st) {
+      debugPrint('pokedex complete check failed: $e\n$st');
+      return false;
     }
+  }
+
+  Future<void> _showPokedexCompleteTicketNotice() async {
+    if (_isPokedexCompleteTicketNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isPokedexCompleteTicketNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hidePokedexCompleteTicketNotice() async {
+    if (!_isPokedexCompleteTicketNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isPokedexCompleteTicketNoticeOpen = false,
+    );
+  }
+
+  void _closePokedexCompleteTicketNoticeOverlay() {
+    if (!_isPokedexCompleteTicketNoticeOpen) return;
+    unawaited(_hidePokedexCompleteTicketNotice());
   }
 
   // 간단 MVP 상호작용: user_pets.affection을 +1 올리고 마지막 사용 날짜를 저장한다.
@@ -3364,6 +3659,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _showSnack(l10n.snackAdoptFirst);
       return;
     }
+    if (_handleMaturePetBlockedInteraction()) return;
     if (_isInteracting) return;
 
     final isPlay = action == 'play';
@@ -3506,6 +3802,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<void> _onYardPetTapped() async {
     if (_isYardPetTapBlocked()) return;
+    if (_handleMaturePetBlockedInteraction()) return;
     if (_isActivePetPettedToday()) return;
 
     _ensurePettingTapTarget();
@@ -3858,7 +4155,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   //        (B) 개발 전용 security definer RPC 예: debug_reset_user_data — 배포 전 접근 제한 검토
   //   4) user_items
   //   5) user_pets
-  //   6) profiles 프로필 필드만 초기화 (개발용이므로 email/account_type/linked_at 은 유지)
+  //   6) profiles 프로필·이메일 연동 필드 초기화 후 익명 세션 재발급
   //   7) 로컬 상태·플래그·애니메이션 컨트롤러 정리 (도감 캐시·선택 상태 포함)
   //   8) _bootstrap() 재호출
   //
@@ -3928,7 +4225,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       await supabase.from('user_items').delete().eq('user_id', user.id);
       await supabase.from('user_pets').delete().eq('user_id', user.id);
-      // 개발용 초기화: 동일 Supabase 유저·세션 유지 — 이메일 연동 필드는 건드리지 않음.
       await supabase
           .from('profiles')
           .update({
@@ -3936,13 +4232,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             'gender': null,
             'age_range': null,
             'diet_goal': null,
+            'email': null,
+            'account_type': 'guest',
+            'linked_at': null,
             'gold_balance': 1000,
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', user.id);
 
+      await supabase.auth.signOut();
+      await supabase.auth.signInAnonymously();
+
       if (!mounted) return;
       _safeSetState(() {
+        _resetEmailLinkPanelOtpFlow();
+        _emailLinkRestoreMode = false;
         _emailOtpCooldownTimer?.cancel();
         _emailOtpCooldownTimer = null;
         _emailOtpCooldownSeconds = 0;
@@ -4785,6 +5089,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
     _dismissFocus();
+    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
+    if (!mounted) return;
+    if (isPokedexComplete) {
+      await _showPokedexCompleteTicketNotice();
+      return;
+    }
     final confirmed = await _confirmUseRandomTicket();
     if (!mounted || !confirmed) return;
     await _useRandomAdoptionTicketFromBag();
@@ -5975,6 +6285,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
 
+    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
+    if (!mounted) return;
+    if (isPokedexComplete) {
+      await _showPokedexCompleteTicketNotice();
+      return;
+    }
+
     // 현재 활성 펫이 아직 성숙기 졸업 처리가 끝나지 않은 상태라면 사용 불가.
     // 성숙기 + is_resident=true + graduated_at!=null 셋이 모두 갖춰진 경우에만
     // 새 펫을 분양받을 수 있다.
@@ -6503,6 +6820,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isEmailFormatErrorNoticeOpen = false;
     _isEmailDuplicateNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
+    _isMaturityCompleteNoticeOpen = false;
+    _isPokedexCompleteTicketNoticeOpen = false;
+    _isRemoteEmailLinkedLogoutNoticeOpen = false;
     if (_isRandomTicketUseConfirmOpen) {
       _cancelRandomTicketUseConfirmPending();
     }
@@ -6922,6 +7242,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailDuplicateNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
+        _buildMaturityCompleteNoticeGlobalOverlay(),
+        _buildPokedexCompleteTicketNoticeGlobalOverlay(),
+        _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay(),
       ],
     );
   }
@@ -7041,6 +7364,236 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
                 child: _buildNameInterlockNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMaturityCompleteNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isMaturityCompleteNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: _buildVegePetConfirmDialogShell(
+                width: _kVegePetConfirmDialogW,
+                height: _kVegePetConfirmDialogH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.maturityCompleteNoticeTitle,
+                              textAlign: TextAlign.left,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF000000),
+                                height: 1.25,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              l10n.maturityCompleteNoticeBody,
+                              textAlign: TextAlign.left,
+                              maxLines: isEn ? 3 : 2,
+                              overflow: TextOverflow.visible,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: isEn ? 9 : 10,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF4A4A4A),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        child: InkWell(
+                          onTap: _closeMaturityCompleteNoticeOverlay,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Ink(
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: _buildPastelBlueGradientButtonText(
+                                l10n.confirmLabel,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPokedexCompleteTicketNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isPokedexCompleteTicketNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: _buildVegePetConfirmDialogShell(
+                width: _kVegePetConfirmDialogW,
+                height: _kVegePetConfirmDialogH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.pokedexCompleteTicketNoticeTitle,
+                              textAlign: TextAlign.left,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF000000),
+                                height: 1.25,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              l10n.pokedexCompleteTicketNoticeBody,
+                              textAlign: TextAlign.left,
+                              maxLines: isEn ? 3 : 2,
+                              overflow: TextOverflow.visible,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: isEn ? 9 : 10,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF4A4A4A),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        child: InkWell(
+                          onTap: _closePokedexCompleteTicketNoticeOverlay,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Ink(
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFF1F1F1),
+                                width: 0.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.03),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: _buildPastelBlueGradientButtonText(
+                                l10n.pokedexCompleteTicketNoticeConfirm,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -7593,6 +8146,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildEmailDuplicateNoticeDialog() {
     final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
     return _buildVegePetConfirmDialogShell(
       width: _kVegePetConfirmDialogW,
       height: _kVegePetConfirmDialogH,
@@ -7623,11 +8177,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     l10n.emailDuplicateNoticeBody,
                     textAlign: TextAlign.left,
                     softWrap: true,
+                    maxLines: isEn ? 3 : 2,
+                    overflow: TextOverflow.visible,
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFFB92020),
+                      color: Color(0xFF4A4A4A),
                       height: 1.25,
                     ),
                   ),
@@ -7690,8 +8246,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           children: [
             Positioned.fill(
               child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _closeEmailDuplicateNoticeOverlay,
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
                 child: const SizedBox.expand(),
               ),
             ),
@@ -7700,11 +8256,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               top: _kVegePetConfirmDialogTop,
               width: _kVegePetConfirmDialogW,
               height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildEmailDuplicateNoticeDialog(),
-              ),
+              child: _buildEmailDuplicateNoticeDialog(),
             ),
           ],
         ),
@@ -7798,6 +8350,130 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildRemoteEmailLinkedLogoutNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+    final resetting = _isResettingToGuestAfterRemoteLogout;
+
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.remoteEmailLinkedLogoutTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: isEn ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.remoteEmailLinkedLogoutBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    maxLines: isEn ? 3 : 2,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: resetting
+                    ? null
+                    : () => unawaited(_confirmRemoteEmailLinkedLogoutAndReset()),
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.remoteEmailLinkedLogoutConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isRemoteEmailLinkedLogoutNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: _buildRemoteEmailLinkedLogoutNoticeDialog(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
     if (!_isYardConfirmOverlayFadeVisible(_isDuplicatePetNameNoticeOpen)) {
       return const SizedBox.shrink();
@@ -7847,6 +8523,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _isEmailFormatErrorNoticeOpen = false;
       _isEmailDuplicateNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
+      _isMaturityCompleteNoticeOpen = false;
+      _isPokedexCompleteTicketNoticeOpen = false;
       if (_isRandomTicketUseConfirmOpen) {
         _cancelRandomTicketUseConfirmPending();
       }
@@ -10339,6 +11017,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _onPetInfoBannerAction(String action) async {
+    if (_handleMaturePetBlockedInteraction()) return;
     if (action == 'play') {
       final err = _validateToyPlayEligibility();
       if (err != null) {
@@ -11646,18 +12325,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     switch (action) {
       case 'meal':
+        if (_handleMaturePetBlockedInteraction()) return;
         await _openMealSheet();
         break;
       case 'play':
+        if (_handleMaturePetBlockedInteraction()) return;
         await _openToyPlaySheet();
         break;
       case 'pet':
+        if (_handleMaturePetBlockedInteraction()) return;
         await _interactPet('pet');
         break;
     }
   }
 
   Future<void> _openToyPlaySheet({bool fromPetBanner = false}) async {
+    if (_handleMaturePetBlockedInteraction()) return;
     final err = _validateToyPlayEligibility();
     if (err != null) {
       _showSnack(err);
@@ -12419,13 +13102,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     // 서버(Edge Function)가 affection 만 올리고 stage 는 갱신하지 않을 수 있으므로,
     // 클라이언트에서 affection 기준으로 stage 를 동기화한다.
-    if (ok && gain > 0) {
+    if (ok && gain > 0 && !_isCurrentPetMature()) {
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     }
   }
 
   Future<void> _openMealSheet({bool fromPetBanner = false}) async {
     if (_activePet == null) return;
+    if (_handleMaturePetBlockedInteraction()) return;
 
     await _waitForUiSettle();
     if (!mounted) return;
@@ -13692,7 +14376,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (_isEmailDuplicateNoticeOpen) {
-      _closeEmailDuplicateNoticeOverlay();
+      return;
+    }
+
+    if (_isRemoteEmailLinkedLogoutNoticeOpen) {
       return;
     }
 
@@ -16812,6 +17499,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             onPressed: _resetForTesting,
             icon: const Icon(Icons.delete_forever, size: 18),
             label: const Text('개발용 전체 초기화'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => unawaited(_handleRemoteEmailLinkedDetected()),
+            icon: const Icon(Icons.phonelink_erase_outlined, size: 18),
+            label: const Text('원격 연동 로그아웃 알림 테스트'),
           ),
         ],
       ),

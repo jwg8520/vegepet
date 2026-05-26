@@ -449,7 +449,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get shopNoticeDescription => '조금만 기다려주세요!';
 
   @override
-  String get withdrawConfirmTitle => '회원 탈퇴';
+  String get withdrawConfirmTitle => '⚠️회원 탈퇴';
 
   @override
   String get withdrawConfirmDescription =>
@@ -459,7 +459,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get withdrawConfirmDeleteButton => '탈퇴';
 
   @override
-  String get withdrawFinalTitle => '탈퇴 확인';
+  String get withdrawFinalTitle => '⚠️탈퇴 확인';
 
   @override
   String get withdrawFinalDescription => '아래 버튼을 누르면 회원 탈퇴가 최종 완료됩니다.';
@@ -548,6 +548,22 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackStageReachedAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
 
   @override
+  String get maturityCompleteNoticeTitle => '축하드려요🎉';
+
+  @override
+  String get maturityCompleteNoticeBody =>
+      '베지펫이 건강한 음식 덕분에 성숙기가 되었어요! 랜덤 분양권을 드릴 테니 다른 베지펫도 키워보세요~';
+
+  @override
+  String get pokedexCompleteTicketNoticeTitle => '모든 베지펫 육성 완료!';
+
+  @override
+  String get pokedexCompleteTicketNoticeBody => '새로운 베지펫들이 올 때까지 기다려주세요..🥹';
+
+  @override
+  String get pokedexCompleteTicketNoticeConfirm => '확인';
+
+  @override
   String get settingsSectionAccountBullet => '• 계정';
 
   @override
@@ -627,13 +643,34 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailFormatErrorConfirm => '확인';
 
   @override
-  String get emailDuplicateNoticeTitle => '중복 이메일';
+  String get emailDuplicateNoticeTitle => '⚠️중복 이메일';
 
   @override
-  String get emailDuplicateNoticeBody => '※ 이미 사용된 이메일입니다. 다른 이메일로 인증해 주세요.';
+  String get emailDuplicateNoticeBody =>
+      '이미 연동된 이메일입니다. 인증하면 기존 데이터를 이 기기에 불러옵니다.';
 
   @override
   String get emailDuplicateNoticeConfirm => '확인';
+
+  @override
+  String get remoteEmailLinkedLogoutTitle => '⚠️계정 연동 감지';
+
+  @override
+  String get remoteEmailLinkedLogoutBody =>
+      '사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.';
+
+  @override
+  String get remoteEmailLinkedLogoutConfirm => '확인';
+
+  @override
+  String get duplicatePetNameNoticeTitle => '중복 이름';
+
+  @override
+  String get duplicatePetNameNoticeBody =>
+      '이미 해당 이름의 베지펫이 존재합니다. 다른 이름으로 지어주세요!';
+
+  @override
+  String get duplicatePetNameNoticeConfirm => '확인';
 
   @override
   String get saveLabel => '저장';

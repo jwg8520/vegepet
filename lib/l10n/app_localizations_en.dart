@@ -463,7 +463,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shopNoticeDescription => 'Please stay tuned!';
 
   @override
-  String get withdrawConfirmTitle => 'Delete Account';
+  String get withdrawConfirmTitle => '⚠️Delete Account';
 
   @override
   String get withdrawConfirmDescription =>
@@ -473,7 +473,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get withdrawConfirmDeleteButton => 'Delete';
 
   @override
-  String get withdrawFinalTitle => 'Final Check';
+  String get withdrawFinalTitle => '⚠️Final Check';
 
   @override
   String get withdrawFinalDescription =>
@@ -566,6 +566,23 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your VegePet reached the Adult stage! Raising complete!';
 
   @override
+  String get maturityCompleteNoticeTitle => 'Congratulations! 🎉';
+
+  @override
+  String get maturityCompleteNoticeBody =>
+      'Your VegePet has reached adulthood thanks to healthy meals! You\'ve earned a random adoption pass—why not raise another VegePet?';
+
+  @override
+  String get pokedexCompleteTicketNoticeTitle => 'All VegePets Raised!';
+
+  @override
+  String get pokedexCompleteTicketNoticeBody =>
+      'Please stay tuned until new VegePets arrive... 🥹';
+
+  @override
+  String get pokedexCompleteTicketNoticeConfirm => 'OK';
+
+  @override
   String get settingsSectionAccountBullet => '• Account';
 
   @override
@@ -649,14 +666,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailFormatErrorConfirm => 'OK';
 
   @override
-  String get emailDuplicateNoticeTitle => 'Email Already in Use';
+  String get emailDuplicateNoticeTitle => '⚠️ Email Already Linked';
 
   @override
   String get emailDuplicateNoticeBody =>
-      'This email is already in use. Please use a different email.';
+      'This email is already linked. Verifying it will load your existing data on this device.';
 
   @override
   String get emailDuplicateNoticeConfirm => 'OK';
+
+  @override
+  String get remoteEmailLinkedLogoutTitle =>
+      '⚠️ Account Linked on Another Device';
+
+  @override
+  String get remoteEmailLinkedLogoutBody =>
+      'Your account was linked on another device. This app will sign out and restart in Guest Mode.';
+
+  @override
+  String get remoteEmailLinkedLogoutConfirm => 'OK';
 
   @override
   String get duplicatePetNameNoticeTitle => 'Duplicate Name';

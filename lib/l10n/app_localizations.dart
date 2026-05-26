@@ -971,7 +971,7 @@ abstract class AppLocalizations {
   /// No description provided for @withdrawConfirmTitle.
   ///
   /// In ko, this message translates to:
-  /// **'회원 탈퇴'**
+  /// **'⚠️회원 탈퇴'**
   String get withdrawConfirmTitle;
 
   /// No description provided for @withdrawConfirmDescription.
@@ -989,7 +989,7 @@ abstract class AppLocalizations {
   /// No description provided for @withdrawFinalTitle.
   ///
   /// In ko, this message translates to:
-  /// **'탈퇴 확인'**
+  /// **'⚠️탈퇴 확인'**
   String get withdrawFinalTitle;
 
   /// No description provided for @withdrawFinalDescription.
@@ -1160,6 +1160,36 @@ abstract class AppLocalizations {
   /// **'베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!'**
   String get snackStageReachedAdult;
 
+  /// No description provided for @maturityCompleteNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'축하드려요🎉'**
+  String get maturityCompleteNoticeTitle;
+
+  /// No description provided for @maturityCompleteNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 건강한 음식 덕분에 성숙기가 되었어요! 랜덤 분양권을 드릴 테니 다른 베지펫도 키워보세요~'**
+  String get maturityCompleteNoticeBody;
+
+  /// No description provided for @pokedexCompleteTicketNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'모든 베지펫 육성 완료!'**
+  String get pokedexCompleteTicketNoticeTitle;
+
+  /// No description provided for @pokedexCompleteTicketNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'새로운 베지펫들이 올 때까지 기다려주세요..🥹'**
+  String get pokedexCompleteTicketNoticeBody;
+
+  /// No description provided for @pokedexCompleteTicketNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get pokedexCompleteTicketNoticeConfirm;
+
   /// No description provided for @settingsSectionAccountBullet.
   ///
   /// In ko, this message translates to:
@@ -1313,13 +1343,13 @@ abstract class AppLocalizations {
   /// No description provided for @emailDuplicateNoticeTitle.
   ///
   /// In ko, this message translates to:
-  /// **'중복 이메일'**
+  /// **'⚠️중복 이메일'**
   String get emailDuplicateNoticeTitle;
 
   /// No description provided for @emailDuplicateNoticeBody.
   ///
   /// In ko, this message translates to:
-  /// **'※ 이미 사용된 이메일입니다. 다른 이메일로 인증해 주세요.'**
+  /// **'이미 연동된 이메일입니다. 인증하면 기존 데이터를 이 기기에 불러옵니다.'**
   String get emailDuplicateNoticeBody;
 
   /// No description provided for @emailDuplicateNoticeConfirm.
@@ -1327,6 +1357,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'확인'**
   String get emailDuplicateNoticeConfirm;
+
+  /// No description provided for @remoteEmailLinkedLogoutTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'⚠️계정 연동 감지'**
+  String get remoteEmailLinkedLogoutTitle;
+
+  /// No description provided for @remoteEmailLinkedLogoutBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.'**
+  String get remoteEmailLinkedLogoutBody;
+
+  /// No description provided for @remoteEmailLinkedLogoutConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get remoteEmailLinkedLogoutConfirm;
 
   /// No description provided for @duplicatePetNameNoticeTitle.
   ///
