@@ -797,7 +797,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
-    _keyboardAccessoryFocusNode.canRequestFocus = false;
     _ensureKeyboardFocusBinding(
       key: 'profile_nickname',
       controller: _nicknameController,
@@ -6131,16 +6130,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _activeKeyboardController != null;
   }
 
-  bool _hasActiveTextInput() {
-    final focus = FocusManager.instance.primaryFocus;
-    if (focus == null || !focus.hasFocus) return false;
-    final focusContext = focus.context;
-    if (focusContext == null) return false;
-    return focusContext.widget is EditableText ||
-        focusContext.findAncestorWidgetOfExactType<TextField>() != null ||
-        focusContext.findAncestorWidgetOfExactType<TextFormField>() != null;
-  }
-
   void _onEmailLinkControllerChangedForOtpSession() {
     if (!_emailLinkOtpSent) return;
     final cur = _emailLinkController.text.trim();
@@ -6192,43 +6181,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(() {});
   }
 
-  void _clearActiveKeyboardInputIfNeeded(FocusNode focusNode) {
-    if (_activeKeyboardFocusNode != focusNode) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_activeKeyboardFocusNode != focusNode) return;
-      if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
-      if (_hasActiveTextInput()) return;
-      _clearActiveKeyboardInput();
-      _safeSetState(() {});
-    });
-  }
-
-  void _openKeyboardAccessoryForInput({
+  void _openKeyboardAccessoryEditor({
     required String key,
     required TextEditingController controller,
     required FocusNode sourceFocusNode,
-    TextInputType keyboardType = TextInputType.text,
+    required TextInputType keyboardType,
     List<TextInputFormatter> inputFormatters = const [],
   }) {
     if (!mounted) return;
-    _keyboardAccessoryFormattersByKey[key] = inputFormatters;
-    final alreadyActive =
+    if (_activeKeyboardInputKey == key &&
         _activeKeyboardController == controller &&
-        _activeKeyboardInputKey == key &&
-        sourceFocusNode.hasFocus;
+        _activeKeyboardFocusNode == sourceFocusNode &&
+        _keyboardAccessoryFocusNode.hasFocus) {
+      return;
+    }
     _registerActiveKeyboardInput(
       key: key,
       controller: controller,
       focusNode: sourceFocusNode,
       keyboardType: keyboardType,
     );
-    if (alreadyActive) return;
+    _keyboardAccessoryFormattersByKey[key] = inputFormatters;
+
+    _safeSetState(() {});
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (!sourceFocusNode.hasFocus) {
-        sourceFocusNode.requestFocus();
-      }
+      if (_activeKeyboardController != controller) return;
+      _keyboardAccessoryFocusNode.canRequestFocus = true;
+      _keyboardAccessoryFocusNode.requestFocus();
     });
   }
 
@@ -6263,25 +6244,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     void onTextChanged() {
       if (!mounted) return;
       onChanged?.call(controller.text);
-      if (_activeKeyboardController == controller) {
-        _safeSetState(() {});
-      }
+      _safeSetState(() {});
     }
 
     controller.addListener(onTextChanged);
-    focusNode.addListener(() {
-      if (!mounted) return;
-      if (focusNode.hasFocus) {
-        _registerActiveKeyboardInput(
-          key: key,
-          controller: controller,
-          focusNode: focusNode,
-          keyboardType: keyboardType,
-        );
-      } else {
-        _clearActiveKeyboardInputIfNeeded(focusNode);
-      }
-    });
   }
 
   Widget _buildKeyboardAccessoryTriggerField({
@@ -6315,58 +6281,50 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         );
 
-    final isDietNote = key == 'diet_note';
+    final borderRadius = shellDecoration.borderRadius is BorderRadius
+        ? shellDecoration.borderRadius as BorderRadius
+        : BorderRadius.circular(10);
+
     return Material(
       color: Colors.transparent,
-      child: Ink(
-        height: height,
-        padding: padding,
-        decoration: shellDecoration,
-        child: Align(
-          alignment: alignment,
-          child: TextField(
-            controller: controller,
-            focusNode: sourceFocusNode,
-            enabled: enabled,
-            readOnly: false,
-            keyboardType: keyboardType,
-            inputFormatters: inputFormatters,
-            style: style,
-            maxLines: maxLines,
-            minLines: 1,
-            autocorrect: false,
-            enableSuggestions: false,
-            scrollPadding: EdgeInsets.zero,
-            textAlignVertical: isDietNote
-                ? TextAlignVertical.top
-                : TextAlignVertical.center,
-            textInputAction: isDietNote
-                ? TextInputAction.newline
-                : TextInputAction.done,
-            onSubmitted: isDietNote
-                ? null
-                : (_) => _handleKeyboardAccessorySubmitted(),
-            onTap: enabled
-                ? () {
-                    _openKeyboardAccessoryForInput(
-                      key: key,
-                      controller: controller,
-                      sourceFocusNode: sourceFocusNode,
-                      keyboardType: keyboardType,
-                      inputFormatters: inputFormatters,
-                    );
-                    sourceFocusNode.requestFocus();
-                  }
-                : null,
-            decoration: InputDecoration(
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-              hintText: hintText.isEmpty ? null : hintText,
-              hintStyle: hintStyle ??
-                  style.copyWith(color: const Color(0xFFB0B0B0)),
-            ),
-          ),
+      child: InkWell(
+        borderRadius: borderRadius,
+        onTap: !enabled
+            ? null
+            : () {
+                _openKeyboardAccessoryEditor(
+                  key: key,
+                  controller: controller,
+                  sourceFocusNode: sourceFocusNode,
+                  keyboardType: keyboardType,
+                  inputFormatters: inputFormatters,
+                );
+              },
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) {
+            final displayText = controller.text;
+            final isEmpty = displayText.trim().isEmpty;
+            return Ink(
+              height: height,
+              padding: padding,
+              decoration: shellDecoration,
+              child: Align(
+                alignment: alignment,
+                child: Text(
+                  isEmpty ? hintText : displayText,
+                  maxLines: maxLines,
+                  overflow: maxLines == 1
+                      ? TextOverflow.ellipsis
+                      : TextOverflow.fade,
+                  style: isEmpty
+                      ? (hintStyle ??
+                          style.copyWith(color: const Color(0xFFB0B0B0)))
+                      : style,
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -6396,11 +6354,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final controller = _activeKeyboardController;
     final inputKey = _activeKeyboardInputKey;
-    if (bottomInset <= 0 || controller == null || inputKey == null) {
+    if (controller == null || inputKey == null) {
       return const SizedBox.shrink();
     }
     final isDietNote = inputKey == 'diet_note';
     final maxLines = isDietNote ? 2 : 1;
+    final formatters = _keyboardAccessoryFormattersByKey[inputKey] ?? const [];
     const fieldStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 13,
@@ -6412,7 +6371,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Positioned(
       left: _kKeyboardAccessoryHorizontalInset,
       right: _kKeyboardAccessoryHorizontalInset,
-      bottom: bottomInset,
+      bottom: bottomInset > 0 ? bottomInset : 0,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Material(
@@ -6426,17 +6385,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
             ),
             alignment: isDietNote ? Alignment.topLeft : Alignment.centerLeft,
-            child: IgnorePointer(
-              child: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: controller,
-                builder: (context, value, _) {
-                  return Text(
-                    value.text,
-                    maxLines: maxLines,
-                    overflow: TextOverflow.ellipsis,
-                    style: fieldStyle,
-                  );
-                },
+            child: TextField(
+              controller: controller,
+              focusNode: _keyboardAccessoryFocusNode,
+              enabled: true,
+              readOnly: false,
+              enableInteractiveSelection: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: _activeKeyboardInputType,
+              inputFormatters: formatters,
+              style: fieldStyle,
+              maxLines: maxLines,
+              minLines: 1,
+              scrollPadding: EdgeInsets.zero,
+              textAlignVertical: isDietNote
+                  ? TextAlignVertical.top
+                  : TextAlignVertical.center,
+              textInputAction: isDietNote
+                  ? TextInputAction.newline
+                  : TextInputAction.done,
+              onSubmitted: isDietNote
+                  ? null
+                  : (_) => _handleKeyboardAccessorySubmitted(),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
           ),
@@ -15391,8 +15366,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             _SupportDocumentSection(
               title: isEn ? '4. External Deletion Request' : '4. 앱 외부 삭제 요청',
               body: isEn
-                  ? 'If app access is unavailable, send a request to acoustic.jwg@gmail.com. A web deletion-request URL may be required for Google Play.'
-                  : '앱 접근이 어려운 경우 acoustic.jwg@gmail.com 으로 삭제 요청이 가능합니다. Google Play 제출 시 웹 삭제 요청 URL이 필요할 수 있습니다.',
+                  ? 'If app access is unavailable, send a request to acoustic.jwg@gmail.com.'
+                  : '앱 접근이 어려운 경우 acoustic.jwg@gmail.com 으로 삭제 요청이 가능합니다.',
             ),
             _SupportDocumentSection(
               title: isEn ? '5. Processing Timeline' : '5. 처리 기간',
