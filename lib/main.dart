@@ -797,10 +797,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _nicknameController.addListener(_enforceProfileNicknameMaxLength);
-    _nicknameFocusNode.canRequestFocus = false;
-    _petNamingFocusNode.canRequestFocus = false;
-    _emailLinkFocusNode.canRequestFocus = false;
-    _emailLinkOtpFocusNode.canRequestFocus = false;
+    _keyboardAccessoryFocusNode.canRequestFocus = false;
     _ensureKeyboardFocusBinding(
       key: 'profile_nickname',
       controller: _nicknameController,
@@ -843,20 +840,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         LengthLimitingTextInputFormatter(8),
       ],
     );
-    _keyboardAccessoryFocusNode.addListener(() {
-      if (!mounted) return;
-      if (_keyboardAccessoryFocusNode.hasFocus) {
-        _safeSetState(() {});
-        return;
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
-        if (_hasActiveTextInput()) return;
-        _clearActiveKeyboardInput();
-        _safeSetState(() {});
-      });
-    });
     _petToySwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -6149,7 +6132,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   bool _hasActiveTextInput() {
-    if (_keyboardAccessoryFocusNode.hasFocus) return true;
     final focus = FocusManager.instance.primaryFocus;
     if (focus == null || !focus.hasFocus) return false;
     final focusContext = focus.context;
@@ -6212,10 +6194,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _clearActiveKeyboardInputIfNeeded(FocusNode focusNode) {
     if (_activeKeyboardFocusNode != focusNode) return;
-    if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
-    if (_keyboardAccessoryFocusNode.hasFocus) return;
-    _clearActiveKeyboardInput();
-    _safeSetState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_activeKeyboardFocusNode != focusNode) return;
+      if (MediaQuery.viewInsetsOf(context).bottom > 0) return;
+      if (_hasActiveTextInput()) return;
+      _clearActiveKeyboardInput();
+      _safeSetState(() {});
+    });
   }
 
   void _openKeyboardAccessoryForInput({
@@ -6230,7 +6216,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final alreadyActive =
         _activeKeyboardController == controller &&
         _activeKeyboardInputKey == key &&
-        _keyboardAccessoryFocusNode.hasFocus;
+        sourceFocusNode.hasFocus;
     _registerActiveKeyboardInput(
       key: key,
       controller: controller,
@@ -6240,8 +6226,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (alreadyActive) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (!_keyboardAccessoryFocusNode.hasFocus) {
-        _keyboardAccessoryFocusNode.requestFocus();
+      if (!sourceFocusNode.hasFocus) {
+        sourceFocusNode.requestFocus();
       }
     });
   }
@@ -6283,6 +6269,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     controller.addListener(onTextChanged);
+    focusNode.addListener(() {
+      if (!mounted) return;
+      if (focusNode.hasFocus) {
+        _registerActiveKeyboardInput(
+          key: key,
+          controller: controller,
+          focusNode: focusNode,
+          keyboardType: keyboardType,
+        );
+      } else {
+        _clearActiveKeyboardInputIfNeeded(focusNode);
+      }
+    });
   }
 
   Widget _buildKeyboardAccessoryTriggerField({
@@ -6316,44 +6315,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         );
 
+    final isDietNote = key == 'diet_note';
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: enabled
-            ? () {
-                _openKeyboardAccessoryForInput(
-                  key: key,
-                  controller: controller,
-                  sourceFocusNode: sourceFocusNode,
-                  keyboardType: keyboardType,
-                  inputFormatters: inputFormatters,
-                );
-              }
-            : null,
-        borderRadius: BorderRadius.circular(10),
-        child: Ink(
-          height: height,
-          padding: padding,
-          decoration: shellDecoration,
-          child: Align(
-            alignment: alignment,
-            child: ValueListenableBuilder<TextEditingValue>(
-            valueListenable: controller,
-            builder: (context, value, _) {
-              final text = value.text;
-              final isEmpty = text.isEmpty;
-              final displayText = isEmpty && hintText.isNotEmpty
-                  ? hintText
-                  : text;
-              return Text(
-                displayText,
-                maxLines: maxLines,
-                overflow: TextOverflow.ellipsis,
-                style: isEmpty && hintText.isNotEmpty
-                    ? (hintStyle ?? style.copyWith(color: const Color(0xFFB0B0B0)))
-                    : style,
-              );
-            },
+      child: Ink(
+        height: height,
+        padding: padding,
+        decoration: shellDecoration,
+        child: Align(
+          alignment: alignment,
+          child: TextField(
+            controller: controller,
+            focusNode: sourceFocusNode,
+            enabled: enabled,
+            readOnly: false,
+            keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
+            style: style,
+            maxLines: maxLines,
+            minLines: 1,
+            autocorrect: false,
+            enableSuggestions: false,
+            scrollPadding: EdgeInsets.zero,
+            textAlignVertical: isDietNote
+                ? TextAlignVertical.top
+                : TextAlignVertical.center,
+            textInputAction: isDietNote
+                ? TextInputAction.newline
+                : TextInputAction.done,
+            onSubmitted: isDietNote
+                ? null
+                : (_) => _handleKeyboardAccessorySubmitted(),
+            onTap: enabled
+                ? () {
+                    _openKeyboardAccessoryForInput(
+                      key: key,
+                      controller: controller,
+                      sourceFocusNode: sourceFocusNode,
+                      keyboardType: keyboardType,
+                      inputFormatters: inputFormatters,
+                    );
+                    sourceFocusNode.requestFocus();
+                  }
+                : null,
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+              hintText: hintText.isEmpty ? null : hintText,
+              hintStyle: hintStyle ??
+                  style.copyWith(color: const Color(0xFFB0B0B0)),
             ),
           ),
         ),
@@ -6390,8 +6401,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     final isDietNote = inputKey == 'diet_note';
     final maxLines = isDietNote ? 2 : 1;
-    final formatters =
-        _keyboardAccessoryFormattersByKey[inputKey] ?? const <TextInputFormatter>[];
     const fieldStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 13,
@@ -6417,30 +6426,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
             ),
             alignment: isDietNote ? Alignment.topLeft : Alignment.centerLeft,
-            child: TextField(
-              controller: controller,
-              focusNode: _keyboardAccessoryFocusNode,
-              keyboardType: _activeKeyboardInputType,
-              enableInteractiveSelection: true,
-              readOnly: false,
-              autocorrect: false,
-              enableSuggestions: false,
-              maxLines: maxLines,
-              minLines: 1,
-              inputFormatters: formatters,
-              style: fieldStyle,
-              textAlignVertical: isDietNote
-                  ? TextAlignVertical.top
-                  : TextAlignVertical.center,
-              scrollPadding: EdgeInsets.zero,
-              textInputAction: isDietNote
-                  ? TextInputAction.newline
-                  : TextInputAction.done,
-              onSubmitted: (_) => _handleKeyboardAccessorySubmitted(),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
+            child: IgnorePointer(
+              child: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: controller,
+                builder: (context, value, _) {
+                  return Text(
+                    value.text,
+                    maxLines: maxLines,
+                    overflow: TextOverflow.ellipsis,
+                    style: fieldStyle,
+                  );
+                },
               ),
             ),
           ),
@@ -17970,8 +17966,6 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   @override
   void initState() {
     super.initState();
-    _weightFocusNode.canRequestFocus = false;
-    _noteFocusNode.canRequestFocus = false;
     widget.bindKeyboardInput?.call(
       key: 'diet_weight',
       controller: _weightController,
