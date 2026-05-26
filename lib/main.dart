@@ -10208,17 +10208,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _submitPetNaming() async {
     if (_isPetNamingPanelClosing || _isNameInterlockNoticeOpen) return;
     final text = _petNamingController.text.trim();
-    final l10n = AppLocalizations.of(context);
-    if (text.isEmpty) {
-      _showSnack(l10n.petNamingEnterNameError);
-      return;
-    }
-    if (!_isValidNicknameOrPetName(text)) {
-      if (text.length < 2 || text.length > 8) {
-        _showSnack(l10n.petNamingLengthError);
-      } else {
-        _showSnack(l10n.petNamingSpecialCharError);
-      }
+    if (text.isEmpty || !_isValidNicknameOrPetName(text)) {
+      await _showNameInterlockNotice();
       return;
     }
 
