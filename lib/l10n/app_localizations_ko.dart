@@ -548,11 +548,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackStageReachedAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
 
   @override
-  String get maturityCompleteNoticeTitle => '축하드려요🎉';
+  String get maturityCompleteNoticeTitle => '성숙기가 되었어요🎉';
 
   @override
-  String get maturityCompleteNoticeBody =>
-      '베지펫이 건강한 음식 덕분에 성숙기가 되었어요! 랜덤 분양권을 드릴 테니 다른 베지펫도 키워보세요~';
+  String get maturityCompleteNoticeBody => '분양권을 사용하여 새로운 베지펫을 분양 받아보세요!';
 
   @override
   String get pokedexCompleteTicketNoticeTitle => '모든 베지펫 육성 완료!';

@@ -566,11 +566,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your VegePet reached the Adult stage! Raising complete!';
 
   @override
-  String get maturityCompleteNoticeTitle => 'Congratulations! 🎉';
+  String get maturityCompleteNoticeTitle => 'Reached Adulthood! 🎉';
 
   @override
   String get maturityCompleteNoticeBody =>
-      'Your VegePet has reached adulthood thanks to healthy meals! You\'ve earned a random adoption pass—why not raise another VegePet?';
+      'Use an Adoption Ticket to welcome a new VegePet!';
 
   @override
   String get pokedexCompleteTicketNoticeTitle => 'All VegePets Raised!';

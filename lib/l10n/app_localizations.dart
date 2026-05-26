@@ -1163,13 +1163,13 @@ abstract class AppLocalizations {
   /// No description provided for @maturityCompleteNoticeTitle.
   ///
   /// In ko, this message translates to:
-  /// **'축하드려요🎉'**
+  /// **'성숙기가 되었어요🎉'**
   String get maturityCompleteNoticeTitle;
 
   /// No description provided for @maturityCompleteNoticeBody.
   ///
   /// In ko, this message translates to:
-  /// **'베지펫이 건강한 음식 덕분에 성숙기가 되었어요! 랜덤 분양권을 드릴 테니 다른 베지펫도 키워보세요~'**
+  /// **'분양권을 사용하여 새로운 베지펫을 분양 받아보세요!'**
   String get maturityCompleteNoticeBody;
 
   /// No description provided for @pokedexCompleteTicketNoticeTitle.
