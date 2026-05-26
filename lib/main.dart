@@ -6289,6 +6289,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: borderRadius,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
         onTap: !enabled
             ? null
             : () {
