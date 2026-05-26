@@ -1172,6 +1172,24 @@ abstract class AppLocalizations {
   /// **'분양권을 사용하여 새로운 베지펫을 분양 받아보세요!'**
   String get maturityCompleteNoticeBody;
 
+  /// No description provided for @profileSelectMissingNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'다시 입력해주세요.'**
+  String get profileSelectMissingNoticeTitle;
+
+  /// No description provided for @profileSelectMissingNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'성별/나이대/식단 목적을 선택해 주세요.'**
+  String get profileSelectMissingNoticeBody;
+
+  /// No description provided for @profileSelectMissingNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get profileSelectMissingNoticeConfirm;
+
   /// No description provided for @pokedexCompleteTicketNoticeTitle.
   ///
   /// In ko, this message translates to:

@@ -573,6 +573,16 @@ class AppLocalizationsEn extends AppLocalizations {
       'Use an Adoption Ticket to welcome a new VegePet!';
 
   @override
+  String get profileSelectMissingNoticeTitle => 'Please check your profile.';
+
+  @override
+  String get profileSelectMissingNoticeBody =>
+      'Please select your gender, age range, and diet goal.';
+
+  @override
+  String get profileSelectMissingNoticeConfirm => 'OK';
+
+  @override
   String get pokedexCompleteTicketNoticeTitle => 'All VegePets Raised!';
 
   @override

@@ -619,6 +619,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   bool _isNameInterlockNoticeOpen = false;
 
+  /// 초기 프로필 입력창에서 성별/나이대/식단 목적 미선택 시작 안내 (240×116 · 마당 좌표계).
+  bool _isProfileSelectMissingNoticeOpen = false;
+
   /// 설정 > 회원 탈퇴 1차 확인 (240×116 · 마당 좌표계).
   bool _isWithdrawConfirmOpen = false;
 
@@ -1095,8 +1098,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Future<void> _showProfileSelectMissingNotice() async {
+    if (_isProfileSelectMissingNoticeOpen) return;
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: true);
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isProfileSelectMissingNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideProfileSelectMissingNotice() async {
+    if (!_isProfileSelectMissingNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isProfileSelectMissingNoticeOpen = false,
+    );
+  }
+
+  void _closeProfileSelectMissingNoticeOverlay() {
+    if (!_isProfileSelectMissingNoticeOpen) return;
+    unawaited(_hideProfileSelectMissingNotice());
+  }
+
   Future<void> _saveProfile() async {
-    if (_isSavingProfile || _isNameInterlockNoticeOpen) return;
+    if (_isSavingProfile ||
+        _isNameInterlockNoticeOpen ||
+        _isProfileSelectMissingNoticeOpen) return;
     // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
     _dismissFocus();
@@ -1115,17 +1141,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _showNameInterlockNotice();
       return;
     }
-    final l10n = AppLocalizations.of(context);
-    if (_selectedGender == null) {
-      _showSnack(l10n.snackSelectGender);
-      return;
-    }
-    if (_selectedAgeRange == null) {
-      _showSnack(l10n.snackSelectAgeRange);
-      return;
-    }
-    if (_selectedDietGoal == null) {
-      _showSnack(l10n.snackSelectDietGoal);
+    final hasMissingProfileSelect = _selectedGender == null ||
+        _selectedGender!.trim().isEmpty ||
+        _selectedAgeRange == null ||
+        _selectedAgeRange!.trim().isEmpty ||
+        _selectedDietGoal == null ||
+        _selectedDietGoal!.trim().isEmpty;
+    if (hasMissingProfileSelect) {
+      await _showProfileSelectMissingNotice();
       return;
     }
 
@@ -6815,6 +6838,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
     _isNameInterlockNoticeOpen = false;
+    _isProfileSelectMissingNoticeOpen = false;
     _isEmailLinkInviteNoticeOpen = false;
     _isEmailLinkSuccessNoticeOpen = false;
     _isEmailFormatErrorNoticeOpen = false;
@@ -7242,6 +7266,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailDuplicateNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
+        _buildProfileSelectMissingNoticeGlobalOverlay(),
         _buildMaturityCompleteNoticeGlobalOverlay(),
         _buildPokedexCompleteTicketNoticeGlobalOverlay(),
         _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay(),
@@ -7364,6 +7389,136 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
                 child: _buildNameInterlockNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileSelectMissingNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.profileSelectMissingNoticeTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.profileSelectMissingNoticeBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    maxLines: isEn ? 3 : 2,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _closeProfileSelectMissingNoticeOverlay,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.profileSelectMissingNoticeConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileSelectMissingNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(
+      _isProfileSelectMissingNoticeOpen,
+    )) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: FadeTransition(
+        opacity: _yardConfirmOverlayFadeCurve,
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  if (_dismissKeyboardIfVisibleOnly()) return;
+                  _closeProfileSelectMissingNoticeOverlay();
+                },
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildProfileSelectMissingNoticeDialog(),
               ),
             ),
           ],
@@ -14336,6 +14491,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// 하위 기능창이 열려 있으면 [_dismissGameSubPanelWithCenterExit] 로 마당까지 닫는다.
   Future<void> _closeActiveGameMenuFromOutsideBackdropTap() async {
     if (_dismissKeyboardIfVisibleOnly()) return;
+    if (_isProfileSelectMissingNoticeOpen) {
+      _closeProfileSelectMissingNoticeOverlay();
+      return;
+    }
     if (_isDietDiaryPanelOpen) {
       final handled =
           await _dietDiarySheetPanelKey.currentState?.handleOutsideDismiss() ??

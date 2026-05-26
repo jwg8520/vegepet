@@ -554,6 +554,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get maturityCompleteNoticeBody => '분양권을 사용하여 새로운 베지펫을 분양 받아보세요!';
 
   @override
+  String get profileSelectMissingNoticeTitle => '다시 입력해주세요.';
+
+  @override
+  String get profileSelectMissingNoticeBody => '성별/나이대/식단 목적을 선택해 주세요.';
+
+  @override
+  String get profileSelectMissingNoticeConfirm => '확인';
+
+  @override
   String get pokedexCompleteTicketNoticeTitle => '모든 베지펫 육성 완료!';
 
   @override
