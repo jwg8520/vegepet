@@ -9701,21 +9701,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 style: fieldTextStyle,
                                 hintStyle: fieldHintStyle,
                                 hintText: l10n.petNamingHint,
-                                height: 26,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                ),
+                                padding: EdgeInsets.zero,
                                 decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.all(
-                                    Radius.circular(10),
-                                  ),
-                                  border: Border.fromBorderSide(
-                                    BorderSide(
-                                      color: Color(0xFFE6E6E6),
-                                      width: 1,
-                                    ),
-                                  ),
+                                  color: Colors.transparent,
                                 ),
                               ),
                             ),
@@ -17432,6 +17420,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
     String hintText,
     EdgeInsets padding,
     Alignment alignment,
+    BoxDecoration? decoration,
   })?
   buildKeyboardTriggerField;
   final Widget Function(
@@ -17894,6 +17883,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     String hintText,
     EdgeInsets padding,
     Alignment alignment,
+    BoxDecoration? decoration,
   })?
   buildKeyboardTriggerField;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
@@ -18166,6 +18156,9 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                         hintText: '',
                         padding: EdgeInsets.zero,
                         alignment: Alignment.centerLeft,
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent,
+                        ),
                       ) ??
                       const SizedBox.shrink(),
                 ),
@@ -18201,6 +18194,9 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                     hintText: '',
                     padding: EdgeInsets.zero,
                     alignment: Alignment.topLeft,
+                    decoration: const BoxDecoration(
+                      color: Colors.transparent,
+                    ),
                   ) ??
                   const SizedBox.shrink(),
             ),
