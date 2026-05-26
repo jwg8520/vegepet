@@ -6178,7 +6178,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _activeKeyboardController = controller;
     _activeKeyboardFocusNode = focusNode;
     _activeKeyboardInputType = keyboardType;
-    _safeSetState(() {});
   }
 
   void _openKeyboardAccessoryEditor({
@@ -6202,7 +6201,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       keyboardType: keyboardType,
     );
     _keyboardAccessoryFormattersByKey[key] = inputFormatters;
-
     _safeSetState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -6360,6 +6358,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (controller == null || inputKey == null) {
       return const SizedBox.shrink();
     }
+    final keyboardVisible = bottomInset > 0;
     final isDietNote = inputKey == 'diet_note';
     final maxLines = isDietNote ? 2 : 1;
     final formatters = _keyboardAccessoryFormattersByKey[inputKey] ?? const [];
@@ -6374,47 +6373,63 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Positioned(
       left: _kKeyboardAccessoryHorizontalInset,
       right: _kKeyboardAccessoryHorizontalInset,
-      bottom: bottomInset > 0 ? bottomInset : 0,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
-            ),
-            alignment: isDietNote ? Alignment.topLeft : Alignment.centerLeft,
-            child: TextField(
-              controller: controller,
-              focusNode: _keyboardAccessoryFocusNode,
-              enabled: true,
-              readOnly: false,
-              enableInteractiveSelection: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              keyboardType: _activeKeyboardInputType,
-              inputFormatters: formatters,
-              style: fieldStyle,
-              maxLines: maxLines,
-              minLines: 1,
-              scrollPadding: EdgeInsets.zero,
-              textAlignVertical: isDietNote
-                  ? TextAlignVertical.top
-                  : TextAlignVertical.center,
-              textInputAction: isDietNote
-                  ? TextInputAction.newline
-                  : TextInputAction.done,
-              onSubmitted: isDietNote
-                  ? null
-                  : (_) => _handleKeyboardAccessorySubmitted(),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
+      bottom: keyboardVisible ? bottomInset : 0,
+      child: RepaintBoundary(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Opacity(
+            opacity: keyboardVisible ? 1 : 0,
+            child: IgnorePointer(
+              ignoring: !keyboardVisible,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFE6E6E6),
+                      width: 1,
+                    ),
+                  ),
+                  alignment: isDietNote
+                      ? Alignment.topLeft
+                      : Alignment.centerLeft,
+                  child: TextField(
+                    controller: controller,
+                    focusNode: _keyboardAccessoryFocusNode,
+                    enabled: true,
+                    readOnly: false,
+                    enableInteractiveSelection: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    keyboardType: _activeKeyboardInputType,
+                    inputFormatters: formatters,
+                    style: fieldStyle,
+                    maxLines: maxLines,
+                    minLines: 1,
+                    scrollPadding: EdgeInsets.zero,
+                    textAlignVertical: isDietNote
+                        ? TextAlignVertical.top
+                        : TextAlignVertical.center,
+                    textInputAction: isDietNote
+                        ? TextInputAction.newline
+                        : TextInputAction.done,
+                    onSubmitted: isDietNote
+                        ? null
+                        : (_) => _handleKeyboardAccessorySubmitted(),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
