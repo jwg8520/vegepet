@@ -636,7 +636,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailLinkSuccessTitle => '연동 완료💫';
 
   @override
-  String get emailLinkSuccessBody => '기존 계정 정보가 있다면 자동으로 불러옵니다.';
+  String get emailLinkSuccessBody => '계정이 성공적으로 연동되었습니다.';
 
   @override
   String get emailLinkSuccessConfirm => '확인';
@@ -655,7 +655,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get emailDuplicateNoticeBody =>
-      '이미 연동된 이메일입니다. 인증하면 기존 데이터를 이 기기에 불러옵니다.';
+      '이미 연동된 이메일이 존재합니다. 인증을 완료하면 기존 데이터를 이 기기에 불러옵니다.';
 
   @override
   String get emailDuplicateNoticeConfirm => '확인';

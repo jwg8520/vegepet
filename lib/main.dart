@@ -659,6 +659,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _emailLinkOtpSentForEmail = '';
   DateTime? _emailLinkOtpSentAt;
   Timer? _emailLinkOtpSessionTimer;
+  bool _suppressEmailLinkControllerSessionClear = false;
   final TextEditingController _emailLinkController = TextEditingController();
   final TextEditingController _emailLinkOtpController = TextEditingController();
   final FocusNode _emailLinkFocusNode = FocusNode();
@@ -2145,18 +2146,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _markEmailLinkOtpSessionActive(String email) {
     _emailLinkOtpSent = true;
-    _emailLinkOtpSentForEmail = email;
+    _emailLinkOtpSentForEmail = email.trim();
     _emailLinkOtpSentAt = DateTime.now();
     _scheduleEmailLinkOtpSessionExpiry();
   }
 
+  void _setEmailLinkControllerTextSilently(String value) {
+    _suppressEmailLinkControllerSessionClear = true;
+    _emailLinkController.text = value;
+    _suppressEmailLinkControllerSessionClear = false;
+  }
+
   /// 연동창만 닫는다. OTP 세션(인증코드 입력 활성)은 1시간 동안 유지.
-  void _closeEmailLinkPanel() {
+  void _closeEmailLinkPanel({bool resetOtpSession = false}) {
     _emailLinkPanelSendBusy = false;
     _emailLinkPanelVerifyBusy = false;
     _emailLinkPanelResendBusy = false;
-    _emailLinkController.clear();
-    _emailLinkOtpController.clear();
+    _expireEmailLinkOtpSessionIfNeeded();
+    if (resetOtpSession) {
+      _clearEmailLinkOtpSession();
+      _setEmailLinkControllerTextSilently('');
+      _emailLinkOtpController.clear();
+      _emailLinkRestoreMode = false;
+    }
     _isEmailLinkPanelOpen = false;
   }
 
@@ -2165,11 +2177,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _emailLinkPanelSendBusy = false;
     _emailLinkPanelVerifyBusy = false;
     _emailLinkPanelResendBusy = false;
-    _emailLinkRestoreMode = false;
-    _emailLinkController.clear();
-    _emailLinkOtpController.clear();
     if (_emailLinkOtpSent && _emailLinkOtpSentForEmail.isNotEmpty) {
-      _emailLinkController.text = _emailLinkOtpSentForEmail;
+      final sentEmail = _emailLinkOtpSentForEmail.trim();
+      final currentEmail = _emailLinkController.text.trim();
+      if (currentEmail.toLowerCase() != sentEmail.toLowerCase()) {
+        _setEmailLinkControllerTextSilently(sentEmail);
+      }
+    } else {
+      _emailLinkRestoreMode = false;
+      _emailLinkOtpController.clear();
     }
     _scheduleEmailLinkOtpSessionExpiry();
   }
@@ -6471,9 +6487,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _onEmailLinkControllerChangedForOtpSession() {
+    if (_suppressEmailLinkControllerSessionClear) return;
     if (!_emailLinkOtpSent) return;
-    final cur = _emailLinkController.text.trim();
-    if (cur != _emailLinkOtpSentForEmail.trim()) {
+    final currentEmail = _emailLinkController.text.trim().toLowerCase();
+    final sentEmail = _emailLinkOtpSentForEmail.trim().toLowerCase();
+    if (currentEmail.isEmpty) return;
+    if (sentEmail.isNotEmpty && currentEmail != sentEmail) {
       _safeSetState(_clearEmailLinkOtpSession);
     }
   }
@@ -9291,7 +9310,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               behavior: HitTestBehavior.translucent,
               onTap: () {
                 if (_dismissKeyboardIfVisibleOnly()) return;
-                _safeSetState(_closeEmailLinkPanel);
+                _safeSetState(() => _closeEmailLinkPanel());
               },
               child: const SizedBox.expand(),
             ),
@@ -14574,7 +14593,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_isEmailLinkPanelOpen) {
       _dismissFocus();
-      _safeSetState(_closeEmailLinkPanel);
+      _safeSetState(() => _closeEmailLinkPanel());
       return;
     }
 

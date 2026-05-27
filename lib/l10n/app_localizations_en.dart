@@ -661,7 +661,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get emailLinkSuccessBody =>
-      'If we find existing account data, we\'ll load it automatically.';
+      'Your account has been successfully linked.';
 
   @override
   String get emailLinkSuccessConfirm => 'OK';
@@ -680,7 +680,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get emailDuplicateNoticeBody =>
-      'This email is already linked. Verifying it will load your existing data on this device.';
+      'This email is already linked. Once verification is complete, your existing data will be loaded onto this device.';
 
   @override
   String get emailDuplicateNoticeConfirm => 'OK';
