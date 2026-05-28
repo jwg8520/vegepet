@@ -2408,7 +2408,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<bool> _promptEmailFormatErrorIfNeeded(String email) async {
     final trimmed = email.trim();
-    if (trimmed.isEmpty) return false;
+    if (trimmed.isEmpty) {
+      await _showEmailFormatErrorNotice();
+      return true;
+    }
     if (_looksLikeEmail(trimmed)) return false;
     await _showEmailFormatErrorNotice();
     return true;
@@ -8496,32 +8499,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    l10n.emailDuplicateNoticeTitle,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.emailDuplicateNoticeBody,
-                    textAlign: TextAlign.left,
-                    softWrap: true,
-                    maxLines: isEn ? 3 : 2,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A4A4A),
-                      height: 1.25,
+                  Transform.translate(
+                    offset: Offset(0, isEn ? -2 : 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          l10n.emailDuplicateNoticeTitle,
+                          textAlign: TextAlign.left,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF000000),
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          l10n.emailDuplicateNoticeBody,
+                          textAlign: TextAlign.left,
+                          softWrap: true,
+                          maxLines: isEn ? 3 : 2,
+                          overflow: TextOverflow.visible,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF4A4A4A),
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -9706,11 +9717,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_emailLinkOtpSent) {
       if (_isEmailOtpCooldownActive()) return;
       final raw = _emailLinkController.text.trim();
-      final l10n = AppLocalizations.of(context);
-      if (raw.isEmpty) {
-        _showSnack(l10n.snackEmailRequired);
-        return;
-      }
       if (await _promptEmailFormatErrorIfNeeded(raw)) return;
       _safeSetState(() => _emailLinkPanelSendBusy = true);
       final ok = await _sendEmailLinkOtp(raw);
@@ -14572,7 +14578,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _renderingSettingsSupportDoc = null;
     _settingsSupportDocSwapInProgress = false;
     _settingsSupportDocScrollbarReady = false;
-    _resetEmailLinkPanelOtpFlow();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
   }
 
@@ -14592,7 +14597,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
       _settingsSupportDocScrollbarReady = false;
-      _resetEmailLinkPanelOtpFlow();
     });
   }
 
@@ -15320,7 +15324,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _renderingSettingsSupportDoc = null;
       _settingsSupportDocSwapInProgress = false;
       _settingsSupportDocScrollbarReady = false;
-      _resetEmailLinkPanelOtpFlow();
     });
   }
 
