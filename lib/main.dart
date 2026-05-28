@@ -649,6 +649,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _isRemoteEmailLinkedLogoutNoticeOpen = false;
   bool _isResettingToGuestAfterRemoteLogout = false;
 
+  /// 다른 기기에서의 회원탈퇴/Auth user 삭제로 인해 현재 기기 세션이
+  /// stale 상태가 되었을 때, 새 게스트로 안전하게 초기화하는 흐름의 재진입을
+  /// 방지하기 위한 가드 플래그.
+  bool _isResettingDeletedAccountSession = false;
+
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
   bool _isDeletingAccount = false;
@@ -1054,15 +1059,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return false;
   }
 
-  void _syncProfileFormFromFetched() {
+  /// 프로필 form controller/select 값을 [_profile] 기준으로 동기화한다.
+  ///
+  /// 일반 bootstrap/일반 reload 흐름에서는 [force]=false 로 호출하여 사용자가
+  /// 입력 중인 값을 덮어쓰지 않게 한다. 다만 중복 이메일 인증 완료 등으로
+  /// Auth 세션 자체가 다른 계정으로 전환된 직후에는 반드시 [force]=true 로
+  /// 호출해 이전 guest 단계에서 입력된 값(텅 비어 있지는 않지만 stale 한 값)을
+  /// 새 계정 profile 값으로 강제 덮어써야 한다.
+  void _syncProfileFormFromFetched({bool force = false}) {
     final p = _profile;
     if (p == null) return;
-    if (_nicknameController.text.isEmpty && p['nickname'] != null) {
-      _nicknameController.text = p['nickname'].toString();
+
+    final nickname = p['nickname']?.toString() ?? '';
+    final gender = p['gender']?.toString();
+    final ageRange = p['age_range']?.toString();
+    final dietGoal = p['diet_goal']?.toString();
+
+    if (force || _nicknameController.text.isEmpty) {
+      _nicknameController.text = nickname;
     }
-    _selectedGender ??= p['gender']?.toString();
-    _selectedAgeRange ??= p['age_range']?.toString();
-    _selectedDietGoal ??= p['diet_goal']?.toString();
+
+    if (force || _selectedGender == null || _selectedGender!.trim().isEmpty) {
+      _selectedGender = gender;
+    }
+
+    if (force || _selectedAgeRange == null || _selectedAgeRange!.trim().isEmpty) {
+      _selectedAgeRange = ageRange;
+    }
+
+    if (force || _selectedDietGoal == null || _selectedDietGoal!.trim().isEmpty) {
+      _selectedDietGoal = dietGoal;
+    }
   }
 
   void _enforceProfileNicknameMaxLength() {
@@ -1229,6 +1256,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       });
     } catch (e, st) {
       debugPrint('profile upsert failed: $e\n$st');
+
+      // 다른 기기에서 회원탈퇴 등으로 Auth user 가 삭제된 직후 stale session
+      // 으로 프로필 저장을 시도하면 23503/profiles_id_fkey 류 오류가 발생한다.
+      // 이 경우 일반 저장 실패 snackbar 를 띄우는 대신, 안전하게 새 게스트
+      // 세션으로 재시작해 "프로필을 입력해주세요!" 화면으로 복귀한다.
+      if (_isAuthUserMissingForeignKeyError(e)) {
+        if (mounted) {
+          _safeSetState(() {
+            _isSavingProfile = false;
+            _isProfileSetupClosing = false;
+          });
+        } else {
+          _isSavingProfile = false;
+          _isProfileSetupClosing = false;
+        }
+        await _resetToFreshGuestAfterDeletedAccount();
+        return;
+      }
+
       if (!mounted) return;
       _safeSetState(() {
         _isSavingProfile = false;
@@ -1722,6 +1768,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         unawaited(_bootstrapOptionalServices());
       });
     } catch (e) {
+      // 다른 기기에서 회원탈퇴/Auth user 삭제가 일어난 직후 부트스트랩에서
+      // 23503 / profiles_id_fkey / JWT invalid 같은 stale session 오류가
+      // 잡히면, 일반 에러 화면 대신 안전하게 새 게스트 세션으로 재시작한다.
+      // (재진입 가드는 [_resetToFreshGuestAfterDeletedAccount] 내부에서 처리)
+      if (_isAuthUserMissingForeignKeyError(e) &&
+          !_isResettingDeletedAccountSession) {
+        debugPrint('bootstrap detected deleted account / stale session: $e');
+        unawaited(_resetToFreshGuestAfterDeletedAccount());
+        return;
+      }
+
       if (!mounted) return;
       setState(() {
         _status = _ViewStatus.error;
@@ -2198,9 +2255,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _emailLinkPanelResendBusy = false;
   }
 
-  Future<void> _refreshAllUserDataAfterAuthChange() async {
+  /// 이메일 OTP 인증 완료 등 Auth 세션이 바뀐 직후 호출되는 전체 reload.
+  ///
+  /// 도감/식단일지 캐시는 모두 비우고, 기존 계정의 profile / 펫 / 식단 / 분양권
+  /// 데이터를 다시 받아 화면 상태(_status / 프로필 입력창 / 분양창 표시 여부)도
+  /// 재계산한다.
+  ///
+  /// 중복 이메일 인증으로 “기존 계정 복구” 흐름이 끝난 직후에는
+  /// [forceProfileFormSync] 를 true 로 호출해 이전 guest 단계의 controller /
+  /// select 값을 새 계정 profile 값으로 강제 덮어써야 한다.
+  Future<void> _refreshAllUserDataAfterAuthChange({
+    bool forceProfileFormSync = false,
+  }) async {
     _pokedexEntries = [];
     _pokedexPanelSelectedEntry = null;
+    _diaryLogsByDate = {};
+    _diaryLogsCachedMonthKey = null;
 
     await Future.wait([
       _fetchProfile(),
@@ -2209,12 +2279,96 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _fetchResidentPets(),
       _fetchTodayMealLogs(),
       _fetchRandomTicketCount(),
-      _fetchPokedexEntries(),
     ]);
 
+    _syncProfileFormFromFetched(force: forceProfileFormSync);
+
     if (!mounted) return;
-    _syncProfileFormFromFetched();
-    _safeSetState(() {});
+
+    final profileComplete = _isProfileComplete();
+    final hasActivePet = _activePet != null;
+
+    _safeSetState(() {
+      _status = _ViewStatus.ready;
+      _isProfileSetupClosing = false;
+      _isProfileSetupPanelVisible = !profileComplete;
+      _isInitialAdoptionPanelVisible = profileComplete && !hasActivePet;
+      _isInitialAdoptionPanelClosing = false;
+      if (profileComplete && !hasActivePet) {
+        _isInitialAdoptionInFlight = false;
+      }
+    });
+  }
+
+  /// 다른 기기에서 회원탈퇴/Auth user 삭제가 일어났을 때 발생할 수 있는
+  /// stale session 오류(Postgres FK 23503 / profiles_id_fkey / auth user
+  /// not found / JWT invalid) 패턴을 한 곳에서 인식한다.
+  bool _isAuthUserMissingForeignKeyError(Object e) {
+    final text = e.toString().toLowerCase();
+    if (text.contains('23503')) return true;
+    if (text.contains('profiles_id_fkey')) return true;
+    if (text.contains('key is not present in table "users"')) return true;
+    if (text.contains('key is not present in table \'users\'')) return true;
+    if (text.contains('user not found')) return true;
+    if (text.contains('jwt') && text.contains('invalid')) return true;
+    if (text.contains('user_not_found')) return true;
+    return false;
+  }
+
+  /// 다른 기기에서의 회원탈퇴 등으로 현재 Auth user 가 더 이상 존재하지 않는
+  /// 상태로 미끄러진 경우(stale session), 안전하게 새 익명(게스트) 세션으로
+  /// 초기화한다.
+  ///
+  /// MVP 정책상 다른 기기 데이터를 유지하려고 시도하지 않는다. 단순히 새
+  /// guest id 로 다시 시작해 "프로필을 입력해주세요!" 흐름으로 복귀한다.
+  Future<void> _resetToFreshGuestAfterDeletedAccount() async {
+    if (_isResettingDeletedAccountSession) return;
+    _isResettingDeletedAccountSession = true;
+    try {
+      _dismissFocus();
+
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        debugPrint('signOut after deleted account failed: $e');
+      }
+
+      _clearEmailLinkOtpSession();
+
+      _profile = null;
+      _activePet = null;
+      _residentPets = [];
+      _todayMealLogs = [];
+      _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      _diaryLogsByDate = {};
+      _diaryLogsCachedMonthKey = null;
+      _randomTicketCount = 0;
+      _selectedSpeciesId = null;
+
+      _nicknameController.clear();
+      _selectedGender = null;
+      _selectedAgeRange = null;
+      _selectedDietGoal = null;
+
+      _isEmailLinkPanelOpen = false;
+      _isProfileSetupPanelVisible = false;
+      _isInitialAdoptionPanelVisible = false;
+      _isProfileSetupClosing = false;
+      _isInitialAdoptionPanelClosing = false;
+      _isInitialAdoptionInFlight = false;
+
+      try {
+        await supabase.auth.signInAnonymously();
+      } catch (e) {
+        debugPrint('signInAnonymously after deleted account failed: $e');
+      }
+
+      if (!mounted) return;
+      await _bootstrap();
+    } finally {
+      _isResettingDeletedAccountSession = false;
+    }
   }
 
   Future<void> _showEmailLinkSuccessNotice() async {
@@ -2811,8 +2965,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _showSnack(l10n.snackEmailOtpRequired);
       return false;
     }
+    final wasRestoreMode = _emailLinkRestoreMode;
     final otpType =
-        _emailLinkRestoreMode ? OtpType.email : OtpType.emailChange;
+        wasRestoreMode ? OtpType.email : OtpType.emailChange;
     try {
       await supabase.auth.verifyOTP(
         email: trimmedEmail,
@@ -2829,8 +2984,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     try {
-      await _syncAuthEmailToProfileIfNeeded();
-      await _refreshAllUserDataAfterAuthChange();
+      // 신규 이메일 연동 시에는 기존 guest 입력값을 보존하고, 중복 이메일
+      // 복구(restore) 시에는 기존 계정 profile 값으로 form 을 강제 덮어쓴다.
+      if (wasRestoreMode) {
+        // restore 흐름에서는 새 계정 profile 데이터가 이미 DB에 있으므로,
+        // 별도의 guest profile row sync 는 건너뛰고 바로 전체 reload 한다.
+        await _refreshAllUserDataAfterAuthChange(forceProfileFormSync: true);
+      } else {
+        await _syncAuthEmailToProfileIfNeeded();
+        await _refreshAllUserDataAfterAuthChange();
+      }
       if (mounted) {
         _safeSetState(() => _emailLinkRestoreMode = false);
       } else {
