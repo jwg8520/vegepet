@@ -676,6 +676,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailFormatErrorConfirm => 'OK';
 
   @override
+  String get emailOtpInvalidNoticeTitle => '⚠️ Invalid Code';
+
+  @override
+  String get emailOtpInvalidNoticeBody =>
+      'Please try again. The code expires after 1 hour.';
+
+  @override
+  String get emailOtpInvalidNoticeConfirm => 'OK';
+
+  @override
   String get emailDuplicateNoticeTitle => '⚠️ Email Already Linked';
 
   @override

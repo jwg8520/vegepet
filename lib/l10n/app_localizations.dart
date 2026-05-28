@@ -1358,6 +1358,24 @@ abstract class AppLocalizations {
   /// **'확인'**
   String get emailFormatErrorConfirm;
 
+  /// No description provided for @emailOtpInvalidNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'⚠️올바르지 않은 코드'**
+  String get emailOtpInvalidNoticeTitle;
+
+  /// No description provided for @emailOtpInvalidNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'다시 입력해주세요. 입력 제한 시간은 1시간 입니다.'**
+  String get emailOtpInvalidNoticeBody;
+
+  /// No description provided for @emailOtpInvalidNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get emailOtpInvalidNoticeConfirm;
+
   /// No description provided for @emailDuplicateNoticeTitle.
   ///
   /// In ko, this message translates to:

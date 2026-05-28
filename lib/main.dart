@@ -635,6 +635,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _isEmailLinkSuccessNoticeOpen = false;
   bool _isEmailFormatErrorNoticeOpen = false;
   bool _isEmailDuplicateNoticeOpen = false;
+  bool _isEmailOtpInvalidNoticeOpen = false;
 
   /// 도감 등록 펫과 동일한 이름으로 분양 펫 이름 저장 시도 시 (240×116 · 마당 좌표계).
   bool _isDuplicatePetNameNoticeOpen = false;
@@ -1059,6 +1060,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return false;
   }
 
+  /// 프로필 입력 form의 로컬 UI 상태만 비운다.
+  /// (DB row 수정/삭제는 하지 않는다)
+  void _clearProfileFormState() {
+    _nicknameController.clear();
+    _selectedGender = null;
+    _selectedAgeRange = null;
+    _selectedDietGoal = null;
+
+    _profilePanelInitialNickname = '';
+    _profilePanelInitialGender = null;
+    _profilePanelInitialAgeRange = null;
+    _profilePanelInitialDietGoal = null;
+  }
+
   /// 프로필 form controller/select 값을 [_profile] 기준으로 동기화한다.
   ///
   /// 일반 bootstrap/일반 reload 흐름에서는 [force]=false 로 호출하여 사용자가
@@ -1266,10 +1281,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _safeSetState(() {
             _isSavingProfile = false;
             _isProfileSetupClosing = false;
+            _isProfileSetupPanelVisible = false;
+            _clearProfileFormState();
           });
         } else {
           _isSavingProfile = false;
           _isProfileSetupClosing = false;
+          _isProfileSetupPanelVisible = false;
+          _clearProfileFormState();
         }
         await _resetToFreshGuestAfterDeletedAccount();
         return;
@@ -1737,6 +1756,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (supabase.auth.currentSession == null) {
         await supabase.auth.signInAnonymously();
       }
+      final currentUser = supabase.auth.currentUser;
+      final isEmailSession =
+          currentUser?.email?.trim().isNotEmpty == true;
 
       await Future.wait([
         _fetchProfile(),
@@ -1746,9 +1768,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _fetchTodayMealLogs(),
         _fetchRandomTicketCount(),
       ]);
+
+      if (isEmailSession && _profile == null) {
+        debugPrint('email session profile missing; reset to fresh guest');
+        if (!_isResettingDeletedAccountSession) {
+          unawaited(_resetToFreshGuestAfterDeletedAccount());
+        }
+        return;
+      }
       await _syncAuthEmailToProfileIfNeeded();
 
-      _syncProfileFormFromFetched();
+      if (_isResettingDeletedAccountSession) {
+        _clearProfileFormState();
+      } else {
+        _syncProfileFormFromFetched();
+      }
 
       if (!mounted) return;
       setState(() {
@@ -1927,6 +1961,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         message.contains('user already registered') ||
         message.contains('email already') ||
         message.contains('already exists');
+  }
+
+  bool _isEmailOtpInvalidOrExpiredError(Object e) {
+    final text = _formatAuthError(e).toLowerCase();
+    return text.contains('invalid') ||
+        text.contains('token') ||
+        text.contains('otp') ||
+        text.contains('expired') ||
+        text.contains('email token') ||
+        text.contains('confirmation token') ||
+        text.contains('verification');
   }
 
   Future<void> _showEmailDuplicateNotice() async {
@@ -2326,6 +2371,57 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isResettingDeletedAccountSession = true;
     try {
       _dismissFocus();
+      debugPrint(
+        'deleted account reset: clearing local profile form before guest sign-in',
+      );
+
+      if (mounted) {
+        _safeSetState(() {
+          _status = _ViewStatus.loading;
+          _clearProfileFormState();
+
+          _profile = null;
+          _activePet = null;
+          _residentPets = [];
+          _todayMealLogs = [];
+          _pokedexEntries = [];
+          _pokedexPanelSelectedEntry = null;
+          _diaryLogsByDate = {};
+          _diaryLogsCachedMonthKey = null;
+          _randomTicketCount = 0;
+          _selectedSpeciesId = null;
+
+          _isProfileSetupPanelVisible = false;
+          _isProfileSetupClosing = false;
+          _isInitialAdoptionPanelVisible = false;
+          _isInitialAdoptionPanelClosing = false;
+          _isInitialAdoptionInFlight = false;
+
+          _isEmailLinkPanelOpen = false;
+          _isProfilePanelOpen = false;
+          _gameMenuPanelOpen = false;
+        });
+      } else {
+        _clearProfileFormState();
+        _profile = null;
+        _activePet = null;
+        _residentPets = [];
+        _todayMealLogs = [];
+        _pokedexEntries = [];
+        _pokedexPanelSelectedEntry = null;
+        _diaryLogsByDate = {};
+        _diaryLogsCachedMonthKey = null;
+        _randomTicketCount = 0;
+        _selectedSpeciesId = null;
+        _isProfileSetupPanelVisible = false;
+        _isProfileSetupClosing = false;
+        _isInitialAdoptionPanelVisible = false;
+        _isInitialAdoptionPanelClosing = false;
+        _isInitialAdoptionInFlight = false;
+        _isEmailLinkPanelOpen = false;
+      }
+
+      _clearEmailLinkOtpSession();
 
       try {
         await supabase.auth.signOut();
@@ -2333,33 +2429,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         debugPrint('signOut after deleted account failed: $e');
       }
 
-      _clearEmailLinkOtpSession();
-
-      _profile = null;
-      _activePet = null;
-      _residentPets = [];
-      _todayMealLogs = [];
-      _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
-      _diaryLogsByDate = {};
-      _diaryLogsCachedMonthKey = null;
-      _randomTicketCount = 0;
-      _selectedSpeciesId = null;
-
-      _nicknameController.clear();
-      _selectedGender = null;
-      _selectedAgeRange = null;
-      _selectedDietGoal = null;
-
-      _isEmailLinkPanelOpen = false;
-      _isProfileSetupPanelVisible = false;
-      _isInitialAdoptionPanelVisible = false;
-      _isProfileSetupClosing = false;
-      _isInitialAdoptionPanelClosing = false;
-      _isInitialAdoptionInFlight = false;
-
       try {
         await supabase.auth.signInAnonymously();
+        debugPrint(
+          'deleted account reset: signed in as fresh guest '
+          '${supabase.auth.currentUser?.id}',
+        );
       } catch (e) {
         debugPrint('signInAnonymously after deleted account failed: $e');
       }
@@ -2404,6 +2479,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _closeEmailFormatErrorNoticeOverlay() {
     if (!_isEmailFormatErrorNoticeOpen) return;
     unawaited(_hideEmailFormatErrorNotice());
+  }
+
+  Future<void> _showEmailOtpInvalidNotice() async {
+    if (_isEmailOtpInvalidNoticeOpen) return;
+    _dismissFocus();
+    _instantCloseYardConfirmOverlays();
+    _safeSetState(() => _isEmailOtpInvalidNoticeOpen = true);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideEmailOtpInvalidNotice() async {
+    if (!_isEmailOtpInvalidNoticeOpen) return;
+    await _dismissYardConfirmOverlayAnimated(
+      () => _isEmailOtpInvalidNoticeOpen = false,
+    );
+  }
+
+  void _closeEmailOtpInvalidNoticeOverlay() {
+    if (!_isEmailOtpInvalidNoticeOpen) return;
+    unawaited(_hideEmailOtpInvalidNotice());
   }
 
   Future<bool> _promptEmailFormatErrorIfNeeded(String email) async {
@@ -2965,7 +3060,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final trimmedEmail = email.trim();
     final trimmedToken = token.trim();
     if (trimmedEmail.isEmpty || trimmedToken.isEmpty) {
-      _showSnack(l10n.snackEmailOtpRequired);
+      await _showEmailOtpInvalidNotice();
       return false;
     }
     final wasRestoreMode = _emailLinkRestoreMode;
@@ -2977,9 +3072,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         token: trimmedToken,
         type: otpType,
       );
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('email otp verify failed: $e\n$st');
       if (_isEmailAlreadyUsedError(e)) {
         await _showEmailAlreadyUsedDialog();
+        return false;
+      }
+      if (_isEmailOtpInvalidOrExpiredError(e)) {
+        await _showEmailOtpInvalidNotice();
         return false;
       }
       _showSnack(l10n.snackOtpVerifyFailed(_formatAuthError(e)));
@@ -4512,10 +4612,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
 
         _selectedSpeciesId = null;
-        _nicknameController.clear();
-        _selectedGender = null;
-        _selectedAgeRange = null;
-        _selectedDietGoal = null;
+        _clearProfileFormState();
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
       });
@@ -7027,6 +7124,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isEmailLinkInviteNoticeOpen = false;
     _isEmailLinkSuccessNoticeOpen = false;
     _isEmailFormatErrorNoticeOpen = false;
+    _isEmailOtpInvalidNoticeOpen = false;
     _isEmailDuplicateNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
     _isMaturityCompleteNoticeOpen = false;
@@ -7448,6 +7546,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _buildEmailLinkInviteNoticeGlobalOverlay(),
         _buildEmailLinkSuccessNoticeGlobalOverlay(),
         _buildEmailFormatErrorNoticeGlobalOverlay(),
+        _buildEmailOtpInvalidNoticeGlobalOverlay(),
         _buildEmailDuplicateNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
@@ -8476,6 +8575,128 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
                 child: _buildEmailFormatErrorNoticeDialog(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmailOtpInvalidNoticeDialog() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.emailOtpInvalidNoticeTitle,
+                    textAlign: TextAlign.left,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    l10n.emailOtpInvalidNoticeBody,
+                    textAlign: TextAlign.left,
+                    softWrap: true,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4A4A4A),
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _closeEmailOtpInvalidNoticeOverlay,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      l10n.emailOtpInvalidNoticeConfirm,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmailOtpInvalidNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isEmailOtpInvalidNoticeOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: _buildVegePetYardConfirmOverlayFade(
+        child: Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeEmailOtpInvalidNoticeOverlay,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kVegePetConfirmDialogLeft,
+              top: _kVegePetConfirmDialogTop,
+              width: _kVegePetConfirmDialogW,
+              height: _kVegePetConfirmDialogH,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: _buildEmailOtpInvalidNoticeDialog(),
               ),
             ),
           ],
@@ -9744,7 +9965,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (await _promptEmailFormatErrorIfNeeded(raw)) return;
       final code = _emailLinkOtpController.text.trim();
       if (code.isEmpty) {
-        _showSnack(l10n.snackOtpRequired);
+        await _showEmailOtpInvalidNotice();
         return;
       }
       _safeSetState(() => _emailLinkPanelVerifyBusy = true);
@@ -16576,10 +16797,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _helpPanelSwapInProgress = false;
         _resetEmailLinkPanelOtpFlow();
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
-        _nicknameController.clear();
-        _selectedGender = null;
-        _selectedAgeRange = null;
-        _selectedDietGoal = null;
+        _clearProfileFormState();
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
 

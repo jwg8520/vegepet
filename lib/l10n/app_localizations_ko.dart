@@ -651,6 +651,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get emailFormatErrorConfirm => '확인';
 
   @override
+  String get emailOtpInvalidNoticeTitle => '⚠️올바르지 않은 코드';
+
+  @override
+  String get emailOtpInvalidNoticeBody => '다시 입력해주세요. 입력 제한 시간은 1시간 입니다.';
+
+  @override
+  String get emailOtpInvalidNoticeConfirm => '확인';
+
+  @override
   String get emailDuplicateNoticeTitle => '⚠️중복 이메일';
 
   @override
