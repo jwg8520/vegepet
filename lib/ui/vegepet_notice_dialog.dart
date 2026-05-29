@@ -9,6 +9,14 @@ const double kVegePetConfirmDialogTop = 129;
 const double kVegePetConfirmDialogW = 240;
 const double kVegePetConfirmDialogH = 116;
 
+const double kVegePetNoticeHorizontalPadding = 16;
+const double kVegePetNoticeBodyWidth =
+    kVegePetConfirmDialogW - kVegePetNoticeHorizontalPadding * 2;
+const int kVegePetNoticeBodyDefaultMaxLines = 3;
+const double kVegePetNoticeButtonHorizontalInset = 8;
+const double kVegePetNoticeButtonWidth =
+    kVegePetConfirmDialogW - kVegePetNoticeButtonHorizontalInset * 2;
+
 /// 마당 240×116 Glassmorphism 단일 확인 버튼 알림창 공통 설정.
 class VegePetNoticeConfig {
   const VegePetNoticeConfig({
@@ -24,7 +32,7 @@ class VegePetNoticeConfig {
     this.bodyMaxLines,
     this.bodyMaxLinesEn,
     this.bodyMaxLinesKo,
-    this.bodyOverflow = TextOverflow.ellipsis,
+    this.bodyOverflow = TextOverflow.clip,
     this.titleBlockTranslateYOffset = 0,
     this.useFadeTransitionForOverlay = false,
     this.dismissKeyboardOnOutsideTapFirst = false,
@@ -90,25 +98,27 @@ Widget buildVegePetOneButtonNoticeDialog(
   final isEn = isEnglishLocale;
   final bodyFontSize =
       config.bodyFontSizeEn != null && isEn ? config.bodyFontSizeEn! : 10.0;
-  final int? resolvedBodyMaxLines;
+  final int resolvedBodyMaxLines;
   if (config.bodyMaxLinesEn != null || config.bodyMaxLinesKo != null) {
     resolvedBodyMaxLines = isEn
-        ? (config.bodyMaxLinesEn ?? config.bodyMaxLinesKo)
-        : (config.bodyMaxLinesKo ?? config.bodyMaxLinesEn);
+        ? (config.bodyMaxLinesEn ??
+            config.bodyMaxLinesKo ??
+            kVegePetNoticeBodyDefaultMaxLines)
+        : (config.bodyMaxLinesKo ??
+            config.bodyMaxLinesEn ??
+            kVegePetNoticeBodyDefaultMaxLines);
   } else {
-    resolvedBodyMaxLines = config.bodyMaxLines;
+    resolvedBodyMaxLines =
+        config.bodyMaxLines ?? kVegePetNoticeBodyDefaultMaxLines;
   }
 
-  const contentWidth = kVegePetConfirmDialogW - 32;
-  const buttonWidth = kVegePetConfirmDialogW - 16;
-
-  Widget titleBodyColumn = Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      SizedBox(
-        width: contentWidth,
-        child: Text(
+  Widget titleBodyColumn = SizedBox(
+    width: kVegePetNoticeBodyWidth,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
           config.title,
           textAlign: TextAlign.left,
           maxLines: 1,
@@ -122,11 +132,8 @@ Widget buildVegePetOneButtonNoticeDialog(
             height: 1.25,
           ),
         ),
-      ),
-      const SizedBox(height: 5),
-      SizedBox(
-        width: contentWidth,
-        child: Text(
+        const SizedBox(height: 5),
+        Text(
           config.body,
           textAlign: TextAlign.left,
           softWrap: true,
@@ -140,8 +147,8 @@ Widget buildVegePetOneButtonNoticeDialog(
             height: 1.25,
           ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
   if (config.titleBlockTranslateYOffset != 0) {
     titleBodyColumn = Transform.translate(
@@ -158,7 +165,12 @@ Widget buildVegePetOneButtonNoticeDialog(
       children: [
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.fromLTRB(
+              kVegePetNoticeHorizontalPadding,
+              kVegePetNoticeHorizontalPadding,
+              kVegePetNoticeHorizontalPadding,
+              0,
+            ),
             child: Align(
               alignment: Alignment.topLeft,
               child: titleBodyColumn,
@@ -167,41 +179,41 @@ Widget buildVegePetOneButtonNoticeDialog(
         ),
         const SizedBox(height: 2),
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Align(
-            alignment: Alignment.center,
-            child: SizedBox(
-              width: buttonWidth,
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  onTap: config.onPrimaryTap,
+          padding: const EdgeInsets.fromLTRB(
+            kVegePetNoticeButtonHorizontalInset,
+            0,
+            kVegePetNoticeButtonHorizontalInset,
+            8,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              onTap: config.onPrimaryTap,
+              borderRadius: BorderRadius.circular(14),
+              child: Ink(
+                height: 30,
+                width: kVegePetNoticeButtonWidth,
+                decoration: BoxDecoration(
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
-                  child: Ink(
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: const Color(0xFFF1F1F1),
-                        width: 0.8,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.03),
-                          blurRadius: 4,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
+                  border: Border.all(
+                    color: const Color(0xFFF1F1F1),
+                    width: 0.8,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
                     ),
-                    child: Center(
-                      child: buildVegePetPastelBlueGradientButtonText(
-                        config.primaryLabel,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                  ],
+                ),
+                child: Center(
+                  child: buildVegePetPastelBlueGradientButtonText(
+                    config.primaryLabel,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
