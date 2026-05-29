@@ -1100,6 +1100,59 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  /// user-scoped 인메모리 캐시를 비운다. petSpecies 는 [_fetchCoreUserData] 로 갱신한다.
+  void _clearUserScopedCaches() {
+    _profile = null;
+    _activePet = null;
+    _residentPets = [];
+    _todayMealLogs = [];
+    _pokedexEntries = [];
+    _pokedexPanelSelectedEntry = null;
+    _diaryLogsByDate = {};
+    _diaryLogsCachedMonthKey = null;
+    _randomTicketCount = 0;
+    _selectedSpeciesId = null;
+  }
+
+  Future<void> _fetchCoreUserData() async {
+    await Future.wait([
+      _fetchProfile(),
+      _fetchPetSpecies(),
+      _fetchActivePet(),
+      _fetchResidentPets(),
+      _fetchTodayMealLogs(),
+      _fetchRandomTicketCount(),
+    ]);
+  }
+
+  /// [_fetchCoreUserData] 직후 UI·프로필 form 상태를 마당 ready 기준으로 맞춘다.
+  void _applyPostFetchUiState({
+    bool forceProfileFormSync = false,
+    bool clearProfileForm = false,
+  }) {
+    if (clearProfileForm) {
+      _clearProfileFormState();
+    } else {
+      _syncProfileFormFromFetched(force: forceProfileFormSync);
+    }
+
+    if (!mounted) return;
+
+    final profileComplete = _isProfileComplete();
+    final hasActivePet = _activePet != null;
+
+    _safeSetState(() {
+      _status = _ViewStatus.ready;
+      _isProfileSetupClosing = false;
+      _isProfileSetupPanelVisible = !profileComplete;
+      _isInitialAdoptionPanelVisible = profileComplete && !hasActivePet;
+      _isInitialAdoptionPanelClosing = false;
+      if (profileComplete && !hasActivePet) {
+        _isInitialAdoptionInFlight = false;
+      }
+    });
+  }
+
   void _enforceProfileNicknameMaxLength() {
     final text = _nicknameController.text;
     if (text.characters.length <= _kProfileNicknameMaxLength) return;
@@ -1757,14 +1810,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final isEmailSession =
           currentUser?.email?.trim().isNotEmpty == true;
 
-      await Future.wait([
-        _fetchProfile(),
-        _fetchPetSpecies(),
-        _fetchActivePet(),
-        _fetchResidentPets(),
-        _fetchTodayMealLogs(),
-        _fetchRandomTicketCount(),
-      ]);
+      await _fetchCoreUserData();
 
       if (isEmailSession && _profile == null) {
         debugPrint('email session profile missing; reset to fresh guest');
@@ -1775,25 +1821,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       await _syncAuthEmailToProfileIfNeeded();
 
-      if (_isResettingDeletedAccountSession) {
-        _clearProfileFormState();
-      } else {
-        _syncProfileFormFromFetched();
-      }
-
-      if (!mounted) return;
-      setState(() {
-        final profileComplete = _isProfileComplete();
-        final hasActivePet = _activePet != null;
-        _status = _ViewStatus.ready;
-        _isProfileSetupClosing = false;
-        _isProfileSetupPanelVisible = !profileComplete;
-        _isInitialAdoptionPanelVisible = profileComplete && !hasActivePet;
-        _isInitialAdoptionPanelClosing = false;
-        if (profileComplete && !hasActivePet) {
-          _isInitialAdoptionInFlight = false;
-        }
-      });
+      _applyPostFetchUiState(
+        clearProfileForm: _isResettingDeletedAccountSession,
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(_bootstrapOptionalServices());
@@ -2305,37 +2335,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _refreshAllUserDataAfterAuthChange({
     bool forceProfileFormSync = false,
   }) async {
-    _pokedexEntries = [];
-    _pokedexPanelSelectedEntry = null;
-    _diaryLogsByDate = {};
-    _diaryLogsCachedMonthKey = null;
-
-    await Future.wait([
-      _fetchProfile(),
-      _fetchPetSpecies(),
-      _fetchActivePet(),
-      _fetchResidentPets(),
-      _fetchTodayMealLogs(),
-      _fetchRandomTicketCount(),
-    ]);
-
-    _syncProfileFormFromFetched(force: forceProfileFormSync);
-
-    if (!mounted) return;
-
-    final profileComplete = _isProfileComplete();
-    final hasActivePet = _activePet != null;
-
-    _safeSetState(() {
-      _status = _ViewStatus.ready;
-      _isProfileSetupClosing = false;
-      _isProfileSetupPanelVisible = !profileComplete;
-      _isInitialAdoptionPanelVisible = profileComplete && !hasActivePet;
-      _isInitialAdoptionPanelClosing = false;
-      if (profileComplete && !hasActivePet) {
-        _isInitialAdoptionInFlight = false;
-      }
-    });
+    _clearUserScopedCaches();
+    await _fetchCoreUserData();
+    _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
   }
 
   /// 다른 기기에서 회원탈퇴/Auth user 삭제가 일어났을 때 발생할 수 있는
@@ -2372,17 +2374,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _safeSetState(() {
           _status = _ViewStatus.loading;
           _clearProfileFormState();
-
-          _profile = null;
-          _activePet = null;
-          _residentPets = [];
-          _todayMealLogs = [];
-          _pokedexEntries = [];
-          _pokedexPanelSelectedEntry = null;
-          _diaryLogsByDate = {};
-          _diaryLogsCachedMonthKey = null;
-          _randomTicketCount = 0;
-          _selectedSpeciesId = null;
+          _clearUserScopedCaches();
 
           _isProfileSetupPanelVisible = false;
           _isProfileSetupClosing = false;
@@ -2396,16 +2388,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         });
       } else {
         _clearProfileFormState();
-        _profile = null;
-        _activePet = null;
-        _residentPets = [];
-        _todayMealLogs = [];
-        _pokedexEntries = [];
-        _pokedexPanelSelectedEntry = null;
-        _diaryLogsByDate = {};
-        _diaryLogsCachedMonthKey = null;
-        _randomTicketCount = 0;
-        _selectedSpeciesId = null;
+        _clearUserScopedCaches();
         _isProfileSetupPanelVisible = false;
         _isProfileSetupClosing = false;
         _isInitialAdoptionPanelVisible = false;
@@ -4576,14 +4559,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _isSavingProfile = false;
         _isLoggingMeal = false;
         _firstMealPopupShownThisSession = false;
-        _randomTicketCount = 0;
-        _pokedexEntries = [];
-        _residentPets = [];
-        _activePet = null;
-        _todayMealLogs = [];
-        _profile = null;
+        _clearUserScopedCaches();
         _diaryVisibleMonth = _todayDiaryMonth();
-        _diaryLogsByDate = {};
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
