@@ -1120,39 +1120,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showNameInterlockNotice() async {
-    if (_isNameInterlockNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isNameInterlockNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isNameInterlockNoticeOpen,
+      markOpen: () => _isNameInterlockNoticeOpen = true,
+    );
   }
 
   Future<void> _hideNameInterlockNotice() async {
-    if (!_isNameInterlockNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isNameInterlockNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isNameInterlockNoticeOpen,
+      markClosed: () => _isNameInterlockNoticeOpen = false,
     );
   }
 
   Future<void> _showProfileSelectMissingNotice() async {
-    if (_isProfileSelectMissingNoticeOpen) return;
-    _dismissFocus();
-    await _closeProfileSelectOverlay(notify: false, animated: true);
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isProfileSelectMissingNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isProfileSelectMissingNoticeOpen,
+      markOpen: () => _isProfileSelectMissingNoticeOpen = true,
+      beforeOpenAsync: () =>
+          _closeProfileSelectOverlay(notify: false, animated: true),
+    );
   }
 
   Future<void> _hideProfileSelectMissingNotice() async {
-    if (!_isProfileSelectMissingNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isProfileSelectMissingNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isProfileSelectMissingNoticeOpen,
+      markClosed: () => _isProfileSelectMissingNoticeOpen = false,
     );
   }
 
   void _closeProfileSelectMissingNoticeOverlay() {
-    if (!_isProfileSelectMissingNoticeOpen) return;
-    unawaited(_hideProfileSelectMissingNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isProfileSelectMissingNoticeOpen,
+      hide: _hideProfileSelectMissingNotice,
+    );
   }
 
   Future<void> _saveProfile() async {
@@ -1971,30 +1972,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showEmailDuplicateNotice() async {
-    if (_isEmailDuplicateNoticeOpen) return;
-    _dismissFocus();
-    _safeSetState(() => _isEmailDuplicateNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    // 이메일 연동 흐름 중: 다른 yard 알림을 닫지 않는다.
+    await _showYardNotice(
+      isOpen: () => _isEmailDuplicateNoticeOpen,
+      markOpen: () => _isEmailDuplicateNoticeOpen = true,
+      instantCloseOtherYardNotices: false,
+    );
   }
 
   Future<void> _hideEmailDuplicateNotice() async {
-    if (!_isEmailDuplicateNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isEmailDuplicateNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isEmailDuplicateNoticeOpen,
+      markClosed: () => _isEmailDuplicateNoticeOpen = false,
     );
   }
 
   void _closeEmailDuplicateNoticeOverlay() {
-    if (!_isEmailDuplicateNoticeOpen) return;
-    unawaited(_hideEmailDuplicateNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isEmailDuplicateNoticeOpen,
+      hide: _hideEmailDuplicateNotice,
+    );
   }
 
   Future<void> _showRemoteEmailLinkedLogoutNotice() async {
-    if (_isRemoteEmailLinkedLogoutNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isRemoteEmailLinkedLogoutNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isRemoteEmailLinkedLogoutNoticeOpen,
+      markOpen: () => _isRemoteEmailLinkedLogoutNoticeOpen = true,
+    );
   }
 
   /// 추후 백엔드/DB 감지 로직에서 호출할 hook.
@@ -2132,23 +2136,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showDuplicatePetNameNotice() async {
-    if (_isDuplicatePetNameNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isDuplicatePetNameNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isDuplicatePetNameNoticeOpen,
+      markOpen: () => _isDuplicatePetNameNoticeOpen = true,
+    );
   }
 
   Future<void> _hideDuplicatePetNameNotice() async {
-    if (!_isDuplicatePetNameNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isDuplicatePetNameNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isDuplicatePetNameNoticeOpen,
+      markClosed: () => _isDuplicatePetNameNoticeOpen = false,
     );
   }
 
   void _closeDuplicatePetNameNoticeOverlay() {
-    if (!_isDuplicatePetNameNoticeOpen) return;
-    unawaited(_hideDuplicatePetNameNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isDuplicatePetNameNoticeOpen,
+      hide: _hideDuplicatePetNameNotice,
+    );
   }
 
   Future<void> _showEmailAlreadyUsedDialog() async {
@@ -2435,58 +2440,59 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showEmailLinkSuccessNotice() async {
-    if (_isEmailLinkSuccessNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isEmailLinkSuccessNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isEmailLinkSuccessNoticeOpen,
+      markOpen: () => _isEmailLinkSuccessNoticeOpen = true,
+    );
   }
 
   Future<void> _hideEmailLinkSuccessNotice() async {
-    if (!_isEmailLinkSuccessNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isEmailLinkSuccessNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isEmailLinkSuccessNoticeOpen,
+      markClosed: () => _isEmailLinkSuccessNoticeOpen = false,
     );
   }
 
   Future<void> _showEmailFormatErrorNotice() async {
-    if (_isEmailFormatErrorNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isEmailFormatErrorNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isEmailFormatErrorNoticeOpen,
+      markOpen: () => _isEmailFormatErrorNoticeOpen = true,
+    );
   }
 
   Future<void> _hideEmailFormatErrorNotice() async {
-    if (!_isEmailFormatErrorNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isEmailFormatErrorNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isEmailFormatErrorNoticeOpen,
+      markClosed: () => _isEmailFormatErrorNoticeOpen = false,
     );
   }
 
   void _closeEmailFormatErrorNoticeOverlay() {
-    if (!_isEmailFormatErrorNoticeOpen) return;
-    unawaited(_hideEmailFormatErrorNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isEmailFormatErrorNoticeOpen,
+      hide: _hideEmailFormatErrorNotice,
+    );
   }
 
   Future<void> _showEmailOtpInvalidNotice() async {
-    if (_isEmailOtpInvalidNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isEmailOtpInvalidNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isEmailOtpInvalidNoticeOpen,
+      markOpen: () => _isEmailOtpInvalidNoticeOpen = true,
+    );
   }
 
   Future<void> _hideEmailOtpInvalidNotice() async {
-    if (!_isEmailOtpInvalidNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isEmailOtpInvalidNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isEmailOtpInvalidNoticeOpen,
+      markClosed: () => _isEmailOtpInvalidNoticeOpen = false,
     );
   }
 
   void _closeEmailOtpInvalidNoticeOverlay() {
-    if (!_isEmailOtpInvalidNoticeOpen) return;
-    unawaited(_hideEmailOtpInvalidNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isEmailOtpInvalidNoticeOpen,
+      hide: _hideEmailOtpInvalidNotice,
+    );
   }
 
   Future<bool> _promptEmailFormatErrorIfNeeded(String email) async {
@@ -2501,8 +2507,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _closeEmailLinkSuccessNoticeOverlay() {
-    if (!_isEmailLinkSuccessNoticeOpen) return;
-    unawaited(_hideEmailLinkSuccessNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isEmailLinkSuccessNoticeOpen,
+      hide: _hideEmailLinkSuccessNotice,
+    );
   }
 
   _MealNotificationTexts _mealNotificationTextsForLocaleCode(
@@ -3857,20 +3865,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _showMaturityCompleteAlert() {
-    if (_isMaturityCompleteNoticeOpen) return;
-    if (!mounted) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isMaturityCompleteNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    _showYardNoticeSync(
+      isOpen: () => _isMaturityCompleteNoticeOpen,
+      markOpen: () => _isMaturityCompleteNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideMaturityCompleteNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isMaturityCompleteNoticeOpen,
+      markClosed: () => _isMaturityCompleteNoticeOpen = false,
+    );
   }
 
   void _closeMaturityCompleteNoticeOverlay() {
-    if (!_isMaturityCompleteNoticeOpen) return;
-    unawaited(
-      _dismissYardConfirmOverlayAnimated(
-        () => _isMaturityCompleteNoticeOpen = false,
-      ),
+    _requestHideYardNotice(
+      isOpen: () => _isMaturityCompleteNoticeOpen,
+      hide: _hideMaturityCompleteNotice,
     );
   }
 
@@ -3918,23 +3929,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showPokedexCompleteTicketNotice() async {
-    if (_isPokedexCompleteTicketNoticeOpen) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isPokedexCompleteTicketNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isPokedexCompleteTicketNoticeOpen,
+      markOpen: () => _isPokedexCompleteTicketNoticeOpen = true,
+    );
   }
 
   Future<void> _hidePokedexCompleteTicketNotice() async {
-    if (!_isPokedexCompleteTicketNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isPokedexCompleteTicketNoticeOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isPokedexCompleteTicketNoticeOpen,
+      markClosed: () => _isPokedexCompleteTicketNoticeOpen = false,
     );
   }
 
   void _closePokedexCompleteTicketNoticeOverlay() {
-    if (!_isPokedexCompleteTicketNoticeOpen) return;
-    unawaited(_hidePokedexCompleteTicketNotice());
+    _requestHideYardNotice(
+      isOpen: () => _isPokedexCompleteTicketNoticeOpen,
+      hide: _hidePokedexCompleteTicketNotice,
+    );
   }
 
   // 간단 MVP 상호작용: user_pets.affection을 +1 올리고 마지막 사용 날짜를 저장한다.
@@ -4013,28 +4025,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _showEmailLinkInviteNotice() async {
-    if (_isEmailLinkInviteNoticeOpen) return;
     if (_hasEffectiveEmailLink()) return;
-    _dismissFocus();
-    _instantCloseYardConfirmOverlays();
-    _safeSetState(() => _isEmailLinkInviteNoticeOpen = true);
-    _playYardConfirmOverlayEnter();
+    await _showYardNotice(
+      isOpen: () => _isEmailLinkInviteNoticeOpen,
+      markOpen: () => _isEmailLinkInviteNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideEmailLinkInviteNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isEmailLinkInviteNoticeOpen,
+      markClosed: () => _isEmailLinkInviteNoticeOpen = false,
+    );
   }
 
   void _closeEmailLinkInviteNoticeOverlay() {
-    if (!_isEmailLinkInviteNoticeOpen) return;
-    unawaited(
-      _dismissYardConfirmOverlayAnimated(
-        () => _isEmailLinkInviteNoticeOpen = false,
-      ),
+    _requestHideYardNotice(
+      isOpen: () => _isEmailLinkInviteNoticeOpen,
+      hide: _hideEmailLinkInviteNotice,
     );
   }
 
   Future<void> _onEmailLinkInviteLinkTap() async {
     if (!_isEmailLinkInviteNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isEmailLinkInviteNoticeOpen = false,
-    );
+    await _hideEmailLinkInviteNotice();
     if (!mounted) return;
     await _openSettingsFromGameMenu();
     if (!mounted) return;
@@ -5065,81 +5079,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget _buildHelpGameMenuGlassPanel() {
     final l10n = AppLocalizations.of(context);
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 9,
-                top: 9,
-                width: 28,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => unawaited(_closeHelpPanelToGameMenu()),
-                    borderRadius: BorderRadius.circular(10),
-                    child: const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 16,
-                        color: Color(0xFF000000),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 37,
-                top: _gameMenuSubPanelTitleTop,
-                right: 8,
-                child: Text(
-                  l10n.helpPanelTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF000000),
-                    height: 1.0,
-                  ),
-                ),
-              ),
-              // 상세 내용은 추후 구축 예정 — 좌우 8px 여백만 유지.
-              const Positioned(
-                left: 8,
-                right: 8,
-                top: 48,
-                bottom: 8,
-                child: SizedBox.expand(),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _buildGameMenuSubPanelShell(
+      title: l10n.helpPanelTitle,
+      onBack: () => unawaited(_closeHelpPanelToGameMenu()),
+      bodyLeft: 8,
+      bodyRight: 8,
+      bodyBottom: 8,
+      bodyPadding: EdgeInsets.zero,
+      body: const SizedBox.expand(),
     );
   }
 
@@ -5220,34 +5167,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            width: _kStoryPanelW,
-            height: _kStoryPanelH,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.35),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned(
-                  top: 8,
-                  right: 8,
+      child: _buildVegePetGlassPanel(
+        width: _kStoryPanelW,
+        height: _kStoryPanelH,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              top: 8,
+              right: 8,
                   width: 24,
                   height: 24,
                   child: Material(
@@ -5283,10 +5211,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     icon: Icons.chevron_right,
                     onTap: canNext ? _goStoryNextPage : null,
                   ),
-                ),
-              ],
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -5476,127 +5402,54 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       height: 1.2,
     );
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
+    return _buildGameMenuSubPanelShell(
+      title: l10n.bagPanelTitle,
+      onBack: () {
+        if (_bagPanelDetailItem != null) {
+          _safeSetState(() => _bagPanelDetailItem = null);
+        } else {
+          unawaited(_closeBagPanelToGameMenu());
+        }
+      },
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.bagSectionTickets, style: sectionTitleStyle),
+            const SizedBox(height: 8),
+            if (ticketDef != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _buildBagWireframeDummyTile(
+                  item: ticketDef,
+                  onTap: () => _safeSetState(
+                    () => _bagPanelDetailItem = ticketDef,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 14),
+            Text(l10n.bagSectionToys, style: sectionTitleStyle),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildBagWireframeDummyTile(
+                  item: toys[0],
+                  onTap: () => _safeSetState(
+                    () => _bagPanelDetailItem = toys[0],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _buildBagWireframeDummyTile(
+                  item: toys[1],
+                  onTap: () => _safeSetState(
+                    () => _bagPanelDetailItem = toys[1],
+                  ),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 9,
-                top: 9,
-                width: 28,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
-                      if (_bagPanelDetailItem != null) {
-                        _safeSetState(() => _bagPanelDetailItem = null);
-                      } else {
-                        unawaited(_closeBagPanelToGameMenu());
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(10),
-                    child: const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 16,
-                        color: Color(0xFF000000),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 37,
-                top: _gameMenuSubPanelTitleTop,
-                right: 8,
-                child: Text(
-                  l10n.bagPanelTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF000000),
-                    height: 1.0,
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 48,
-                bottom: 0,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(l10n.bagSectionTickets, style: sectionTitleStyle),
-                        const SizedBox(height: 8),
-                        if (ticketDef != null)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: _buildBagWireframeDummyTile(
-                              item: ticketDef,
-                              onTap: () => _safeSetState(
-                                () => _bagPanelDetailItem = ticketDef,
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 14),
-                        Text(l10n.bagSectionToys, style: sectionTitleStyle),
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildBagWireframeDummyTile(
-                              item: toys[0],
-                              onTap: () => _safeSetState(
-                                () => _bagPanelDetailItem = toys[0],
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            _buildBagWireframeDummyTile(
-                              item: toys[1],
-                              onTap: () => _safeSetState(
-                                () => _bagPanelDetailItem = toys[1],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -5613,101 +5466,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final dogs = _petSpeciesSortedForFamilyNorm('dog');
     final cats = _petSpeciesSortedForFamilyNorm('cat');
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 9,
-                top: 9,
-                width: 28,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
-                      if (_pokedexPanelSelectedEntry != null) {
-                        _safeSetState(() => _pokedexPanelSelectedEntry = null);
-                      } else {
-                        unawaited(_closePokedexPanelToGameMenu());
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(10),
-                    child: const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 16,
-                        color: Color(0xFF000000),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 37,
-                top: _gameMenuSubPanelTitleTop,
-                right: 8,
-                child: Text(
-                  l10n.pokedexPanelTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF000000),
-                    height: 1.0,
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 48,
-                bottom: 0,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(l10n.pokedexSectionDogs, style: sectionTitleStyle),
-                        const SizedBox(height: 8),
-                        _buildPokedexGameMenuThreeSpeciesRow(dogs, 'dog'),
-                        const SizedBox(height: 12),
-                        Text(l10n.pokedexSectionCats, style: sectionTitleStyle),
-                        const SizedBox(height: 8),
-                        _buildPokedexGameMenuThreeSpeciesRow(cats, 'cat'),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+    return _buildGameMenuSubPanelShell(
+      title: l10n.pokedexPanelTitle,
+      onBack: () {
+        if (_pokedexPanelSelectedEntry != null) {
+          _safeSetState(() => _pokedexPanelSelectedEntry = null);
+        } else {
+          unawaited(_closePokedexPanelToGameMenu());
+        }
+      },
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.pokedexSectionDogs, style: sectionTitleStyle),
+            const SizedBox(height: 8),
+            _buildPokedexGameMenuThreeSpeciesRow(dogs, 'dog'),
+            const SizedBox(height: 12),
+            Text(l10n.pokedexSectionCats, style: sectionTitleStyle),
+            const SizedBox(height: 8),
+            _buildPokedexGameMenuThreeSpeciesRow(cats, 'cat'),
+          ],
         ),
       ),
     );
@@ -5727,31 +5507,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            width: _kBagItemDetailW,
-            height: _kBagItemDetailH,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.35),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-              child: LayoutBuilder(
+      child: _buildVegePetGlassPanel(
+        width: _kBagItemDetailW,
+        height: _kBagItemDetailH,
+        shadowBlurRadius: 10,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: LayoutBuilder(
                 builder: (context, c) {
                   return SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -5813,8 +5575,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   );
                 },
               ),
-            ),
-          ),
         ),
       ),
     );
@@ -6046,37 +5806,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            width: _kBagItemDetailW,
-            height: _kBagItemDetailH,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.35),
-                width: 1,
+      child: _buildVegePetGlassPanel(
+        width: _kBagItemDetailW,
+        height: _kBagItemDetailH,
+        shadowBlurRadius: 10,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Align(
+                alignment: Alignment.topCenter,
+                child: _buildBagDetailPreviewIcon(item),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: _buildBagDetailPreviewIcon(item),
-                  ),
                   const SizedBox(height: 8),
                   // 영어 "Random Adoption Ticket" 같은 긴 이름이 detail 패널 폭을
                   // 넘기지 않도록 FittedBox 로 한 단계 축소 허용.
@@ -6102,13 +5844,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
-                  if (showUseInPanel) ...[
-                    const SizedBox(height: 8),
-                    _buildBagTicketGradientUseButton(),
-                  ],
-                ],
-              ),
-            ),
+              if (showUseInPanel) ...[
+                const SizedBox(height: 8),
+                _buildBagTicketGradientUseButton(),
+              ],
+            ],
           ),
         ),
       ),
@@ -6508,8 +6248,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (completer != null && !completer.isCompleted) {
       completer.complete(confirmed);
     }
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isRandomTicketUseConfirmOpen = false,
+    await _hideYardNotice(
+      isOpen: () => _isRandomTicketUseConfirmOpen,
+      markClosed: () => _isRandomTicketUseConfirmOpen = false,
     );
   }
 
@@ -7069,9 +6810,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     unawaited(_yardConfirmOverlayFadeController.forward());
   }
 
-  void _instantCloseYardConfirmOverlays() {
-    _yardConfirmOverlayFadeController.stop();
-    _yardConfirmOverlayFadeController.value = 0;
+  /// 마당 240×116 공통 알림창 open 플래그를 모두 false 로 리셋한다.
+  void _resetYardConfirmOverlayOpenFlags() {
     _isShopNoticeOpen = false;
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
@@ -7086,10 +6826,69 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isMaturityCompleteNoticeOpen = false;
     _isPokedexCompleteTicketNoticeOpen = false;
     _isRemoteEmailLinkedLogoutNoticeOpen = false;
+    _isRandomTicketUseConfirmOpen = false;
+  }
+
+  /// 다른 yard 알림을 즉시 닫고 fade 를 0으로 만든다. RandomTicket Completer cancel 포함.
+  void _instantCloseYardConfirmOverlays() {
+    _yardConfirmOverlayFadeController.stop();
+    _yardConfirmOverlayFadeController.value = 0;
     if (_isRandomTicketUseConfirmOpen) {
       _cancelRandomTicketUseConfirmPending();
     }
-    _isRandomTicketUseConfirmOpen = false;
+    _resetYardConfirmOverlayOpenFlags();
+  }
+
+  /// [instantCloseOtherYardNotices] false — 이메일 중복 등, 연동 중 다른 알림 유지.
+  Future<void> _showYardNotice({
+    required bool Function() isOpen,
+    required VoidCallback markOpen,
+    bool instantCloseOtherYardNotices = true,
+    Future<void> Function()? beforeOpenAsync,
+    VoidCallback? beforeOpenSync,
+  }) async {
+    if (isOpen()) return;
+    _dismissFocus();
+    beforeOpenSync?.call();
+    if (beforeOpenAsync != null) await beforeOpenAsync();
+    if (instantCloseOtherYardNotices) {
+      _instantCloseYardConfirmOverlays();
+    }
+    _safeSetState(markOpen);
+    _playYardConfirmOverlayEnter();
+  }
+
+  void _showYardNoticeSync({
+    required bool Function() isOpen,
+    required VoidCallback markOpen,
+    bool instantCloseOtherYardNotices = true,
+    VoidCallback? beforeOpenSync,
+  }) {
+    if (isOpen()) return;
+    if (!mounted) return;
+    _dismissFocus();
+    beforeOpenSync?.call();
+    if (instantCloseOtherYardNotices) {
+      _instantCloseYardConfirmOverlays();
+    }
+    _safeSetState(markOpen);
+    _playYardConfirmOverlayEnter();
+  }
+
+  Future<void> _hideYardNotice({
+    required bool Function() isOpen,
+    required VoidCallback markClosed,
+  }) async {
+    if (!isOpen()) return;
+    await _dismissYardConfirmOverlayAnimated(markClosed);
+  }
+
+  void _requestHideYardNotice({
+    required bool Function() isOpen,
+    required Future<void> Function() hide,
+  }) {
+    if (!isOpen()) return;
+    unawaited(hide());
   }
 
   bool _isYardConfirmOverlayFadeVisible(bool isOpen) {
@@ -7115,26 +6914,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _safeSetState(setClosed);
   }
 
+  Future<void> _hideShopNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isShopNoticeOpen,
+      markClosed: () => _isShopNoticeOpen = false,
+    );
+  }
+
   void _closeShopNoticeOverlay() {
-    if (!_isShopNoticeOpen) return;
-    unawaited(
-      _dismissYardConfirmOverlayAnimated(() => _isShopNoticeOpen = false),
+    _requestHideYardNotice(
+      isOpen: () => _isShopNoticeOpen,
+      hide: _hideShopNotice,
+    );
+  }
+
+  Future<void> _hideWithdrawConfirmNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isWithdrawConfirmOpen,
+      markClosed: () => _isWithdrawConfirmOpen = false,
     );
   }
 
   void _closeWithdrawConfirmOverlay() {
-    if (!_isWithdrawConfirmOpen) return;
-    unawaited(
-      _dismissYardConfirmOverlayAnimated(() => _isWithdrawConfirmOpen = false),
+    _requestHideYardNotice(
+      isOpen: () => _isWithdrawConfirmOpen,
+      hide: _hideWithdrawConfirmNotice,
+    );
+  }
+
+  Future<void> _hideWithdrawFinalConfirmNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isWithdrawFinalConfirmOpen,
+      markClosed: () => _isWithdrawFinalConfirmOpen = false,
     );
   }
 
   void _closeWithdrawFinalConfirmOverlay() {
-    if (!_isWithdrawFinalConfirmOpen) return;
-    unawaited(
-      _dismissYardConfirmOverlayAnimated(
-        () => _isWithdrawFinalConfirmOpen = false,
-      ),
+    _requestHideYardNotice(
+      isOpen: () => _isWithdrawFinalConfirmOpen,
+      hide: _hideWithdrawFinalConfirmNotice,
     );
   }
 
@@ -7159,6 +6977,162 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         );
       },
       child: child,
+    );
+  }
+
+  /// Glassmorphism 패널 shell (ClipRRect + BackdropFilter + white 60%).
+  Widget _buildVegePetGlassPanel({
+    required double width,
+    required double height,
+    required Widget child,
+    double borderRadius = 20,
+    double blurSigma = 10,
+    Color? backgroundColor,
+    double shadowBlurRadius = 12,
+  }) {
+    final bg = backgroundColor ?? Colors.white.withValues(alpha: 0.60);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: shadowBlurRadius,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  /// 게임 메뉴 하위 패널 공통: 뒤로가기(9,9) + 대제목(37 또는 프로필 inset).
+  List<Widget> _buildGameSubPanelHeader({
+    required String title,
+    required VoidCallback onBack,
+    bool showBackButton = true,
+    bool useProfileTitleInset = false,
+    TextStyle? titleStyle,
+  }) {
+    final effectiveTitleStyle = titleStyle ??
+        const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF000000),
+          height: 1.0,
+        );
+    final titleWidget = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: effectiveTitleStyle,
+    );
+    final titleTop = _gameMenuSubPanelTitleTop;
+
+    return [
+      if (showBackButton)
+        Positioned(
+          left: 9,
+          top: 9,
+          width: 28,
+          height: 28,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onBack,
+              borderRadius: BorderRadius.circular(10),
+              child: const SizedBox(
+                width: 28,
+                height: 28,
+                child: Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 16,
+                  color: Color(0xFF000000),
+                ),
+              ),
+            ),
+          ),
+        ),
+      if (useProfileTitleInset)
+        Positioned(
+          left: 9,
+          top: titleTop,
+          right: 8,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 28),
+            child: titleWidget,
+          ),
+        )
+      else
+        Positioned(
+          left: 37,
+          top: titleTop,
+          right: 8,
+          child: titleWidget,
+        ),
+    ];
+  }
+
+  /// 게임 메뉴 하위 패널(246×310) shell + 헤더 + 본문 영역.
+  Widget _buildGameMenuSubPanelShell({
+    required String title,
+    required Widget body,
+    required VoidCallback onBack,
+    bool showBackButton = true,
+    double width = _kGameMenuPanelW,
+    double height = _kGameMenuPanelH,
+    double blurSigma = 10,
+    double shadowBlurRadius = 12,
+    double bodyTop = 48,
+    double bodyLeft = 0,
+    double bodyRight = 0,
+    double? bodyBottom,
+    EdgeInsets bodyPadding = const EdgeInsets.fromLTRB(8, 0, 8, 8),
+    bool useProfileTitleInset = false,
+    TextStyle? titleStyle,
+  }) {
+    Widget bodyChild = body;
+    if (bodyPadding != EdgeInsets.zero) {
+      bodyChild = Padding(padding: bodyPadding, child: body);
+    }
+
+    return _buildVegePetGlassPanel(
+      width: width,
+      height: height,
+      blurSigma: blurSigma,
+      shadowBlurRadius: shadowBlurRadius,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ..._buildGameSubPanelHeader(
+            title: title,
+            onBack: onBack,
+            showBackButton: showBackButton,
+            useProfileTitleInset: useProfileTitleInset,
+            titleStyle: titleStyle,
+          ),
+          Positioned(
+            left: bodyLeft,
+            right: bodyRight,
+            top: bodyTop,
+            bottom: bodyBottom ?? 0,
+            child: bodyChild,
+          ),
+        ],
+      ),
     );
   }
 
@@ -7208,35 +7182,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       resolvedBodyMaxLines = config.bodyMaxLines;
     }
 
+    // left/right 16 패딩 안 본문·제목 영역 (240 - 32 = 208).
+    const contentWidth = _kVegePetConfirmDialogW - 32;
+    const buttonWidth = _kVegePetConfirmDialogW - 16;
+
     Widget titleBodyColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          config.title,
-          textAlign: TextAlign.left,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontFamily: 'Pretendard',
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF000000),
-            height: 1.25,
+        SizedBox(
+          width: contentWidth,
+          child: Text(
+            config.title,
+            textAlign: TextAlign.left,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF000000),
+              height: 1.25,
+            ),
           ),
         ),
         const SizedBox(height: 5),
-        Text(
-          config.body,
-          textAlign: TextAlign.left,
-          softWrap: config.bodySoftWrap,
-          maxLines: resolvedBodyMaxLines,
-          overflow: config.bodyOverflow,
-          style: TextStyle(
-            fontFamily: 'Pretendard',
-            fontSize: bodyFontSize,
-            fontWeight: FontWeight.w600,
-            color: config.bodyColor,
-            height: 1.25,
+        SizedBox(
+          width: contentWidth,
+          child: Text(
+            config.body,
+            textAlign: TextAlign.left,
+            softWrap: true,
+            maxLines: resolvedBodyMaxLines,
+            overflow: config.bodyOverflow,
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: bodyFontSize,
+              fontWeight: FontWeight.w600,
+              color: config.bodyColor,
+              height: 1.25,
+            ),
           ),
         ),
       ],
@@ -7257,40 +7243,49 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: titleBodyColumn,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: titleBodyColumn,
+              ),
             ),
           ),
           const SizedBox(height: 2),
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: config.onPrimaryTap,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Align(
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: buttonWidth,
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    onTap: config.onPrimaryTap,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
+                    child: Ink(
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: const Color(0xFFF1F1F1),
+                          width: 0.8,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.03),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      config.primaryLabel,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                      child: Center(
+                        child: _buildPastelBlueGradientButtonText(
+                          config.primaryLabel,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -7703,7 +7698,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         bodyMaxLinesEn: 3,
         bodyMaxLinesKo: 2,
         bodyOverflow: TextOverflow.visible,
-        bodySoftWrap: true,
         useFadeTransitionForOverlay: true,
         dismissKeyboardOnOutsideTapFirst: true,
       ),
@@ -7977,7 +7971,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         onPrimaryTap: _closeEmailFormatErrorNoticeOverlay,
         onOutsideTap: () => unawaited(_hideEmailFormatErrorNotice()),
         bodyColor: const Color(0xFFB92020),
-        bodySoftWrap: true,
       ),
     );
   }
@@ -7993,7 +7986,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         onPrimaryTap: _closeEmailOtpInvalidNoticeOverlay,
         onOutsideTap: _closeEmailOtpInvalidNoticeOverlay,
         bodyOverflow: TextOverflow.visible,
-        bodySoftWrap: true,
       ),
     );
   }
@@ -8013,7 +8005,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         bodyMaxLinesEn: 3,
         bodyMaxLinesKo: 2,
         bodyOverflow: TextOverflow.visible,
-        bodySoftWrap: true,
         blockDialogPointerWithGestureDetector: false,
       ),
     );
@@ -8030,7 +8021,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         onPrimaryTap: _closeDuplicatePetNameNoticeOverlay,
         onOutsideTap: _closeDuplicatePetNameNoticeOverlay,
         bodyColor: const Color(0xFFB92020),
-        bodySoftWrap: true,
       ),
     );
   }
@@ -8874,40 +8864,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: _kCustomerCenterPanelW,
-          height: _kCustomerCenterPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                top: 16,
-                left: 16,
-                right: 16,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.center,
-                  child: Text(
-                    l10n.supportCenter,
+    return _buildVegePetGlassPanel(
+      width: _kCustomerCenterPanelW,
+      height: _kCustomerCenterPanelH,
+      shadowBlurRadius: 10,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: Text(
+                l10n.supportCenter,
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -9006,9 +8978,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
@@ -9282,40 +9252,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            width: _kEmailLinkPanelW,
-            height: _kEmailLinkPanelH,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.35),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.center,
-                    child: Text(
-                      l10n.emailAccountLink,
+      child: _buildVegePetGlassPanel(
+        width: _kEmailLinkPanelW,
+        height: _kEmailLinkPanelH,
+        shadowBlurRadius: 10,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  l10n.emailAccountLink,
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -9394,9 +9346,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     children: middleSections,
                   ),
                 ),
-              ],
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -13116,89 +13066,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
+    return _buildGameMenuSubPanelShell(
+      title: l10n.profilePanelTitle,
+      onBack: () => unawaited(_closeProfilePanelToGameMenu()),
+      useProfileTitleInset: true,
+      bodyBottom: 8,
+      bodyPadding: const EdgeInsets.fromLTRB(9, 0, 8, 0),
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: _buildGameMenuProfileAvatarDummy(
+                genderForAvatar,
+              ),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 9,
-                top: 9,
-                width: 28,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => unawaited(_closeProfilePanelToGameMenu()),
-                    borderRadius: BorderRadius.circular(10),
-                    child: const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 16,
-                        color: Color(0xFF000000),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 9,
-                top: _gameMenuSubPanelTitleTop,
-                right: 8,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 28),
-                  child: Text(
-                    l10n.profilePanelTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF000000),
-                      height: 1.0,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 48,
-                bottom: 8,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(9, 0, 8, 0),
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Center(
-                          child: _buildGameMenuProfileAvatarDummy(
-                            genderForAvatar,
-                          ),
-                        ),
                         const SizedBox(height: 10),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
@@ -13350,13 +13233,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             },
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -13577,10 +13454,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
     if (key == 'shop') {
-      if (_isShopNoticeOpen) return;
-      _isNameInterlockNoticeOpen = false;
-      _safeSetState(() => _isShopNoticeOpen = true);
-      _playYardConfirmOverlayEnter();
+      await _showYardNotice(
+        isOpen: () => _isShopNoticeOpen,
+        markOpen: () => _isShopNoticeOpen = true,
+        instantCloseOtherYardNotices: false,
+        beforeOpenSync: () => _isNameInterlockNoticeOpen = false,
+      );
       return;
     }
     await _closeGameMenuPanel();
@@ -14100,31 +13979,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildDietDiaryGameMenuGlassPanel() {
     final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        // 식단일지/설정 글래스만 blur 완화(10→6). 다른 패널은 기존 값 유지.
-        filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: RepaintBoundary(
-            child: _DietDiarySheetPanel(
+    // 식단일지/설정 글래스만 blur 완화(10→6). 헤더·달력 레이아웃은 _DietDiarySheetPanel 유지.
+    return _buildVegePetGlassPanel(
+      width: _kGameMenuPanelW,
+      height: _kGameMenuPanelH,
+      blurSigma: 6,
+      child: RepaintBoundary(
+        child: _DietDiarySheetPanel(
               key: _dietDiarySheetPanelKey,
               embeddedInGameMenuPanel: true,
               onEmbeddedBack: () => unawaited(_closeDietDiaryPanelToGameMenu()),
@@ -14187,8 +14048,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       compact: compact,
                     );
                   },
-            ),
-          ),
         ),
       ),
     );
@@ -15042,84 +14901,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(
-          sigmaX: supportDocBlur,
-          sigmaY: supportDocBlur,
-        ),
-        child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
+    return _buildVegePetGlassPanel(
+      width: _kGameMenuPanelW,
+      height: _kGameMenuPanelH,
+      blurSigma: supportDocBlur,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ..._buildGameSubPanelHeader(
+            title: l10n.settings,
+            onBack: () {
+              if (supportDocForRender != null) {
+                _closeSettingsSupportDocToSettings();
+                return;
+              }
+              unawaited(_closeSettingsPanelToGameMenu());
+            },
+            titleStyle: _settingsPanelTextStyle(
+              16,
+              FontWeight.w700,
+              const Color(0xFF000000),
+              height: 1.0,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 9,
-                top: 9,
-                width: 28,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
-                      if (supportDocForRender != null) {
-                        _closeSettingsSupportDocToSettings();
-                        return;
-                      }
-                      unawaited(_closeSettingsPanelToGameMenu());
-                    },
-                    borderRadius: BorderRadius.circular(10),
-                    child: const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        size: 16,
-                        color: Color(0xFF000000),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 37,
-                top: _gameMenuSubPanelTitleTop,
-                right: 8,
-                child: Text(
-                  l10n.settings,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _settingsPanelTextStyle(
-                      16,
-                      FontWeight.w700,
-                      const Color(0xFF000000),
-                      height: 1.0,
-                    ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 48,
-                bottom: 8,
-                child: Stack(
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 48,
+            bottom: 8,
+            child: Stack(
                   fit: StackFit.expand,
                   clipBehavior: Clip.hardEdge,
                   children: [
@@ -15360,9 +15170,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
@@ -17564,7 +17372,6 @@ class _VegePetNoticeConfig {
     this.bodyMaxLinesEn,
     this.bodyMaxLinesKo,
     this.bodyOverflow = TextOverflow.ellipsis,
-    this.bodySoftWrap = false,
     this.titleBlockTranslateYOffset = 0,
     this.useFadeTransitionForOverlay = false,
     this.dismissKeyboardOnOutsideTapFirst = false,
@@ -17584,7 +17391,6 @@ class _VegePetNoticeConfig {
   final int? bodyMaxLinesEn;
   final int? bodyMaxLinesKo;
   final TextOverflow bodyOverflow;
-  final bool bodySoftWrap;
   final double titleBlockTranslateYOffset;
   final bool useFadeTransitionForOverlay;
   final bool dismissKeyboardOnOutsideTapFirst;
