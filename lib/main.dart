@@ -746,7 +746,7 @@ class _HomePageState extends State<HomePage>
   static const Curve _kYardSidePanelSwapCurve = Curves.easeInOutCubic;
 
   /// 스토리 글래스 패널 (844×390 마당 기준).
-  static const double _kStoryPanelLeft = 39;
+  static const double _kStoryPanelLeft = 38;
   static const double _kStoryPanelTop = 40;
   static const double _kStoryPanelW = 766;
   static const double _kStoryPanelH = 310;
