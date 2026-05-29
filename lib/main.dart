@@ -489,7 +489,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // BottomSheet/Dialog 트리 정리 타이밍이 꼬이면서 `_dependents.isEmpty
   // is not true` 오류가 다시 발생할 수 있기 때문이다.
   List<Map<String, dynamic>> _pokedexEntries = [];
-  bool _isLoadingPokedex = false;
 
   // ----- 식단일지 (diet diary) -----
   //
@@ -550,7 +549,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _profilePanelInitialAgeRange;
   String? _profilePanelInitialDietGoal;
   late AnimationController _gameMenuPanelController;
-  late Animation<double> _gameMenuPanelCurve;
   late AnimationController _gameProfileSwapController;
   late Animation<double> _gameProfileSwapCurve;
 
@@ -899,11 +897,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       vsync: this,
       duration: _kYardSidePanelSlideDuration,
     );
-    _gameMenuPanelCurve = CurvedAnimation(
-      parent: _gameMenuPanelController,
-      curve: _kYardSidePanelSlideCurve,
-      reverseCurve: _kYardSidePanelSlideCurve,
-    );
     _gameProfileSwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -1165,12 +1158,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _saveProfile() async {
     if (_isSavingProfile ||
         _isNameInterlockNoticeOpen ||
-        _isProfileSelectMissingNoticeOpen) return;
+        _isProfileSelectMissingNoticeOpen) {
+      return;
+    }
     // 저장 시점에 키보드/입력 포커스가 살아 있으면 직후 화면 전환과 겹쳐
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
     _dismissFocus();
     await _closeProfileSelectOverlay(animated: true);
 
+    if (!mounted) return;
     final user = supabase.auth.currentUser;
     if (user == null) {
       _showSnack(AppLocalizations.of(context).snackLoginRequired);
@@ -2001,13 +1997,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _playYardConfirmOverlayEnter();
   }
 
-  Future<void> _hideRemoteEmailLinkedLogoutNotice() async {
-    if (!_isRemoteEmailLinkedLogoutNoticeOpen) return;
-    await _dismissYardConfirmOverlayAnimated(
-      () => _isRemoteEmailLinkedLogoutNoticeOpen = false,
-    );
-  }
-
   /// 추후 백엔드/DB 감지 로직에서 호출할 hook.
   Future<void> _handleRemoteEmailLinkedDetected() async {
     if (_isRemoteEmailLinkedLogoutNoticeOpen) return;
@@ -2061,7 +2050,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
-        _isLoadingPokedex = false;
         _pokedexPanelSelectedEntry = null;
         _residentPets = [];
         _activePet = null;
@@ -4174,8 +4162,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _animateOutInitialAdoptionPanel() async {
-    if (_isInitialAdoptionPanelClosing || !_isInitialAdoptionPanelVisible)
+    if (_isInitialAdoptionPanelClosing || !_isInitialAdoptionPanelVisible) {
       return;
+    }
     _safeSetState(() {
       _isInitialAdoptionPanelClosing = true;
       _isInitialAdoptionPanelVisible = false;
@@ -4370,7 +4359,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
-        _isLoadingPokedex = false;
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
 
@@ -4576,7 +4564,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
-        _isLoadingPokedex = false;
         _residentPets = [];
         _activePet = null;
         _todayMealLogs = [];
@@ -4674,31 +4661,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     } catch (e) {
       if (!mounted) return;
       _showSnack('[디버그] 애정도 조작 실패: $e');
-    }
-  }
-
-  Future<void> _debugSetAffectionAndStage({
-    required int affection,
-    required String stage,
-  }) async {
-    if (_activePet == null) {
-      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
-      return;
-    }
-    final petId = _activePet!['id'];
-    try {
-      await supabase
-          .from('user_pets')
-          .update({'affection': affection, 'stage': stage})
-          .eq('id', petId);
-
-      await _fetchActivePet();
-      if (!mounted) return;
-      setState(() {});
-      _showSnack('[디버그] 세팅 완료 (affection=$affection, stage=$stage)');
-    } catch (e) {
-      if (!mounted) return;
-      _showSnack('[디버그] 세팅 실패: $e');
     }
   }
 
@@ -5207,7 +5169,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       illustrationChild = Image.asset(
         paths[index],
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const SizedBox.expand(),
+        errorBuilder: (context, error, stackTrace) =>
+            const SizedBox.expand(),
       );
     }
 
@@ -6189,14 +6152,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _openPokedexSheet() async {
     _dismissFocus();
 
-    _safeSetState(() => _isLoadingPokedex = true);
-    try {
-      await _fetchPokedexEntries();
-    } finally {
-      if (mounted) {
-        _safeSetState(() => _isLoadingPokedex = false);
-      }
-    }
+    await _fetchPokedexEntries();
 
     if (!mounted) return;
 
@@ -7336,7 +7292,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                         if (hasDesc) ...[
                                           const SizedBox(height: 5),
                                           Text(
-                                            desc!,
+                                            desc,
                                             style: const TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.w600,
@@ -10388,27 +10344,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _renderingSettingsSupportDoc != null ||
         _isHelpPanelOpen ||
         _helpPanelSwapInProgress;
-  }
-
-  bool _isAnyGameMenuSurfaceActiveOrTransitioning() {
-    return _gameMenuPanelOpen ||
-        _gameMenuPanelRetracting ||
-        _isAnyGameMenuSubPanelOpenOrSwapping() ||
-        _gameMenuSubOutsideDismissController.isAnimating ||
-        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none ||
-        _gameProfileSwapController.isAnimating ||
-        _gameDietDiarySwapController.isAnimating ||
-        _gameBagSwapController.isAnimating ||
-        _gamePokedexSwapController.isAnimating ||
-        _gameStorySwapController.isAnimating ||
-        _gameSettingsSwapController.isAnimating ||
-        _gameHelpSwapController.isAnimating ||
-        _isShopNoticeOpen ||
-        _isRandomTicketUseConfirmOpen ||
-        _isWithdrawConfirmOpen ||
-        _isWithdrawFinalConfirmOpen ||
-        _isEmailLinkInviteNoticeOpen ||
-        _isEmailLinkSuccessNoticeOpen;
   }
 
   /// 우측 메뉴 아이콘: 패널이 닫히는 동안(슬라이드/마당 페이드) 배경에 유지.
@@ -14596,9 +14531,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dismissFocus();
     await _closeProfileSelectOverlay(animated: true);
 
+    if (!mounted) return false;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack(AppLocalizations.of(context).snackLoginRequired);
+      _showSnack(l10n.snackLoginRequired);
       return false;
     }
 
@@ -14609,8 +14546,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       await _showNameInterlockNotice();
       return false;
     }
-
-    final l10n = AppLocalizations.of(context);
     if (_selectedGender == null) {
       _showSnack(l10n.snackSelectGender);
       return false;
@@ -15454,12 +15389,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _fetchProfileAndRefreshSettingsUi() async {
-    await _fetchProfile();
-    if (!mounted) return;
-    _safeSetState(() {});
-  }
-
   Future<void> _openSettingsFromGameMenu() async {
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
@@ -15604,13 +15533,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _settingsSupportDocScrollbarReady = false;
       });
     });
-  }
-
-  Future<void> _closeSettingsSupportDocFromOutsideTap() async {
-    _safeSetState(() => _settingsSupportDocScrollbarReady = false);
-    await _dismissGameSubPanelWithCenterExit(
-      _GameMenuSubOutsideDismissKind.settings,
-    );
   }
 
   Widget _buildSettingsSupportDocAnimatedLayer({
@@ -16740,7 +16662,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
-        _isLoadingPokedex = false;
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _isUploadingMeal = false;
@@ -16933,8 +16854,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   await _fetchProfile();
 
                   if (!mounted) return;
-                  // 시트 컨텍스트를 await 이후에 직접 사용하지 않고, sheetCtx 로
-                  // 닫기만 수행한다. dispose 타이밍 안정화를 위해 한 frame 양보 후 SnackBar.
+                  if (!sheetCtx.mounted) return;
                   if (Navigator.of(sheetCtx).canPop()) {
                     Navigator.of(sheetCtx).pop();
                   }
@@ -16982,7 +16902,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedGender,
+                        initialValue: selectedGender,
                         decoration: const InputDecoration(
                           labelText: '성별',
                           prefixIcon: Icon(Icons.arrow_drop_down),
@@ -17005,7 +16925,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedDietGoal,
+                        initialValue: selectedDietGoal,
                         decoration: const InputDecoration(
                           labelText: '식단 목적',
                           prefixIcon: Icon(Icons.arrow_drop_down),
@@ -17320,7 +17240,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   child: Image.network(
                     imageUrl,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Padding(
+                    errorBuilder: (context, error, stackTrace) => const Padding(
                       padding: EdgeInsets.all(40),
                       child: Text(
                         '사진을 불러올 수 없어요.',
@@ -18503,68 +18423,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
-Widget _buildVegePetPastelBlueGradientButtonTextShared(
-  String text, {
-  double fontSize = 14,
-  FontWeight fontWeight = FontWeight.w600,
-}) {
-  // 영어 locale 의 descender (y/g/p) 가 그라데이션 클리핑으로 흰색이 되는 문제를
-  // 막기 위해 height 를 1.15 로 키운다. 한국어는 descender 가 없어 시각 영향이 없다.
-  return ShaderMask(
-    blendMode: BlendMode.srcIn,
-    shaderCallback: (bounds) => const LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
-    ).createShader(bounds),
-    child: Text(
-      text,
-      textAlign: TextAlign.center,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        fontSize: fontSize,
-        fontWeight: fontWeight,
-        color: Colors.white,
-        height: 1.15,
-      ),
-    ),
-  );
-}
-
-Widget _buildVegePetConfirmDialogShellShared({
-  required Widget child,
-  required double width,
-  required double height,
-}) {
-  return ClipRRect(
-    borderRadius: BorderRadius.circular(20),
-    child: BackdropFilter(
-      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.60),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.35),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.10),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: child,
-      ),
-    ),
-  );
-}
-
 // 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
 //
 // category 는 'ticket' | 'furniture' | 'toy' 중 하나.
@@ -19493,7 +19351,7 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                     Image.network(
                       url,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Center(
+                      errorBuilder: (context, error, stackTrace) => Center(
                         child: Text(
                           label,
                           textAlign: TextAlign.center,
