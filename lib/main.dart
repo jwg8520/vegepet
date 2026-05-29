@@ -16,6 +16,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:vegepet/l10n/app_localizations.dart';
+import 'package:vegepet/features/bag/bag_models.dart';
+import 'package:vegepet/features/profile/profile_label_helpers.dart';
+import 'package:vegepet/features/profile/profile_select_helpers.dart';
+import 'package:vegepet/features/settings/support_documents.dart';
+import 'package:vegepet/ui/vegepet_glass.dart';
+import 'package:vegepet/ui/vegepet_gradient_text.dart';
+import 'package:vegepet/ui/vegepet_notice_dialog.dart';
 
 const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
 const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
@@ -348,26 +355,6 @@ class _MealNotificationTexts {
   final List<String> messages;
 }
 
-enum _SupportDocType { terms, privacy, operation, guardian, dataDeletion }
-
-class _SupportDocumentSection {
-  const _SupportDocumentSection({required this.title, required this.body});
-
-  final String title;
-  final String body;
-}
-
-class _SupportDocument {
-  const _SupportDocument({required this.title, required this.sections});
-
-  final String title;
-  final List<_SupportDocumentSection> sections;
-}
-
-/// 게임 메뉴 하위 패널 대제목 top (한국어 14 · 영어 +1px, 뒤로가기 버튼은 9 고정).
-const double _kGameMenuSubPanelTitleTop = 14;
-const double _kGameMenuSubPanelTitleTopEnOffset = 1.0;
-
 enum _ViewStatus { loading, error, ready }
 
 class HomePage extends StatefulWidget {
@@ -381,12 +368,6 @@ class _HomePageState extends State<HomePage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   static const double _kGameCanvasWidth = 844;
   static const double _kGameCanvasHeight = 390;
-
-  /// VegePet 공통 확인창 — 844×390 논리좌표 (화면에는 FittedBox 와 동일 스케일로 맞춤).
-  static const double _kVegePetConfirmDialogLeft = 302;
-  static const double _kVegePetConfirmDialogTop = 129;
-  static const double _kVegePetConfirmDialogW = 240;
-  static const double _kVegePetConfirmDialogH = 116;
 
   /// 분양 후 이름 짓기 패널 — 프로필 입력창과 동일 앵커 (286, 83).
   static const double _kPetNicknameDialogLeft = 286;
@@ -564,7 +545,7 @@ class _HomePageState extends State<HomePage>
   /// 게임 메뉴 ↔ 가방 창 전환 (프로필/식단일지와 동일 계열)
   bool _isBagPanelOpen = false;
   bool _bagPanelSwapInProgress = false;
-  _BagItem? _bagPanelDetailItem;
+  BagItem? _bagPanelDetailItem;
   late AnimationController _gameBagSwapController;
   late Animation<double> _gameBagSwapCurve;
   bool _isPokedexPanelOpen = false;
@@ -592,8 +573,8 @@ class _HomePageState extends State<HomePage>
   late AnimationController _gameHelpSwapController;
   late Animation<double> _gameHelpSwapCurve;
   final ScrollController _settingsScrollController = ScrollController();
-  _SupportDocType? _activeSettingsSupportDoc;
-  _SupportDocType? _renderingSettingsSupportDoc;
+  SupportDocType? _activeSettingsSupportDoc;
+  SupportDocType? _renderingSettingsSupportDoc;
   bool _settingsSupportDocSwapInProgress = false;
   bool _settingsSupportDocScrollbarReady = false;
   final ScrollController _settingsSupportDocScrollController =
@@ -748,8 +729,6 @@ class _HomePageState extends State<HomePage>
   /// 844×390 마당 기준 우측 상단 게임 메뉴 글래스 패널.
   static const double _kGameMenuPanelLeft = 558;
   static const double _kGameMenuPanelTop = 40;
-  static const double _kGameMenuPanelW = 246;
-  static const double _kGameMenuPanelH = 310;
 
   /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
   static const double _kGameMenuPanelOffLeft = 844;
@@ -1674,57 +1653,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildProfileSelectManualScrollbar({
-    required double listHeight,
-    required int optionCount,
-  }) {
-    final controller = _profileSelectScrollController;
-    if (controller == null || optionCount <= 3) {
-      return const SizedBox.shrink();
-    }
-
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        if (!controller.hasClients) {
-          return const SizedBox.shrink();
-        }
-
-        const itemHeight = 30.0;
-        final contentHeight = optionCount * itemHeight;
-        final maxScroll = controller.position.maxScrollExtent;
-        if (maxScroll <= 0) {
-          return const SizedBox.shrink();
-        }
-
-        final thumbHeight = (listHeight * (listHeight / contentHeight)).clamp(
-          16.0,
-          listHeight,
-        );
-        final maxThumbTop = listHeight - thumbHeight;
-        final fraction = (controller.offset / maxScroll).clamp(0.0, 1.0);
-        final thumbTop = fraction * maxThumbTop;
-
-        return Stack(
-          children: [
-            Positioned(
-              top: thumbTop,
-              right: 0,
-              width: 3,
-              height: thumbHeight,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0x99000000),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   Widget _buildProfileSelectOptionsList({
     required List<String> options,
     required String? selectedValue,
@@ -1735,80 +1663,23 @@ class _HomePageState extends State<HomePage>
     Color selectedBackgroundColor = const Color(0xFFEFF6FF),
     Color splashColor = const Color(0xFFF4F8FF),
   }) {
-    final showScrollThumb = options.length > 3;
-    final listView = ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: ListView.builder(
-        controller: _profileSelectScrollController,
-        padding: EdgeInsets.only(right: showScrollThumb ? 8 : 0),
-        itemExtent: 30,
-        itemCount: options.length,
-        primary: false,
-        shrinkWrap: false,
-        physics: const ClampingScrollPhysics(),
-        itemBuilder: (context, index) {
-          final option = options[index];
-          final isSelected = option == selectedValue;
-          final isFirst = index == 0;
-          final isLast = index == options.length - 1;
-          return InkWell(
-            splashColor: splashColor.withValues(alpha: 0.45),
-            highlightColor: splashColor.withValues(alpha: 0.35),
-            hoverColor: splashColor.withValues(alpha: 0.25),
-            onTap: () {
-              onChanged(option);
-              unawaited(_closeProfileSelectOverlay());
-            },
-            child: Container(
-              height: 30,
-              width: double.infinity,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? selectedBackgroundColor : Colors.transparent,
-                borderRadius: BorderRadius.vertical(
-                  top: isFirst ? const Radius.circular(12) : Radius.zero,
-                  bottom: isLast ? const Radius.circular(12) : Radius.zero,
-                ),
-              ),
-              child: Text(
-                optionLabelBuilder?.call(option) ?? option,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.left,
-                style: TextStyle(
-                  fontSize: _isEnglishLocale && optionLabelBuilder != null
-                      ? 10
-                      : 11,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF4A4A4A),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    return SizedBox(
-      width: listWidth,
-      height: listHeight,
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
-        children: [
-          Positioned.fill(child: listView),
-          if (showScrollThumb)
-            Positioned(
-              right: 3,
-              top: 0,
-              bottom: 0,
-              width: 3,
-              child: _buildProfileSelectManualScrollbar(
-                listHeight: listHeight,
-                optionCount: options.length,
-              ),
-            ),
-        ],
-      ),
+    final controller = _profileSelectScrollController;
+    if (controller == null) return const SizedBox.shrink();
+    return buildProfileSelectOptionsList(
+      context: context,
+      scrollController: controller,
+      options: options,
+      selectedValue: selectedValue,
+      onChanged: (option) {
+        onChanged(option);
+        unawaited(_closeProfileSelectOverlay());
+      },
+      listWidth: listWidth,
+      listHeight: listHeight,
+      isEnglishLocale: _isEnglishLocale,
+      optionLabelBuilder: optionLabelBuilder,
+      selectedBackgroundColor: selectedBackgroundColor,
+      splashColor: splashColor,
     );
   }
 
@@ -4353,25 +4224,13 @@ class _HomePageState extends State<HomePage>
     int? maxLines,
     TextOverflow? overflow,
   }) {
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (bounds) => const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
-      ).createShader(bounds),
-      child: Text(
-        text,
-        textAlign: textAlign,
-        maxLines: maxLines,
-        overflow: overflow,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: fontWeight,
-          color: Colors.white,
-          height: 1.15,
-        ),
-      ),
+    return buildVegePetPastelBlueGradientButtonText(
+      text,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      textAlign: textAlign,
+      maxLines: maxLines,
+      overflow: overflow,
     );
   }
 
@@ -5511,19 +5370,8 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  _BagItem _bagWireframeRandomTicketDef() {
-    // name 슬롯에는 안정적인 code 만 들어가고, 화면에 표시될 때
-    // [_localizedBagItemName] / [_localizedBagItemDescription] 가 l10n 으로 변환한다.
-    return _BagItem(
-      category: 'ticket',
-      name: 'random_adoption_ticket',
-      description: '',
-      quantity: _effectiveRandomTicketCountForBag() > 0
-          ? _effectiveRandomTicketCountForBag()
-          : 1,
-      icon: Icons.confirmation_number_outlined,
-      usable: false,
-    );
+  BagItem _bagWireframeRandomTicketDef() {
+    return bagWireframeRandomTicketDef(_effectiveRandomTicketCountForBag());
   }
 
   /// VegePet 더미 아이콘 터치 정책:
@@ -5549,7 +5397,7 @@ class _HomePageState extends State<HomePage>
   /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
   /// 터치는 [_buildVegePetDummyIconInkWell] 와 동일: **아이콘 사각형만** onTap.
   Widget _buildBagWireframeDummyTile({
-    required _BagItem item,
+    required BagItem item,
     required VoidCallback onTap,
   }) {
     return Column(
@@ -5936,7 +5784,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 가방 아이템 설명창: 176×222 글래스 패널, 하늘빛 그라데이션 텍스트 「사용하기」는 분양권만.
-  Widget _buildBagDetailPreviewIcon(_BagItem item) {
+  Widget _buildBagDetailPreviewIcon(BagItem item) {
     return Container(
       width: 48,
       height: 48,
@@ -5994,7 +5842,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildBagItemDetailGlassPanel(_BagItem item) {
+  Widget _buildBagItemDetailGlassPanel(BagItem item) {
     final isTicket = item.category == 'ticket';
     final showUseInPanel = isTicket && _effectiveRandomTicketCountForBag() > 0;
     final nameStyle = TextStyle(
@@ -6062,30 +5910,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  List<_BagItem> _defaultToyBagItems() {
-    // name/description 슬롯에는 안정적인 code 만 들어가고, 화면 표시 시점에만
-    // [_localizedBagItemName] / [_localizedBagItemDescription] 으로 변환한다.
-    return const [
-      _BagItem(
-        category: 'toy',
-        name: 'bone_doll',
-        description: '',
-        quantity: 1,
-        icon: Icons.cruelty_free_outlined,
-        usable: false,
-        targetPetFamily: 'dog',
-      ),
-      _BagItem(
-        category: 'toy',
-        name: 'yarn_ball',
-        description: '',
-        quantity: 1,
-        icon: Icons.sports_baseball_outlined,
-        usable: false,
-        targetPetFamily: 'cat',
-      ),
-    ];
-  }
+  List<BagItem> _defaultToyBagItems() => defaultToyBagItems();
 
   // 도감 BottomSheet 열기 (레거시). 마당 게임 메뉴에서는 [_openPokedexPanelFromGameMenu] 사용.
   //
@@ -7197,32 +7022,14 @@ class _HomePageState extends State<HomePage>
     Color? backgroundColor,
     double shadowBlurRadius = 12,
   }) {
-    final bg = backgroundColor ?? Colors.white.withValues(alpha: 0.60);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-        child: Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: shadowBlurRadius,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: child,
-        ),
-      ),
+    return buildVegePetGlassPanel(
+      width: width,
+      height: height,
+      child: child,
+      borderRadius: borderRadius,
+      blurSigma: blurSigma,
+      backgroundColor: backgroundColor,
+      shadowBlurRadius: shadowBlurRadius,
     );
   }
 
@@ -7234,63 +7041,14 @@ class _HomePageState extends State<HomePage>
     bool useProfileTitleInset = false,
     TextStyle? titleStyle,
   }) {
-    final effectiveTitleStyle = titleStyle ??
-        const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF000000),
-          height: 1.0,
-        );
-    final titleWidget = Text(
-      title,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: effectiveTitleStyle,
+    return buildGameSubPanelHeader(
+      title: title,
+      onBack: onBack,
+      titleTop: _gameMenuSubPanelTitleTop,
+      showBackButton: showBackButton,
+      useProfileTitleInset: useProfileTitleInset,
+      titleStyle: titleStyle,
     );
-    final titleTop = _gameMenuSubPanelTitleTop;
-
-    return [
-      if (showBackButton)
-        Positioned(
-          left: 9,
-          top: 9,
-          width: 28,
-          height: 28,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onBack,
-              borderRadius: BorderRadius.circular(10),
-              child: const SizedBox(
-                width: 28,
-                height: 28,
-                child: Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 16,
-                  color: Color(0xFF000000),
-                ),
-              ),
-            ),
-          ),
-        ),
-      if (useProfileTitleInset)
-        Positioned(
-          left: 9,
-          top: titleTop,
-          right: 8,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 28),
-            child: titleWidget,
-          ),
-        )
-      else
-        Positioned(
-          left: 37,
-          top: titleTop,
-          right: 8,
-          child: titleWidget,
-        ),
-    ];
   }
 
   /// 게임 메뉴 하위 패널(246×310) shell + 헤더 + 본문 영역.
@@ -7299,8 +7057,8 @@ class _HomePageState extends State<HomePage>
     required Widget body,
     required VoidCallback onBack,
     bool showBackButton = true,
-    double width = _kGameMenuPanelW,
-    double height = _kGameMenuPanelH,
+    double width = kVegePetGameMenuPanelW,
+    double height = kVegePetGameMenuPanelH,
     double blurSigma = 10,
     double shadowBlurRadius = 12,
     double bodyTop = 48,
@@ -7311,35 +7069,23 @@ class _HomePageState extends State<HomePage>
     bool useProfileTitleInset = false,
     TextStyle? titleStyle,
   }) {
-    Widget bodyChild = body;
-    if (bodyPadding != EdgeInsets.zero) {
-      bodyChild = Padding(padding: bodyPadding, child: body);
-    }
-
-    return _buildVegePetGlassPanel(
+    return buildGameMenuSubPanelShell(
+      title: title,
+      body: body,
+      onBack: onBack,
+      titleTop: _gameMenuSubPanelTitleTop,
+      showBackButton: showBackButton,
       width: width,
       height: height,
       blurSigma: blurSigma,
       shadowBlurRadius: shadowBlurRadius,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          ..._buildGameSubPanelHeader(
-            title: title,
-            onBack: onBack,
-            showBackButton: showBackButton,
-            useProfileTitleInset: useProfileTitleInset,
-            titleStyle: titleStyle,
-          ),
-          Positioned(
-            left: bodyLeft,
-            right: bodyRight,
-            top: bodyTop,
-            bottom: bodyBottom ?? 0,
-            child: bodyChild,
-          ),
-        ],
-      ),
+      bodyTop: bodyTop,
+      bodyLeft: bodyLeft,
+      bodyRight: bodyRight,
+      bodyBottom: bodyBottom,
+      bodyPadding: bodyPadding,
+      useProfileTitleInset: useProfileTitleInset,
+      titleStyle: titleStyle,
     );
   }
 
@@ -7348,163 +7094,21 @@ class _HomePageState extends State<HomePage>
     required double width,
     required double height,
   }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.60),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.10),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: child,
-        ),
-      ),
+    return buildVegePetConfirmDialogShell(
+      child: child,
+      width: width,
+      height: height,
     );
   }
 
-  Widget _buildVegePetOneButtonNoticeDialog(_VegePetNoticeConfig config) {
-    final isEn = _isEnglishLocale;
-    final bodyFontSize =
-        config.bodyFontSizeEn != null && isEn ? config.bodyFontSizeEn! : 10.0;
-    final int? resolvedBodyMaxLines;
-    if (config.bodyMaxLinesEn != null || config.bodyMaxLinesKo != null) {
-      resolvedBodyMaxLines = isEn
-          ? (config.bodyMaxLinesEn ?? config.bodyMaxLinesKo)
-          : (config.bodyMaxLinesKo ?? config.bodyMaxLinesEn);
-    } else {
-      resolvedBodyMaxLines = config.bodyMaxLines;
-    }
-
-    // left/right 16 패딩 안 본문·제목 영역 (240 - 32 = 208).
-    const contentWidth = _kVegePetConfirmDialogW - 32;
-    const buttonWidth = _kVegePetConfirmDialogW - 16;
-
-    Widget titleBodyColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: contentWidth,
-          child: Text(
-            config.title,
-            textAlign: TextAlign.left,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            softWrap: false,
-            style: const TextStyle(
-              fontFamily: 'Pretendard',
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF000000),
-              height: 1.25,
-            ),
-          ),
-        ),
-        const SizedBox(height: 5),
-        SizedBox(
-          width: contentWidth,
-          child: Text(
-            config.body,
-            textAlign: TextAlign.left,
-            softWrap: true,
-            maxLines: resolvedBodyMaxLines,
-            overflow: config.bodyOverflow,
-            style: TextStyle(
-              fontFamily: 'Pretendard',
-              fontSize: bodyFontSize,
-              fontWeight: FontWeight.w600,
-              color: config.bodyColor,
-              height: 1.25,
-            ),
-          ),
-        ),
-      ],
-    );
-    if (config.titleBlockTranslateYOffset != 0) {
-      titleBodyColumn = Transform.translate(
-        offset: Offset(0, config.titleBlockTranslateYOffset),
-        child: titleBodyColumn,
-      );
-    }
-
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: titleBodyColumn,
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Align(
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: buttonWidth,
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(14),
-                  child: InkWell(
-                    onTap: config.onPrimaryTap,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Ink(
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: const Color(0xFFF1F1F1),
-                          width: 0.8,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.03),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Center(
-                        child: _buildPastelBlueGradientButtonText(
-                          config.primaryLabel,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+  Widget _buildVegePetOneButtonNoticeDialog(VegePetNoticeConfig config) {
+    return buildVegePetOneButtonNoticeDialog(
+      config,
+      isEnglishLocale: _isEnglishLocale,
     );
   }
 
-  Widget _buildVegePetOneButtonNoticeOverlay(_VegePetNoticeConfig config) {
+  Widget _buildVegePetOneButtonNoticeOverlay(VegePetNoticeConfig config) {
     if (!_isYardConfirmOverlayFadeVisible(config.isOpen)) {
       return const SizedBox.shrink();
     }
@@ -7519,10 +7123,10 @@ class _HomePageState extends State<HomePage>
 
     final dialog = _buildVegePetOneButtonNoticeDialog(config);
     final positionedDialog = Positioned(
-      left: _kVegePetConfirmDialogLeft,
-      top: _kVegePetConfirmDialogTop,
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
+      left: kVegePetConfirmDialogLeft,
+      top: kVegePetConfirmDialogTop,
+      width: kVegePetConfirmDialogW,
+      height: kVegePetConfirmDialogH,
       child: config.blockDialogPointerWithGestureDetector
           ? GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -7581,10 +7185,10 @@ class _HomePageState extends State<HomePage>
         final scale = min(sw / _kGameCanvasWidth, sh / _kGameCanvasHeight);
         final ox = (sw - _kGameCanvasWidth * scale) / 2;
         final oy = (sh - _kGameCanvasHeight * scale) / 2;
-        final dlgLeft = ox + _kVegePetConfirmDialogLeft * scale;
-        final dlgTop = oy + _kVegePetConfirmDialogTop * scale;
-        final dlgW = _kVegePetConfirmDialogW * scale;
-        final dlgH = _kVegePetConfirmDialogH * scale;
+        final dlgLeft = ox + kVegePetConfirmDialogLeft * scale;
+        final dlgTop = oy + kVegePetConfirmDialogTop * scale;
+        final dlgW = kVegePetConfirmDialogW * scale;
+        final dlgH = kVegePetConfirmDialogH * scale;
 
         return Dialog(
           insetPadding: EdgeInsets.zero,
@@ -7619,11 +7223,11 @@ class _HomePageState extends State<HomePage>
                     child: FittedBox(
                       fit: BoxFit.fill,
                       child: SizedBox(
-                        width: _kVegePetConfirmDialogW,
-                        height: _kVegePetConfirmDialogH,
+                        width: kVegePetConfirmDialogW,
+                        height: kVegePetConfirmDialogH,
                         child: _buildVegePetConfirmDialogShell(
-                          width: _kVegePetConfirmDialogW,
-                          height: _kVegePetConfirmDialogH,
+                          width: kVegePetConfirmDialogW,
+                          height: kVegePetConfirmDialogH,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -7878,7 +7482,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildNameInterlockNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isNameInterlockNoticeOpen,
         title: l10n.nameInterlockMain,
         body: l10n.nameInterlockSub,
@@ -7895,7 +7499,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildProfileSelectMissingNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isProfileSelectMissingNoticeOpen,
         title: l10n.profileSelectMissingNoticeTitle,
         body: l10n.profileSelectMissingNoticeBody,
@@ -7914,7 +7518,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildMaturityCompleteNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isMaturityCompleteNoticeOpen,
         title: l10n.maturityCompleteNoticeTitle,
         body: l10n.maturityCompleteNoticeBody,
@@ -7933,7 +7537,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildPokedexCompleteTicketNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isPokedexCompleteTicketNoticeOpen,
         title: l10n.pokedexCompleteTicketNoticeTitle,
         body: l10n.pokedexCompleteTicketNoticeBody,
@@ -7952,7 +7556,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildShopNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isShopNoticeOpen,
         title: l10n.shopNoticeTitle,
         body: l10n.shopNoticeDescription,
@@ -8000,13 +7604,13 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
+              left: kVegePetConfirmDialogLeft,
+              top: kVegePetConfirmDialogTop,
+              width: kVegePetConfirmDialogW,
+              height: kVegePetConfirmDialogH,
               child: _buildVegePetConfirmDialogShell(
-                width: _kVegePetConfirmDialogW,
-                height: _kVegePetConfirmDialogH,
+                width: kVegePetConfirmDialogW,
+                height: kVegePetConfirmDialogH,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -8155,7 +7759,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildEmailLinkSuccessNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isEmailLinkSuccessNoticeOpen,
         title: l10n.emailLinkSuccessTitle,
         body: l10n.emailLinkSuccessBody,
@@ -8170,7 +7774,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildEmailFormatErrorNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isEmailFormatErrorNoticeOpen,
         title: l10n.emailFormatErrorTitle,
         body: l10n.emailFormatErrorBody,
@@ -8185,7 +7789,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildEmailOtpInvalidNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isEmailOtpInvalidNoticeOpen,
         title: l10n.emailOtpInvalidNoticeTitle,
         body: l10n.emailOtpInvalidNoticeBody,
@@ -8201,7 +7805,7 @@ class _HomePageState extends State<HomePage>
     final l10n = AppLocalizations.of(context);
     final isEn = _isEnglishLocale;
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isEmailDuplicateNoticeOpen,
         title: l10n.emailDuplicateNoticeTitle,
         body: l10n.emailDuplicateNoticeBody,
@@ -8220,7 +7824,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
-      _VegePetNoticeConfig(
+      VegePetNoticeConfig(
         isOpen: _isDuplicatePetNameNoticeOpen,
         title: l10n.duplicatePetNameNoticeTitle,
         body: l10n.duplicatePetNameNoticeBody,
@@ -8238,8 +7842,8 @@ class _HomePageState extends State<HomePage>
     final resetting = _isResettingToGuestAfterRemoteLogout;
 
     return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
+      width: kVegePetConfirmDialogW,
+      height: kVegePetConfirmDialogH,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -8344,10 +7948,10 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
+              left: kVegePetConfirmDialogLeft,
+              top: kVegePetConfirmDialogTop,
+              width: kVegePetConfirmDialogW,
+              height: kVegePetConfirmDialogH,
               child: _buildRemoteEmailLinkedLogoutNoticeDialog(),
             ),
           ],
@@ -8424,10 +8028,10 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
+              left: kVegePetConfirmDialogLeft,
+              top: kVegePetConfirmDialogTop,
+              width: kVegePetConfirmDialogW,
+              height: kVegePetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
@@ -8458,8 +8062,8 @@ class _HomePageState extends State<HomePage>
     );
 
     return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
+      width: kVegePetConfirmDialogW,
+      height: kVegePetConfirmDialogH,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -8606,16 +8210,16 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
+              left: kVegePetConfirmDialogLeft,
+              top: kVegePetConfirmDialogTop,
+              width: kVegePetConfirmDialogW,
+              height: kVegePetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
                 child: _buildVegePetConfirmDialogShell(
-                  width: _kVegePetConfirmDialogW,
-                  height: _kVegePetConfirmDialogH,
+                  width: kVegePetConfirmDialogW,
+                  height: kVegePetConfirmDialogH,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -8799,16 +8403,16 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
+              left: kVegePetConfirmDialogLeft,
+              top: kVegePetConfirmDialogTop,
+              width: kVegePetConfirmDialogW,
+              height: kVegePetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
                 child: _buildVegePetConfirmDialogShell(
-                  width: _kVegePetConfirmDialogW,
-                  height: _kVegePetConfirmDialogH,
+                  width: kVegePetConfirmDialogW,
+                  height: kVegePetConfirmDialogH,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -11375,7 +10979,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildToyDropTargetOverlay() {
-    return DragTarget<_BagItem>(
+    return DragTarget<BagItem>(
       onWillAcceptWithDetails: (details) {
         final item = details.data;
         return item.category == 'toy' &&
@@ -11931,7 +11535,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildToyMenuDraggableItem(_BagItem toy, bool canUse) {
+  Widget _buildToyMenuDraggableItem(BagItem toy, bool canUse) {
     final iconVisual = _buildToyMenuIconVisual(toy, canUse);
     final child = Column(
       mainAxisSize: MainAxisSize.min,
@@ -11964,7 +11568,7 @@ class _HomePageState extends State<HomePage>
       return Opacity(opacity: 0.35, child: IgnorePointer(child: child));
     }
 
-    return LongPressDraggable<_BagItem>(
+    return LongPressDraggable<BagItem>(
       data: toy,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: Material(
@@ -11985,7 +11589,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildToyMenuIconVisual(_BagItem toy, bool canUse) {
+  Widget _buildToyMenuIconVisual(BagItem toy, bool canUse) {
     final theme = Theme.of(context);
     return Container(
       width: 48,
@@ -12152,7 +11756,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  Future<void> _completeToyMenuDrop(_BagItem toy) async {
+  Future<void> _completeToyMenuDrop(BagItem toy) async {
     if (_isCompletingToyPlay) return;
 
     final l10n = AppLocalizations.of(context);
@@ -13051,8 +12655,8 @@ class _HomePageState extends State<HomePage>
       curve: _kYardSidePanelSlideCurve,
       left: targetLeft,
       top: _kGameMenuPanelTop,
-      width: _kGameMenuPanelW,
-      height: _kGameMenuPanelH,
+      width: kVegePetGameMenuPanelW,
+      height: kVegePetGameMenuPanelH,
       child: yardExit < 0.999
           ? _buildGameMenuPanelCrossfadeStack()
           : AnimatedOpacity(
@@ -13466,8 +13070,8 @@ class _HomePageState extends State<HomePage>
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
-          width: _kGameMenuPanelW,
-          height: _kGameMenuPanelH,
+          width: kVegePetGameMenuPanelW,
+          height: kVegePetGameMenuPanelH,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.60),
             borderRadius: BorderRadius.circular(20),
@@ -14203,8 +13807,8 @@ class _HomePageState extends State<HomePage>
     final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
     // 식단일지/설정 글래스만 blur 완화(10→6). 헤더·달력 레이아웃은 _DietDiarySheetPanel 유지.
     return _buildVegePetGlassPanel(
-      width: _kGameMenuPanelW,
-      height: _kGameMenuPanelH,
+      width: kVegePetGameMenuPanelW,
+      height: kVegePetGameMenuPanelH,
       blurSigma: 6,
       child: RepaintBoundary(
         child: _DietDiarySheetPanel(
@@ -14688,7 +14292,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  void _scheduleSettingsSupportDocScrollbarReady(_SupportDocType type) {
+  void _scheduleSettingsSupportDocScrollbarReady(SupportDocType type) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -14702,7 +14306,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  void _openSettingsSupportDocPanel(_SupportDocType type) {
+  void _openSettingsSupportDocPanel(SupportDocType type) {
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     debugPrint('open support doc: active=$type rendering=$type');
@@ -14747,12 +14351,12 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildSettingsSupportDocAnimatedLayer({
-    required _SupportDocType docType,
+    required SupportDocType docType,
     required AppLocalizations l10n,
     required bool layerVisible,
   }) {
     final safeLocaleCode = _safeLocaleCodeForBuild(context);
-    final document = _buildSupportDocument(docType, safeLocaleCode, l10n);
+    final document = buildSupportDocument(docType, safeLocaleCode, l10n);
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
@@ -14764,7 +14368,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildSettingsSupportDocScrollBody(_SupportDocument doc) {
+  Widget _buildSettingsSupportDocScrollBody(SupportDocument doc) {
     const sectionTitleStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 11,
@@ -15129,8 +14733,8 @@ class _HomePageState extends State<HomePage>
     }
 
     return _buildVegePetGlassPanel(
-      width: _kGameMenuPanelW,
-      height: _kGameMenuPanelH,
+      width: kVegePetGameMenuPanelW,
+      height: kVegePetGameMenuPanelH,
       blurSigma: supportDocBlur,
       child: Stack(
         clipBehavior: Clip.none,
@@ -15354,35 +14958,35 @@ class _HomePageState extends State<HomePage>
                           supportNavRow(
                             l10n.termsOfService,
                             () => _openSettingsSupportDocPanel(
-                              _SupportDocType.terms,
+                              SupportDocType.terms,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.privacyPolicy,
                             () => _openSettingsSupportDocPanel(
-                              _SupportDocType.privacy,
+                              SupportDocType.privacy,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.operationPolicy,
                             () => _openSettingsSupportDocPanel(
-                              _SupportDocType.operation,
+                              SupportDocType.operation,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.guardianGuide,
                             () => _openSettingsSupportDocPanel(
-                              _SupportDocType.guardian,
+                              SupportDocType.guardian,
                             ),
                           ),
                           const SizedBox(height: 6),
                           supportNavRow(
                             l10n.accountDataDeletionGuide,
                             () => _openSettingsSupportDocPanel(
-                              _SupportDocType.dataDeletion,
+                              SupportDocType.dataDeletion,
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -15400,315 +15004,6 @@ class _HomePageState extends State<HomePage>
         ],
       ),
     );
-  }
-
-  _SupportDocument _buildSupportDocument(
-    _SupportDocType type,
-    String localeCode,
-    AppLocalizations l10n,
-  ) {
-    final isEn = localeCode == 'en';
-
-    switch (type) {
-      case _SupportDocType.terms:
-        return _SupportDocument(
-          title: l10n.termsOfService,
-          sections: [
-            _SupportDocumentSection(
-              title: isEn ? '1. Purpose' : '1. 목적',
-              body: isEn
-                  ? 'This document explains the basic rules and terms for using VegePet.'
-                  : '베지펫 서비스 이용 조건과 기본 규칙을 안내합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '2. What VegePet Provides' : '2. 서비스 내용',
-              body: isEn
-                  ? 'VegePet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be limited during the MVP phase or added later.'
-                  : '식단 사진 인증, AI 기반 식단 평가, 펫 육성, 도감/가방/식단일지/설정 기능을 제공합니다. 일부 기능은 MVP 단계 또는 추후 업데이트 대상일 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '3. Account & Email Linking' : '3. 계정 및 이메일 연동',
-              body: isEn
-                  ? 'Users can start as a guest and optionally link an email account via OTP. Users are responsible for entering their own valid email address.'
-                  : '게스트 체험 계정으로 시작할 수 있으며 OTP로 이메일 연동이 가능합니다. 사용자는 본인 이메일을 정확히 입력해야 합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '4. User Responsibilities' : '4. 사용자 책임',
-              body: isEn
-                  ? 'Users must not enter false information, use another person’s email, or attempt abnormal/system-abusive access.'
-                  : '허위 정보 입력, 타인 이메일 사용, 비정상 접근 및 시스템 악용을 금지합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '5. Health Notice' : '5. 식단 평가와 건강 관련 고지',
-              body: isEn
-                  ? 'AI meal feedback is for reference only and is not medical diagnosis or treatment. Consult professionals for health conditions or dietary restrictions.'
-                  : 'AI 식단 평가는 참고용이며 의료/진단/치료 목적이 아닙니다. 건강 상태나 식단 제한이 있으면 전문가 상담이 필요합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '6. Game Items/Data' : '6. 아이템/분양권/게임 데이터',
-              body: isEn
-                  ? 'In-app items and tickets are for gameplay only, not cash-equivalent assets. Shop/payment features may be limited in MVP.'
-                  : '아이템과 분양권은 게임 내 기능이며 현금성 자산이 아닙니다. 상점/결제 기능은 MVP 단계에서 제한되거나 2차 오픈 예정일 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '7. Service Changes' : '7. 서비스 변경 및 중단',
-              body: isEn
-                  ? 'Features may be changed, improved, or suspended for operations, maintenance, and updates.'
-                  : '기능 개선, 오류 수정, 운영상 필요에 따라 서비스 내용이 변경되거나 중단될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '8. Use Restrictions' : '8. 이용 제한',
-              body: isEn
-                  ? 'VegePet may restrict service use for abuse, policy violations, or infringement of others’ rights.'
-                  : '비정상 이용, 시스템 악용, 타인 권리 침해 시 서비스 이용이 제한될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '9. Limitation of Liability' : '9. 책임 제한',
-              body: isEn
-                  ? 'Some features may be limited by network/device environments. VegePet does not guarantee health outcomes.'
-                  : '네트워크/기기 환경에 따라 일부 기능이 제한될 수 있으며, 앱은 건강 결과를 보장하지 않습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '10. Contact' : '10. 문의',
-              body: 'acoustic.jwg@gmail.com',
-            ),
-          ],
-        );
-      case _SupportDocType.privacy:
-        return _SupportDocument(
-          title: l10n.privacyPolicy,
-          sections: [
-            _SupportDocumentSection(
-              title: isEn ? '1. Data We Collect' : '1. 수집하는 정보',
-              body: isEn
-                  ? 'Account info (anonymous user id, linked email), profile info (nickname, gender, age range, diet goal), pet/game data, meal photos/logs, settings and technical logs may be collected.'
-                  : '계정 정보(익명 사용자 ID, 이메일 연동 시 이메일), 프로필 정보, 펫/게임 데이터, 식단 사진/기록, 설정 정보, 기술 로그 등이 수집될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '2. Collection Methods' : '2. 수집 방법',
-              body: isEn
-                  ? 'Data is collected via user input, meal photo uploads, and automatic records generated during app use through Supabase services.'
-                  : '사용자 직접 입력, 식단 사진 업로드, 앱 이용 과정에서 자동 생성되는 기록을 통해 수집하며 Supabase 서비스를 통해 저장됩니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '3. Purposes of Use' : '3. 이용 목적',
-              body: isEn
-                  ? 'Data is used for account identification, data continuity, meal evaluation, gameplay features, notifications, support responses, and service improvement.'
-                  : '계정 식별, 데이터 유지, 식단 인증/평가, 게임 기능 제공, 알림 제공, 고객 문의 대응, 오류 수정 및 서비스 개선에 사용됩니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '4. Third-party Processing' : '4. 제3자 처리/외부 서비스',
-              body: isEn
-                  ? 'VegePet may use Supabase (auth/database/storage/functions), OpenAI (meal analysis), and platform services from Apple/Google. Remote push providers may be added later.'
-                  : 'Supabase(인증/DB/스토리지/함수), OpenAI(식단 분석), Apple/Google 플랫폼 기능을 사용하며, 원격 푸시는 추후 FCM 등 외부 서비스를 사용할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '5. Meal Photo Caution' : '5. 식단 사진 및 민감 정보 주의',
-              body: isEn
-                  ? 'Users should avoid including personal identifiers in meal photos and avoid entering sensitive health details in notes.'
-                  : '식단 사진에 개인 식별 정보가 노출되지 않도록 촬영하고, 민감한 건강 정보를 기록에 입력하지 않도록 권장합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '6. Retention' : '6. 보관 기간',
-              body: isEn
-                  ? 'Data is deleted upon account deletion request unless legal retention requirements apply. Backup/log records may be retained for a limited period.'
-                  : '회원 탈퇴 또는 삭제 요청 시 데이터를 삭제하며, 법령상 보관 의무가 있는 경우 예외가 있을 수 있습니다. 백업/로그는 일정 기간 보관될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '7. Account & Data Deletion' : '7. 계정 및 데이터 삭제',
-              body: isEn
-                  ? 'Users can delete data in Settings > Account > Delete Account. External deletion requests can be sent to acoustic.jwg@gmail.com.'
-                  : '설정 > 계정 > 회원 탈퇴에서 계정 및 관련 데이터 삭제가 가능합니다. 앱 접근이 어려우면 acoustic.jwg@gmail.com으로 삭제 요청할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '8. User Rights' : '8. 사용자 권리',
-              body: isEn
-                  ? 'Users may request access, correction, linkage updates, or deletion of their data.'
-                  : '사용자는 열람, 수정, 삭제, 계정 연동 관련 요청을 할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '9. Children & Guardians' : '9. 아동 및 보호자',
-              body: isEn
-                  ? 'Minor users should use VegePet under guardian guidance. Guardian verification may be required under local laws.'
-                  : '미성년자는 보호자 지도하에 사용을 권장하며, 관련 법령에 따라 보호자 동의가 필요할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '10. Security' : '10. 보안',
-              body: isEn
-                  ? 'Reasonable protection measures are applied, but complete security cannot be guaranteed in all internet/mobile environments.'
-                  : '합리적인 보호 조치를 적용하지만 인터넷/모바일 환경 특성상 완전한 보안을 보장할 수는 없습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '11. Policy Updates' : '11. 변경 고지',
-              body: isEn
-                  ? 'Policy updates may be announced in-app or via update notices.'
-                  : '정책 변경 시 앱 내 공지 또는 업데이트 안내를 통해 고지할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '12. Contact' : '12. 문의',
-              body: 'acoustic.jwg@gmail.com',
-            ),
-          ],
-        );
-      case _SupportDocType.operation:
-        return _SupportDocument(
-          title: l10n.operationPolicy,
-          sections: [
-            _SupportDocumentSection(
-              title: isEn ? '1. Purpose' : '1. 운영 목적',
-              body: isEn
-                  ? 'Provide a stable meal-recording and VegePet growth experience.'
-                  : '안정적인 식단 기록 및 베지펫 육성 경험 제공을 목적으로 운영합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '2. Service Principles' : '2. 서비스 운영 원칙',
-              body: isEn
-                  ? 'We prioritize reliability, bug fixes, and feature improvements while distinguishing MVP and future features.'
-                  : '오류 수정, 기능 개선, 데이터 안정성을 우선하며 MVP 기능과 향후 기능을 구분해 운영합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '3. Prohibited Activities' : '3. 금지 행위',
-              body: isEn
-                  ? 'Using others’ accounts/emails, tampering with data, abnormal requests, and repeated false certification are prohibited.'
-                  : '타인 계정/이메일 사용, 데이터 변조, 비정상 요청, 허위 인증 반복 등은 금지됩니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '4. Data Management' : '4. 데이터 및 기록 관리',
-              body: isEn
-                  ? 'Meal photos, diary entries, and pet data are managed per user account; logs may be used for error analysis.'
-                  : '식단 사진/일지/펫 데이터는 계정 기준으로 관리되며, 오류 분석을 위해 일부 로그를 활용할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '5. AI Evaluation Operations' : '5. AI 식단 평가 운영 기준',
-              body: isEn
-                  ? 'AI meal feedback is for reference only and may vary depending on photo quality or the surrounding environment. Re-capture guidance may be shown for uncertain results.'
-                  : 'AI 결과는 참고용이며 사진 품질/조명 등에 따라 달라질 수 있습니다. 불확실 판정 시 재촬영 안내가 제공될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '6. Notifications' : '6. 알림 운영',
-              body: isEn
-                  ? 'Meal reminders can be toggled by users. Announcement/event notifications may be sent in later updates.'
-                  : '먹이 알림은 사용자가 ON/OFF할 수 있으며, 공지/이벤트 알림은 추후 운영자가 발송할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '7. Item/Reward Operations' : '7. 아이템/보상 운영',
-              body: isEn
-                  ? 'In-app items are gameplay elements. Shop/payment may be limited or deferred in MVP.'
-                  : '분양권/아이템은 게임 진행용 요소이며 상점/결제는 MVP에서 제한되거나 2차 오픈 예정일 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '8. Restrictions & Actions' : '8. 이용 제한 및 조치',
-              body: isEn
-                  ? 'Service use may be restricted for serious abuse, security threats, or rights infringement.'
-                  : '심각한 악용, 보안 위협, 권리 침해 행위에 대해 이용 제한 조치가 이뤄질 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '9. Policy Updates' : '9. 정책 변경',
-              body: isEn
-                  ? 'Operational policies may change as needed for service sustainability.'
-                  : '서비스 운영상 필요에 따라 운영정책이 변경될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '10. Contact' : '10. 문의',
-              body: 'acoustic.jwg@gmail.com',
-            ),
-          ],
-        );
-      case _SupportDocType.guardian:
-        return _SupportDocument(
-          title: l10n.guardianGuide,
-          sections: [
-            _SupportDocumentSection(
-              title: isEn ? '1. About VegePet' : '1. 베지펫 소개',
-              body: isEn
-                  ? 'VegePet is a gamified diet management app that combines meal verification with raising a virtual pet.'
-                  : '베지펫은 식단 인증과 펫 육성을 결합한 게임형 식단관리 앱입니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn
-                  ? '2. Why Guardian Guidance Matters'
-                  : '2. 보호자 확인이 필요한 이유',
-              body: isEn
-                  ? 'The app may handle profile and meal-related information, so guardian guidance is recommended for minors.'
-                  : '앱은 프로필/식단 관련 정보를 다룰 수 있어 미성년자는 보호자 지도하에 사용하는 것을 권장합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '3. Meal Photo Safety' : '3. 식단 사진 촬영 주의',
-              body: isEn
-                  ? 'Avoid capturing personal identifiers such as faces, addresses, school names, or contact details.'
-                  : '얼굴, 주소, 학교명, 연락처 등 개인 식별 정보가 노출되지 않도록 음식 중심으로 촬영해주세요.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '4. Health Caution' : '4. 건강 관련 주의',
-              body: isEn
-                  ? 'AI meal feedback does not replace professional medical or nutrition advice.'
-                  : 'AI 식단 평가는 참고용이며 의료 조언을 대체하지 않습니다. 필요한 경우 전문가 상담이 필요합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '5. Payments & Shop' : '5. 결제 및 상점',
-              body: isEn
-                  ? 'In MVP, payment/shop features may be limited or unavailable. Future paid features should include guardian-friendly notices.'
-                  : 'MVP에서는 상점/결제가 제한 또는 2차 오픈 예정이며, 유료 기능 추가 시 보호자 확인 고지가 강화되어야 합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '6. Notification Control' : '6. 알림 관리',
-              body: isEn
-                  ? 'Meal and announcement notifications can be turned on or off in Settings.'
-                  : '먹이 알림과 공지 알림은 설정에서 ON/OFF할 수 있어 보호자가 이용 상태를 확인할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '7. Account & Data Deletion' : '7. 계정 및 데이터 삭제',
-              body: isEn
-                  ? 'Data can be deleted from Settings > Account > Delete Account. Guardians may request deletion via email.'
-                  : '설정 > 계정 > 회원 탈퇴로 데이터 삭제가 가능하며, 보호자는 이메일로 삭제를 요청할 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '8. Healthy Use Habits' : '8. 안전한 이용 습관',
-              body: isEn
-                  ? 'Avoid excessive use and review meal habits together. Prioritize real health status and professional guidance.'
-                  : '과도한 사용을 피하고 보호자와 함께 식단을 점검하세요. 앱 결과보다 실제 건강 상태를 우선하세요.',
-            ),
-          ],
-        );
-      case _SupportDocType.dataDeletion:
-        return _SupportDocument(
-          title: l10n.accountDataDeletionGuide,
-          sections: [
-            _SupportDocumentSection(
-              title: isEn ? '1. In-app Deletion Path' : '1. 앱 내 삭제 경로',
-              body: isEn
-                  ? 'Go to Settings > Account > Delete Account to remove your account and related data.'
-                  : '설정 > 계정 > 회원 탈퇴에서 계정 및 관련 데이터 삭제가 가능합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '2. Data That Will Be Deleted' : '2. 삭제되는 데이터',
-              body: isEn
-                  ? 'Profile data, linked email info, pet/collection/bag/ticket records, meal photos/logs, and diary entries are deleted.'
-                  : '프로필, 이메일 연동 정보, 펫/도감/가방/분양권 데이터, 식단 사진/인증 기록, 식단일지 입력값 등이 삭제됩니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn
-                  ? '3. Data That May Be Retained'
-                  : '3. 삭제되지 않거나 별도 보관될 수 있는 정보',
-              body: isEn
-                  ? 'Legally required records may be retained for required periods. Non-identifying logs/backups may be deleted after retention windows.'
-                  : '법령상 보관 의무가 있는 정보는 필요한 기간 보관될 수 있으며, 비식별 로그/백업은 일정 기간 후 삭제될 수 있습니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '4. External Deletion Request' : '4. 앱 외부 삭제 요청',
-              body: isEn
-                  ? 'If app access is unavailable, send a request to acoustic.jwg@gmail.com.'
-                  : '앱 접근이 어려운 경우 acoustic.jwg@gmail.com 으로 삭제 요청이 가능합니다.',
-            ),
-            _SupportDocumentSection(
-              title: isEn ? '5. Processing Timeline' : '5. 처리 기간',
-              body: isEn
-                  ? 'Requests are processed within a reasonable period after confirmation. Additional identity verification may be required.'
-                  : '요청 확인 후 합리적인 기간 내 처리되며, 본인 확인을 위해 추가 정보 요청이 있을 수 있습니다.',
-            ),
-          ],
-        );
-    }
   }
 
   /// 회원 탈퇴: 사용자 데이터 삭제 후 익명 세션으로 재시작.
@@ -16733,9 +16028,9 @@ class _HomePageState extends State<HomePage>
               Positioned(
                 left: 37,
                 top:
-                    _kGameMenuSubPanelTitleTop +
+                    kVegePetGameMenuSubPanelTitleTop +
                     (Localizations.localeOf(sheetContext).languageCode == 'en'
-                        ? _kGameMenuSubPanelTitleTopEnOffset
+                        ? kVegePetGameMenuSubPanelTitleTopEnOffset
                         : 0.0),
                 right: 8,
                 child: Text(
@@ -17345,110 +16640,45 @@ class _HomePageState extends State<HomePage>
   // ---------- 공통 유틸 ----------
 
   /// 현재 적용된 앱 locale 이 영어인지 확인. fontSize/창 높이/문구 분기에 사용한다.
-  /// 한국어 UI는 기존 동작을 그대로 유지하고, 영어 UI 만 보정한다.
-  bool get _isEnglishLocale {
-    return Localizations.localeOf(context).languageCode == 'en';
-  }
+  bool get _isEnglishLocale => isEnglishLocale(context);
 
-  double get _gameMenuSubPanelTitleTop =>
-      _kGameMenuSubPanelTitleTop +
-      (_isEnglishLocale ? _kGameMenuSubPanelTitleTopEnOffset : 0.0);
+  double get _gameMenuSubPanelTitleTop => gameMenuSubPanelTitleTop(context);
 
-  /// DB/내부 raw 값 → 화면 표시용. 저장·AI context에는 raw 를 그대로 쓴다.
   String _localizedGenderValue(String? raw, AppLocalizations l10n) {
-    final value = raw?.trim() ?? '';
-    if (!_isEnglishLocale) return value;
-
-    switch (value) {
-      case '여자':
-        return 'Female';
-      case '남자':
-        return 'Male';
-      default:
-        return value;
-    }
+    return localizedGenderValue(raw, isEnglishLocale: _isEnglishLocale);
   }
 
   String _localizedAgeRangeValue(String? raw, AppLocalizations l10n) {
-    final value = raw?.trim() ?? '';
-    if (!_isEnglishLocale) return value;
-
-    switch (value) {
-      case '10대':
-        return 'Teens';
-      case '20대':
-        return '20s';
-      case '30대':
-        return '30s';
-      case '40대':
-        return '40s';
-      case '50대':
-        return '50s';
-      default:
-        return value;
-    }
+    return localizedAgeRangeValue(raw, isEnglishLocale: _isEnglishLocale);
   }
 
   String _localizedDietGoalValue(String? raw, AppLocalizations l10n) {
-    final value = raw?.trim() ?? '';
-    if (!_isEnglishLocale) return value;
-
-    switch (value) {
-      case '다이어트':
-        return 'Weight Loss';
-      case '근력향상':
-        return 'Muscle Gain';
-      case '혈당조정':
-        return 'Blood Sugar Control';
-      default:
-        return value;
-    }
+    return localizedDietGoalValue(raw, isEnglishLocale: _isEnglishLocale);
   }
 
-  /// pet_species.name_ko 기반 종류명 표시. 정보창 Type·도감 종 이름에 사용.
-  /// family(강아지/고양이) 분류는 [_normalizePetFamily] · [_familyToKorean] 등에 사용.
-  /// 추후 name_en 컬럼이 생기면 여기서 우선 적용하도록 확장 가능.
   String _localizedPetSpeciesNameFromRaw({
     required String? nameKo,
     String? family,
     String? code,
   }) {
-    final rawName = nameKo?.trim() ?? '';
-    if (!_isEnglishLocale) return rawName;
+    return localizedPetSpeciesNameFromRaw(
+      nameKo: nameKo,
+      family: family,
+      code: code,
+      isEnglishLocale: _isEnglishLocale,
+    );
+  }
 
-    final lowerFamily = family?.trim().toLowerCase() ?? '';
-    final lowerCode = code?.trim().toLowerCase() ?? '';
+  String _menuLabelForKey(String key) {
+    return menuLabelForKey(key, AppLocalizations.of(context));
+  }
 
-    int? number;
-    final numberMatch = RegExp(r'(\d+)$').firstMatch(rawName);
-    if (numberMatch != null) {
-      number = int.tryParse(numberMatch.group(1)!);
-    }
+  String _localizedBagItemName(BagItem item) {
+    return localizedBagItemName(item, AppLocalizations.of(context));
+  }
 
-    String familyLabel;
-    if (rawName.contains('고양이') ||
-        rawName.contains('냥') ||
-        lowerFamily == 'cat' ||
-        lowerCode.contains('cat')) {
-      familyLabel = 'Cat';
-    } else if (rawName.contains('강아지') ||
-        rawName.contains('댕') ||
-        lowerFamily == 'dog' ||
-        lowerCode.contains('dog')) {
-      familyLabel = 'Dog';
-    } else {
-      familyLabel = 'VegePet';
-    }
-
-    if (number != null) {
-      return '$familyLabel $number';
-    }
-
-    if (rawName.isNotEmpty) {
-      return familyLabel == 'VegePet' ? rawName : familyLabel;
-    }
-
-    return familyLabel;
+  String _localizedBagItemDescription(BagItem item) {
+    return localizedBagItemDescription(item, AppLocalizations.of(context));
   }
 
   String _familyToKorean(String family) {
@@ -17476,63 +16706,6 @@ class _HomePageState extends State<HomePage>
         return l10n.stageAdult;
       default:
         return stage;
-    }
-  }
-
-  /// 메뉴 라벨 key → 현재 locale 표시 문자열.
-  /// `_menuSheetItems` 의 String 슬롯은 안정적인 key 만 들고 다니며, 실제 표시는
-  /// 이 함수에서 l10n 으로 매핑한다. onTap 분기도 key 기준으로 한다.
-  String _menuLabelForKey(String key) {
-    final l10n = AppLocalizations.of(context);
-    switch (key) {
-      case 'profile':
-        return l10n.menuLabelProfile;
-      case 'dietDiary':
-        return l10n.menuLabelDietDiary;
-      case 'bag':
-        return l10n.menuLabelBag;
-      case 'shop':
-        return l10n.menuLabelShop;
-      case 'pokedex':
-        return l10n.menuLabelPokedex;
-      case 'story':
-        return l10n.menuLabelStory;
-      case 'help':
-        return l10n.menuLabelHelp;
-      case 'settings':
-        return l10n.menuLabelSettings;
-      default:
-        return key;
-    }
-  }
-
-  /// 가방/놀아주기 아이템 표시명. _BagItem 의 name 슬롯에는 안정적인 code 가
-  /// 들어가고, 실제 화면 표시 시점에만 l10n 으로 변환한다.
-  String _localizedBagItemName(_BagItem item) {
-    final l10n = AppLocalizations.of(context);
-    switch (item.name) {
-      case 'random_adoption_ticket':
-        return l10n.bagItemRandomTicketName;
-      case 'bone_doll':
-        return l10n.bagItemBoneDollName;
-      case 'yarn_ball':
-        return l10n.bagItemYarnBallName;
-      default:
-        return item.name;
-    }
-  }
-
-  String _localizedBagItemDescription(_BagItem item) {
-    final l10n = AppLocalizations.of(context);
-    switch (item.name) {
-      case 'random_adoption_ticket':
-        return l10n.bagItemRandomTicketDesc;
-      case 'bone_doll':
-        return l10n.bagItemBoneDollDesc;
-      case 'yarn_ball':
-        return l10n.bagItemYarnBallDesc;
-      default:
-        return item.description;
     }
   }
 
@@ -17583,78 +16756,7 @@ class _HomePageState extends State<HomePage>
   }
 }
 
-/// 마당 240×116 Glassmorphism 단일 확인 버튼 알림창 공통 설정.
-class _VegePetNoticeConfig {
-  const _VegePetNoticeConfig({
-    required this.isOpen,
-    required this.title,
-    required this.body,
-    required this.primaryLabel,
-    required this.onPrimaryTap,
-    this.onOutsideTap,
-    this.outsideDismissible = true,
-    this.bodyColor = const Color(0xFF4A4A4A),
-    this.bodyFontSizeEn,
-    this.bodyMaxLines,
-    this.bodyMaxLinesEn,
-    this.bodyMaxLinesKo,
-    this.bodyOverflow = TextOverflow.ellipsis,
-    this.titleBlockTranslateYOffset = 0,
-    this.useFadeTransitionForOverlay = false,
-    this.dismissKeyboardOnOutsideTapFirst = false,
-    this.blockDialogPointerWithGestureDetector = true,
-  });
-
-  final bool isOpen;
-  final String title;
-  final String body;
-  final String primaryLabel;
-  final VoidCallback onPrimaryTap;
-  final VoidCallback? onOutsideTap;
-  final bool outsideDismissible;
-  final Color bodyColor;
-  final double? bodyFontSizeEn;
-  final int? bodyMaxLines;
-  final int? bodyMaxLinesEn;
-  final int? bodyMaxLinesKo;
-  final TextOverflow bodyOverflow;
-  final double titleBlockTranslateYOffset;
-  final bool useFadeTransitionForOverlay;
-  final bool dismissKeyboardOnOutsideTapFirst;
-  final bool blockDialogPointerWithGestureDetector;
-}
-
-// 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
-//
-// category 는 'ticket' | 'furniture' | 'toy' 중 하나.
-class _BagItem {
-  final String category;
-  final String name;
-  final String description;
-  final int quantity;
-  final IconData icon;
-  // 사용하기 버튼 노출 여부. 분양권만 true 가 들어오고, 가구/장난감 등은 false.
-  final bool usable;
-  // toy 아이템의 종족 제한. 'dog' | 'cat' | null
-  final String? targetPetFamily;
-
-  const _BagItem({
-    required this.category,
-    required this.name,
-    required this.description,
-    required this.quantity,
-    required this.icon,
-    this.usable = false,
-    this.targetPetFamily,
-  });
-}
-
 // 펫 정보 BottomSheet 안의 애정도 경험치 바에서 사용하는 표시 정보.
-//
-// 다음 성장 단계까지의 진행도(progress: 0.0~1.0), 그 단계까지 남은 수치
-// 표시용 라벨, 그리고 성숙기(adult) 도달 여부 플래그(isComplete) 를 함께 들고 다닌다.
-//
-// MVP 단계라 main.dart 한 파일 안에서만 쓰이므로 private 으로 둔다.
 class _AffectionProgressInfo {
   const _AffectionProgressInfo({
     required this.current,
@@ -17671,12 +16773,6 @@ class _AffectionProgressInfo {
   final bool isComplete;
 }
 
-// ============================================================================
-// 식단일지 본문 (달력 / 월·연도 선택 / 상세 모드)
-// ----------------------------------------------------------------------------
-// mode / visibleMonth / selectedDate 는 이 State 에서만 관리한다.
-// 게임 메뉴 글래스 패널에 embed 할 때는 [embeddedInGameMenuPanel] 로 레이아웃만 분기한다.
-// ============================================================================
 class _DietDiarySheetPanel extends StatefulWidget {
   const _DietDiarySheetPanel({
     super.key,
@@ -17938,8 +17034,8 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
       final isEnglish =
           Localizations.localeOf(context).languageCode == 'en';
       final embeddedTitleTop =
-          _kGameMenuSubPanelTitleTop +
-          (isEnglish ? _kGameMenuSubPanelTitleTopEnOffset : 0.0);
+          kVegePetGameMenuSubPanelTitleTop +
+          (isEnglish ? kVegePetGameMenuSubPanelTitleTopEnOffset : 0.0);
       final caption = widget.monthYearCaptionBuilder!(visibleMonth);
       Widget embeddedHeader({
         required String rightCaption,
