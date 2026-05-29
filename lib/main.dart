@@ -11111,10 +11111,11 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 먹이주기(feed) 패널의 기본 높이 (한국어 기준). 영어 locale 에서는 문구가 길어
-  /// 하단 안내가 잘릴 수 있어 +9px 만 늘리고 top 은 그대로 유지한다.
+  /// 먹이주기(feed) 패널의 기본 높이 (한국어 기준). 영어 locale 에서는 윗변(top)을
+  /// 유지한 채 아랫변만 16px 줄여 안내 문구를 위로 올린다(212 + 9 - 16 = 205).
   static const double _kMealPanelBaseH = 212;
-  double get _mealPanelHeight => _isEnglishLocale ? _kMealPanelBaseH + 9 : _kMealPanelBaseH;
+  double get _mealPanelHeight =>
+      _isEnglishLocale ? _kMealPanelBaseH - 7 : _kMealPanelBaseH;
 
   Widget _buildMealPanelFootnote(String text, bool isEn) {
     final style = TextStyle(
