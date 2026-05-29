@@ -7195,6 +7195,165 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildVegePetOneButtonNoticeDialog(_VegePetNoticeConfig config) {
+    final isEn = _isEnglishLocale;
+    final bodyFontSize =
+        config.bodyFontSizeEn != null && isEn ? config.bodyFontSizeEn! : 10.0;
+    final int? resolvedBodyMaxLines;
+    if (config.bodyMaxLinesEn != null || config.bodyMaxLinesKo != null) {
+      resolvedBodyMaxLines = isEn
+          ? (config.bodyMaxLinesEn ?? config.bodyMaxLinesKo)
+          : (config.bodyMaxLinesKo ?? config.bodyMaxLinesEn);
+    } else {
+      resolvedBodyMaxLines = config.bodyMaxLines;
+    }
+
+    Widget titleBodyColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          config.title,
+          textAlign: TextAlign.left,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontFamily: 'Pretendard',
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF000000),
+            height: 1.25,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          config.body,
+          textAlign: TextAlign.left,
+          softWrap: config.bodySoftWrap,
+          maxLines: resolvedBodyMaxLines,
+          overflow: config.bodyOverflow,
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            fontSize: bodyFontSize,
+            fontWeight: FontWeight.w600,
+            color: config.bodyColor,
+            height: 1.25,
+          ),
+        ),
+      ],
+    );
+    if (config.titleBlockTranslateYOffset != 0) {
+      titleBodyColumn = Transform.translate(
+        offset: Offset(0, config.titleBlockTranslateYOffset),
+        child: titleBodyColumn,
+      );
+    }
+
+    return _buildVegePetConfirmDialogShell(
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: titleBodyColumn,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: config.onPrimaryTap,
+                borderRadius: BorderRadius.circular(14),
+                child: Ink(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: _buildPastelBlueGradientButtonText(
+                      config.primaryLabel,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVegePetOneButtonNoticeOverlay(_VegePetNoticeConfig config) {
+    if (!_isYardConfirmOverlayFadeVisible(config.isOpen)) {
+      return const SizedBox.shrink();
+    }
+
+    void handleOutsideTap() {
+      if (config.dismissKeyboardOnOutsideTapFirst &&
+          _dismissKeyboardIfVisibleOnly()) {
+        return;
+      }
+      config.onOutsideTap?.call();
+    }
+
+    final dialog = _buildVegePetOneButtonNoticeDialog(config);
+    final positionedDialog = Positioned(
+      left: _kVegePetConfirmDialogLeft,
+      top: _kVegePetConfirmDialogTop,
+      width: _kVegePetConfirmDialogW,
+      height: _kVegePetConfirmDialogH,
+      child: config.blockDialogPointerWithGestureDetector
+          ? GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: dialog,
+            )
+          : dialog,
+    );
+
+    final stack = Stack(
+      clipBehavior: Clip.none,
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: config.outsideDismissible
+                ? HitTestBehavior.translucent
+                : HitTestBehavior.opaque,
+            onTap: config.outsideDismissible ? handleOutsideTap : () {},
+            child: const SizedBox.expand(),
+          ),
+        ),
+        positionedDialog,
+      ],
+    );
+
+    final fadedChild = config.useFadeTransitionForOverlay
+        ? FadeTransition(opacity: _yardConfirmOverlayFadeCurve, child: stack)
+        : _buildVegePetYardConfirmOverlayFade(child: stack);
+
+    return Positioned.fill(child: fadedChild);
+  }
+
   /// [primaryLabel] = A(하늘빛 그라데이션) → `true`, [secondaryLabel] = B(빨강 그라데이션) → `false`.
   /// [dimBarrier] 가 false 이면 배경 어둡게 처리 없음(분양권 확인 등).
   Future<bool> _showVegePetConfirmDialog({
@@ -7514,607 +7673,95 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildNameInterlockNoticeDialog() {
-    final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.nameInterlockMain,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.nameInterlockSub,
-                    textAlign: TextAlign.left,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: isEn ? 9 : 10,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFFB92020),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: () => unawaited(_hideNameInterlockNotice()),
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.confirmLabel,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildNameInterlockNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isNameInterlockNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => unawaited(_hideNameInterlockNotice()),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildNameInterlockNoticeDialog(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProfileSelectMissingNoticeDialog() {
     final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.profileSelectMissingNoticeTitle,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.profileSelectMissingNoticeBody,
-                    textAlign: TextAlign.left,
-                    softWrap: true,
-                    maxLines: isEn ? 3 : 2,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A4A4A),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: _closeProfileSelectMissingNoticeOverlay,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.profileSelectMissingNoticeConfirm,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isNameInterlockNoticeOpen,
+        title: l10n.nameInterlockMain,
+        body: l10n.nameInterlockSub,
+        primaryLabel: l10n.confirmLabel,
+        onPrimaryTap: () => unawaited(_hideNameInterlockNotice()),
+        onOutsideTap: () => unawaited(_hideNameInterlockNotice()),
+        bodyColor: const Color(0xFFB92020),
+        bodyFontSizeEn: 9,
+        bodyMaxLines: 2,
       ),
     );
   }
 
   Widget _buildProfileSelectMissingNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(
-      _isProfileSelectMissingNoticeOpen,
-    )) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: FadeTransition(
-        opacity: _yardConfirmOverlayFadeCurve,
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () {
-                  if (_dismissKeyboardIfVisibleOnly()) return;
-                  _closeProfileSelectMissingNoticeOverlay();
-                },
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildProfileSelectMissingNoticeDialog(),
-              ),
-            ),
-          ],
-        ),
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isProfileSelectMissingNoticeOpen,
+        title: l10n.profileSelectMissingNoticeTitle,
+        body: l10n.profileSelectMissingNoticeBody,
+        primaryLabel: l10n.profileSelectMissingNoticeConfirm,
+        onPrimaryTap: _closeProfileSelectMissingNoticeOverlay,
+        onOutsideTap: _closeProfileSelectMissingNoticeOverlay,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        bodySoftWrap: true,
+        useFadeTransitionForOverlay: true,
+        dismissKeyboardOnOutsideTapFirst: true,
       ),
     );
   }
 
   Widget _buildMaturityCompleteNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isMaturityCompleteNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
     final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: _buildVegePetConfirmDialogShell(
-                width: _kVegePetConfirmDialogW,
-                height: _kVegePetConfirmDialogH,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.maturityCompleteNoticeTitle,
-                              textAlign: TextAlign.left,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF000000),
-                                height: 1.25,
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              l10n.maturityCompleteNoticeBody,
-                              textAlign: TextAlign.left,
-                              maxLines: isEn ? 3 : 2,
-                              overflow: TextOverflow.visible,
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: isEn ? 9 : 10,
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF4A4A4A),
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
-                        child: InkWell(
-                          onTap: _closeMaturityCompleteNoticeOverlay,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Ink(
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Center(
-                              child: _buildPastelBlueGradientButtonText(
-                                l10n.confirmLabel,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isMaturityCompleteNoticeOpen,
+        title: l10n.maturityCompleteNoticeTitle,
+        body: l10n.maturityCompleteNoticeBody,
+        primaryLabel: l10n.confirmLabel,
+        onPrimaryTap: _closeMaturityCompleteNoticeOverlay,
+        outsideDismissible: false,
+        bodyFontSizeEn: 9,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        blockDialogPointerWithGestureDetector: false,
       ),
     );
   }
 
   Widget _buildPokedexCompleteTicketNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isPokedexCompleteTicketNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
     final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: _buildVegePetConfirmDialogShell(
-                width: _kVegePetConfirmDialogW,
-                height: _kVegePetConfirmDialogH,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.pokedexCompleteTicketNoticeTitle,
-                              textAlign: TextAlign.left,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF000000),
-                                height: 1.25,
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              l10n.pokedexCompleteTicketNoticeBody,
-                              textAlign: TextAlign.left,
-                              maxLines: isEn ? 3 : 2,
-                              overflow: TextOverflow.visible,
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: isEn ? 9 : 10,
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF4A4A4A),
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
-                        child: InkWell(
-                          onTap: _closePokedexCompleteTicketNoticeOverlay,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Ink(
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Center(
-                              child: _buildPastelBlueGradientButtonText(
-                                l10n.pokedexCompleteTicketNoticeConfirm,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isPokedexCompleteTicketNoticeOpen,
+        title: l10n.pokedexCompleteTicketNoticeTitle,
+        body: l10n.pokedexCompleteTicketNoticeBody,
+        primaryLabel: l10n.pokedexCompleteTicketNoticeConfirm,
+        onPrimaryTap: _closePokedexCompleteTicketNoticeOverlay,
+        outsideDismissible: false,
+        bodyFontSizeEn: 9,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        blockDialogPointerWithGestureDetector: false,
       ),
     );
   }
 
   Widget _buildShopNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isShopNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
     final l10n = AppLocalizations.of(context);
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _closeShopNoticeOverlay,
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildVegePetConfirmDialogShell(
-                  width: _kVegePetConfirmDialogW,
-                  height: _kVegePetConfirmDialogH,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                l10n.shopNoticeTitle,
-                                textAlign: TextAlign.left,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF000000),
-                                  height: 1.25,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                l10n.shopNoticeDescription,
-                                textAlign: TextAlign.left,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF4A4A4A),
-                                  height: 1.25,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        child: Material(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(14),
-                          child: InkWell(
-                            onTap: _closeShopNoticeOverlay,
-                            borderRadius: BorderRadius.circular(14),
-                            child: Ink(
-                              height: 30,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0xFFF1F1F1),
-                                  width: 0.8,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.03),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 1),
-                                  ),
-                                ],
-                              ),
-                              child: Center(
-                                child: _buildPastelBlueGradientButtonText(
-                                  l10n.confirmLabel,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isShopNoticeOpen,
+        title: l10n.shopNoticeTitle,
+        body: l10n.shopNoticeDescription,
+        primaryLabel: l10n.confirmLabel,
+        onPrimaryTap: _closeShopNoticeOverlay,
+        onOutsideTap: _closeShopNoticeOverlay,
+        bodyMaxLines: 2,
       ),
     );
   }
-
   Widget _buildEmailLinkInviteNoticeGlobalOverlay() {
     if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkInviteNoticeOpen)) {
       return const SizedBox.shrink();
@@ -8305,572 +7952,85 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildEmailLinkSuccessNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkSuccessNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
     final l10n = AppLocalizations.of(context);
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: _buildVegePetConfirmDialogShell(
-                width: _kVegePetConfirmDialogW,
-                height: _kVegePetConfirmDialogH,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.emailLinkSuccessTitle,
-                              textAlign: TextAlign.left,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF000000),
-                                height: 1.25,
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              l10n.emailLinkSuccessBody,
-                              textAlign: TextAlign.left,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A4A4A),
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
-                        child: InkWell(
-                          onTap: _closeEmailLinkSuccessNoticeOverlay,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Ink(
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Center(
-                              child: _buildPastelBlueGradientButtonText(
-                                l10n.emailLinkSuccessConfirm,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmailFormatErrorNoticeDialog() {
-    final l10n = AppLocalizations.of(context);
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.emailFormatErrorTitle,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.emailFormatErrorBody,
-                    textAlign: TextAlign.left,
-                    softWrap: true,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFFB92020),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: _closeEmailFormatErrorNoticeOverlay,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.emailFormatErrorConfirm,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isEmailLinkSuccessNoticeOpen,
+        title: l10n.emailLinkSuccessTitle,
+        body: l10n.emailLinkSuccessBody,
+        primaryLabel: l10n.emailLinkSuccessConfirm,
+        onPrimaryTap: _closeEmailLinkSuccessNoticeOverlay,
+        outsideDismissible: false,
+        bodyMaxLines: 2,
       ),
     );
   }
 
   Widget _buildEmailFormatErrorNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isEmailFormatErrorNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => unawaited(_hideEmailFormatErrorNotice()),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildEmailFormatErrorNoticeDialog(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmailOtpInvalidNoticeDialog() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.emailOtpInvalidNoticeTitle,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.emailOtpInvalidNoticeBody,
-                    textAlign: TextAlign.left,
-                    softWrap: true,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A4A4A),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: _closeEmailOtpInvalidNoticeOverlay,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.emailOtpInvalidNoticeConfirm,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isEmailFormatErrorNoticeOpen,
+        title: l10n.emailFormatErrorTitle,
+        body: l10n.emailFormatErrorBody,
+        primaryLabel: l10n.emailFormatErrorConfirm,
+        onPrimaryTap: _closeEmailFormatErrorNoticeOverlay,
+        onOutsideTap: () => unawaited(_hideEmailFormatErrorNotice()),
+        bodyColor: const Color(0xFFB92020),
+        bodySoftWrap: true,
       ),
     );
   }
 
   Widget _buildEmailOtpInvalidNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isEmailOtpInvalidNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _closeEmailOtpInvalidNoticeOverlay,
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildEmailOtpInvalidNoticeDialog(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmailDuplicateNoticeDialog() {
     final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Transform.translate(
-                    offset: Offset(0, isEn ? -2 : 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n.emailDuplicateNoticeTitle,
-                          textAlign: TextAlign.left,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF000000),
-                            height: 1.25,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          l10n.emailDuplicateNoticeBody,
-                          textAlign: TextAlign.left,
-                          softWrap: true,
-                          maxLines: isEn ? 3 : 2,
-                          overflow: TextOverflow.visible,
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF4A4A4A),
-                            height: 1.25,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: _closeEmailDuplicateNoticeOverlay,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.emailDuplicateNoticeConfirm,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isEmailOtpInvalidNoticeOpen,
+        title: l10n.emailOtpInvalidNoticeTitle,
+        body: l10n.emailOtpInvalidNoticeBody,
+        primaryLabel: l10n.emailOtpInvalidNoticeConfirm,
+        onPrimaryTap: _closeEmailOtpInvalidNoticeOverlay,
+        onOutsideTap: _closeEmailOtpInvalidNoticeOverlay,
+        bodyOverflow: TextOverflow.visible,
+        bodySoftWrap: true,
       ),
     );
   }
 
   Widget _buildEmailDuplicateNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isEmailDuplicateNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: _buildEmailDuplicateNoticeDialog(),
-            ),
-          ],
-        ),
+    final l10n = AppLocalizations.of(context);
+    final isEn = _isEnglishLocale;
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isEmailDuplicateNoticeOpen,
+        title: l10n.emailDuplicateNoticeTitle,
+        body: l10n.emailDuplicateNoticeBody,
+        primaryLabel: l10n.emailDuplicateNoticeConfirm,
+        onPrimaryTap: _closeEmailDuplicateNoticeOverlay,
+        outsideDismissible: false,
+        titleBlockTranslateYOffset: isEn ? -2 : 0,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        bodySoftWrap: true,
+        blockDialogPointerWithGestureDetector: false,
       ),
     );
   }
 
-  Widget _buildDuplicatePetNameNoticeDialog() {
+  Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetConfirmDialogShell(
-      width: _kVegePetConfirmDialogW,
-      height: _kVegePetConfirmDialogH,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.duplicatePetNameNoticeTitle,
-                    textAlign: TextAlign.left,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    l10n.duplicatePetNameNoticeBody,
-                    textAlign: TextAlign.left,
-                    softWrap: true,
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFFB92020),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: _closeDuplicatePetNameNoticeOverlay,
-                borderRadius: BorderRadius.circular(14),
-                child: Ink(
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF1F1F1),
-                      width: 0.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _buildPastelBlueGradientButtonText(
-                      l10n.duplicatePetNameNoticeConfirm,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+    return _buildVegePetOneButtonNoticeOverlay(
+      _VegePetNoticeConfig(
+        isOpen: _isDuplicatePetNameNoticeOpen,
+        title: l10n.duplicatePetNameNoticeTitle,
+        body: l10n.duplicatePetNameNoticeBody,
+        primaryLabel: l10n.duplicatePetNameNoticeConfirm,
+        onPrimaryTap: _closeDuplicatePetNameNoticeOverlay,
+        onOutsideTap: _closeDuplicatePetNameNoticeOverlay,
+        bodyColor: const Color(0xFFB92020),
+        bodySoftWrap: true,
       ),
     );
   }
@@ -8992,41 +8152,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               width: _kVegePetConfirmDialogW,
               height: _kVegePetConfirmDialogH,
               child: _buildRemoteEmailLinkedLogoutNoticeDialog(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isDuplicatePetNameNoticeOpen)) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
-        child: Stack(
-          clipBehavior: Clip.none,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _closeDuplicatePetNameNoticeOverlay,
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: _kVegePetConfirmDialogLeft,
-              top: _kVegePetConfirmDialogTop,
-              width: _kVegePetConfirmDialogW,
-              height: _kVegePetConfirmDialogH,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {},
-                child: _buildDuplicatePetNameNoticeDialog(),
-              ),
             ),
           ],
         ),
@@ -18421,6 +17546,49 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     );
   }
+}
+
+/// 마당 240×116 Glassmorphism 단일 확인 버튼 알림창 공통 설정.
+class _VegePetNoticeConfig {
+  const _VegePetNoticeConfig({
+    required this.isOpen,
+    required this.title,
+    required this.body,
+    required this.primaryLabel,
+    required this.onPrimaryTap,
+    this.onOutsideTap,
+    this.outsideDismissible = true,
+    this.bodyColor = const Color(0xFF4A4A4A),
+    this.bodyFontSizeEn,
+    this.bodyMaxLines,
+    this.bodyMaxLinesEn,
+    this.bodyMaxLinesKo,
+    this.bodyOverflow = TextOverflow.ellipsis,
+    this.bodySoftWrap = false,
+    this.titleBlockTranslateYOffset = 0,
+    this.useFadeTransitionForOverlay = false,
+    this.dismissKeyboardOnOutsideTapFirst = false,
+    this.blockDialogPointerWithGestureDetector = true,
+  });
+
+  final bool isOpen;
+  final String title;
+  final String body;
+  final String primaryLabel;
+  final VoidCallback onPrimaryTap;
+  final VoidCallback? onOutsideTap;
+  final bool outsideDismissible;
+  final Color bodyColor;
+  final double? bodyFontSizeEn;
+  final int? bodyMaxLines;
+  final int? bodyMaxLinesEn;
+  final int? bodyMaxLinesKo;
+  final TextOverflow bodyOverflow;
+  final bool bodySoftWrap;
+  final double titleBlockTranslateYOffset;
+  final bool useFadeTransitionForOverlay;
+  final bool dismissKeyboardOnOutsideTapFirst;
+  final bool blockDialogPointerWithGestureDetector;
 }
 
 // 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
