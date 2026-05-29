@@ -377,7 +377,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const double _kGameCanvasWidth = 844;
   static const double _kGameCanvasHeight = 390;
 
@@ -652,6 +653,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// stale 상태가 되었을 때, 새 게스트로 안전하게 초기화하는 흐름의 재진입을
   /// 방지하기 위한 가드 플래그.
   bool _isResettingDeletedAccountSession = false;
+
+  Timer? _accountHealthCheckTimer;
+  RealtimeChannel? _accountProfileWatchChannel;
+  String? _accountProfileWatchUserId;
 
   /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
   bool _emailLinkRestoreMode = false;
@@ -979,11 +984,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+    _startAccountHealthCheckTimer();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _accountHealthCheckTimer?.cancel();
+    _unsubscribeProfileDeletionWatch();
     _nicknameController.removeListener(_enforceProfileNicknameMaxLength);
     _profileSelectScrollController?.dispose();
     _closeProfileSelectOverlay(notify: false, animated: false);
@@ -1024,6 +1034,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _randomTicketUseConfirmCompleter!.complete(false);
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkDeletedAccountAndResetIfNeeded('app resumed'));
+    }
   }
 
   bool _isProfileComplete() {
@@ -1130,6 +1147,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     bool forceProfileFormSync = false,
     bool clearProfileForm = false,
   }) {
+    if (_isResettingDeletedAccountSession) {
+      _clearProfileFormState();
+      return;
+    }
+
     if (clearProfileForm) {
       _clearProfileFormState();
     } else {
@@ -1815,15 +1837,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (isEmailSession && _profile == null) {
         debugPrint('email session profile missing; reset to fresh guest');
         if (!_isResettingDeletedAccountSession) {
-          unawaited(_resetToFreshGuestAfterDeletedAccount());
+          await _resetToFreshGuestAfterDeletedAccount();
         }
         return;
       }
       await _syncAuthEmailToProfileIfNeeded();
 
-      _applyPostFetchUiState(
-        clearProfileForm: _isResettingDeletedAccountSession,
-      );
+      _applyPostFetchUiState();
+      _syncProfileDeletionWatchForCurrentSession();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(_bootstrapOptionalServices());
@@ -1836,7 +1857,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (_isAuthUserMissingForeignKeyError(e) &&
           !_isResettingDeletedAccountSession) {
         debugPrint('bootstrap detected deleted account / stale session: $e');
-        unawaited(_resetToFreshGuestAfterDeletedAccount());
+        await _resetToFreshGuestAfterDeletedAccount();
         return;
       }
 
@@ -2338,6 +2359,219 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _clearUserScopedCaches();
     await _fetchCoreUserData();
     _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
+    _syncProfileDeletionWatchForCurrentSession();
+  }
+
+  bool _isCurrentEmailAuthSession() {
+    final email = supabase.auth.currentUser?.email?.trim();
+    return email != null && email.isNotEmpty;
+  }
+
+  Future<bool> _isCurrentEmailSessionProfileAlive() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    final email = user.email?.trim();
+    if (email == null || email.isEmpty) {
+      return true;
+    }
+
+    try {
+      final rows = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .limit(1);
+
+      return (rows as List).isNotEmpty;
+    } catch (e, st) {
+      debugPrint('email session profile alive check failed: $e\n$st');
+
+      if (_isAuthUserMissingForeignKeyError(e)) {
+        return false;
+      }
+
+      return true;
+    }
+  }
+
+  Future<bool> _checkDeletedAccountAndResetIfNeeded(String reason) async {
+    if (_isResettingDeletedAccountSession) return true;
+    if (!_isCurrentEmailAuthSession()) return false;
+
+    final alive = await _isCurrentEmailSessionProfileAlive();
+    if (alive) return false;
+
+    debugPrint('deleted account detected: $reason');
+    await _resetToFreshGuestAfterDeletedAccount();
+    return true;
+  }
+
+  Future<bool> _guardAccountAliveBeforeUserAction(String reason) async {
+    final resetStarted = await _checkDeletedAccountAndResetIfNeeded(reason);
+    return !resetStarted;
+  }
+
+  void _startAccountHealthCheckTimer() {
+    _accountHealthCheckTimer?.cancel();
+
+    _accountHealthCheckTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) {
+        if (!mounted) return;
+        if (_isResettingDeletedAccountSession) return;
+        if (!_isCurrentEmailAuthSession()) return;
+        unawaited(
+          _checkDeletedAccountAndResetIfNeeded('periodic account health check'),
+        );
+      },
+    );
+  }
+
+  void _syncProfileDeletionWatchForCurrentSession() {
+    if (_isCurrentEmailAuthSession()) {
+      _subscribeCurrentProfileDeletionWatch();
+    } else {
+      _unsubscribeProfileDeletionWatch();
+    }
+  }
+
+  void _subscribeCurrentProfileDeletionWatch() {
+    final user = supabase.auth.currentUser;
+    final email = user?.email?.trim();
+
+    if (user == null || email == null || email.isEmpty) {
+      _unsubscribeProfileDeletionWatch();
+      return;
+    }
+
+    if (_accountProfileWatchUserId == user.id &&
+        _accountProfileWatchChannel != null) {
+      return;
+    }
+
+    _unsubscribeProfileDeletionWatch();
+
+    _accountProfileWatchUserId = user.id;
+
+    try {
+      final channel = supabase.channel('vegepet-profile-watch-${user.id}');
+
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.delete,
+        schema: 'public',
+        table: 'profiles',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'id',
+          value: user.id,
+        ),
+        callback: (payload) {
+          debugPrint(
+            'profile delete detected by realtime: ${payload.oldRecord}',
+          );
+          unawaited(_resetToFreshGuestAfterDeletedAccount());
+        },
+      );
+
+      _accountProfileWatchChannel = channel;
+      channel.subscribe();
+    } catch (e, st) {
+      debugPrint('profile deletion realtime subscribe failed: $e\n$st');
+      _accountProfileWatchChannel = null;
+      _accountProfileWatchUserId = null;
+    }
+  }
+
+  void _unsubscribeProfileDeletionWatch() {
+    final channel = _accountProfileWatchChannel;
+    if (channel != null) {
+      unawaited(supabase.removeChannel(channel));
+    }
+    _accountProfileWatchChannel = null;
+    _accountProfileWatchUserId = null;
+  }
+
+  /// 삭제된 계정 reset 직후 stale UI·패널·알림을 즉시 내린다.
+  void _dismissAllUiForDeletedAccountReset() {
+    _instantCloseYardConfirmOverlays();
+    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
+
+    _status = _ViewStatus.loading;
+    _clearProfileFormState();
+    _clearUserScopedCaches();
+
+    _resetEmailLinkPanelOtpFlow();
+    _emailLinkRestoreMode = false;
+    _emailOtpCooldownTimer?.cancel();
+    _emailOtpCooldownTimer = null;
+    _emailOtpCooldownSeconds = 0;
+
+    _isUploadingMeal = false;
+    _uploadingSlot = null;
+    _isInteracting = false;
+    _isUsingRandomTicket = false;
+    _isInitialAdoptionPanelVisible = false;
+    _isInitialAdoptionPanelClosing = false;
+    _isInitialAdoptionInFlight = false;
+    _isNamingDialogOpen = false;
+    _canShowActivePetDuringNaming = false;
+    _isAdopting = false;
+    _isSavingProfile = false;
+    _isLoggingMeal = false;
+
+    _isPetInfoBannerOpen = false;
+    _gameMenuPanelOpen = false;
+    _gameMenuPanelRetracting = false;
+    _isMealPanelOpen = false;
+    _petMealSwapInProgress = false;
+    _mealOpenedFromPetBanner = false;
+    _isToyMenuOpen = false;
+    _isToyDropHovering = false;
+    _isCompletingToyPlay = false;
+    _petToySwapInProgress = false;
+    _toyOpenedFromPetBanner = false;
+    _petChildPanelDismissingToYard = false;
+
+    _isProfilePanelOpen = false;
+    _profilePanelSwapInProgress = false;
+    _profileOpenedFromGameMenu = false;
+    _isProfileSetupPanelVisible = false;
+    _isProfileSetupClosing = false;
+
+    _isDietDiaryPanelOpen = false;
+    _dietDiaryPanelSwapInProgress = false;
+    _diaryVisibleMonth = _todayDiaryMonth();
+
+    _isBagPanelOpen = false;
+    _bagPanelSwapInProgress = false;
+    _bagPanelDetailItem = null;
+
+    _isPokedexPanelOpen = false;
+    _pokedexPanelSwapInProgress = false;
+
+    _isSettingsPanelOpen = false;
+    _settingsPanelSwapInProgress = false;
+    _isEmailLinkPanelOpen = false;
+    _isCustomerCenterPanelOpen = false;
+
+    _isStoryPanelOpen = false;
+    _storyPanelSwapInProgress = false;
+    _isHelpPanelOpen = false;
+    _helpPanelSwapInProgress = false;
+    _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
+
+    _petToySwapController.value = 0;
+    _petMealSwapController.value = 0;
+    _gameMenuPanelController.value = 0;
+    _gameProfileSwapController.value = 0;
+    _gameDietDiarySwapController.value = 0;
+    _gameBagSwapController.value = 0;
+    _gamePokedexSwapController.value = 0;
+    _gameSettingsSwapController.value = 0;
+    _gameHelpSwapController.value = 0;
+    _gameStorySwapController.value = 0;
+    _gameMenuSubOutsideDismissController.value = 0;
   }
 
   /// 다른 기기에서 회원탈퇴/Auth user 삭제가 일어났을 때 발생할 수 있는
@@ -2366,35 +2600,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isResettingDeletedAccountSession = true;
     try {
       _dismissFocus();
+      _unsubscribeProfileDeletionWatch();
       debugPrint(
         'deleted account reset: clearing local profile form before guest sign-in',
       );
 
       if (mounted) {
-        _safeSetState(() {
-          _status = _ViewStatus.loading;
-          _clearProfileFormState();
-          _clearUserScopedCaches();
-
-          _isProfileSetupPanelVisible = false;
-          _isProfileSetupClosing = false;
-          _isInitialAdoptionPanelVisible = false;
-          _isInitialAdoptionPanelClosing = false;
-          _isInitialAdoptionInFlight = false;
-
-          _isEmailLinkPanelOpen = false;
-          _isProfilePanelOpen = false;
-          _gameMenuPanelOpen = false;
-        });
+        _safeSetState(_dismissAllUiForDeletedAccountReset);
       } else {
-        _clearProfileFormState();
-        _clearUserScopedCaches();
-        _isProfileSetupPanelVisible = false;
-        _isProfileSetupClosing = false;
-        _isInitialAdoptionPanelVisible = false;
-        _isInitialAdoptionPanelClosing = false;
-        _isInitialAdoptionInFlight = false;
-        _isEmailLinkPanelOpen = false;
+        _dismissAllUiForDeletedAccountReset();
       }
 
       _clearEmailLinkOtpSession();
@@ -2416,6 +2630,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
 
       if (!mounted) return;
+      _isResettingDeletedAccountSession = false;
       await _bootstrap();
     } finally {
       _isResettingDeletedAccountSession = false;
@@ -3937,6 +4152,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // 오늘 날짜(yyyy-mm-dd)와 비교해서 강제한다.
   // action: 'play' | 'pet'
   Future<void> _interactPet(String action) async {
+    if (!await _guardAccountAliveBeforeUserAction('interact pet ($action)')) {
+      return;
+    }
+    if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -3992,6 +4211,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     } catch (e) {
+      if (_isAuthUserMissingForeignKeyError(e)) {
+        if (mounted) {
+          setState(() => _isInteracting = false);
+        } else {
+          _isInteracting = false;
+        }
+        await _resetToFreshGuestAfterDeletedAccount();
+        return;
+      }
       if (!mounted) return;
       setState(() => _isInteracting = false);
       _showSnack(
@@ -4763,6 +4991,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // --------------------------------------------------------------------------
 
   Future<void> _openBagPanelFromGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open bag panel')) return;
     if (_bagPanelSwapInProgress) return;
     if (_gameBagSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
@@ -4825,6 +5054,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openPokedexPanelFromGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open pokedex panel')) return;
     if (_pokedexPanelSwapInProgress) return;
     if (_gamePokedexSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
@@ -9518,7 +9748,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     tooltip: l10n.petInfoTooltip,
                     iconSize: 28,
                     padding: 18,
-                    onTap: _togglePetInfoBanner,
+                    onTap: () => unawaited(_togglePetInfoBanner()),
                   ),
                 ),
               ),
@@ -10489,6 +10719,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openPetInfoBannerClosingGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open pet info')) return;
     if (_isProfilePanelOpen) {
       final canClose = await _saveProfilePanelIfDirtyBeforeClose();
       if (!canClose) return;
@@ -10503,7 +10734,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     unawaited(_finishGameMenuPanelRetract());
   }
 
-  void _togglePetInfoBanner() {
+  Future<void> _togglePetInfoBanner() async {
+    if (!await _guardAccountAliveBeforeUserAction('toggle pet info')) return;
     if (_activePet == null || _isInteracting) return;
     if (_isToyMenuOpen ||
         _petToySwapInProgress ||
@@ -10537,11 +10769,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// 베지펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다(ripple 없음).
   void _onGameMenuHudIconTap() {
+    unawaited(_onGameMenuHudIconTapAsync());
+  }
+
+  Future<void> _onGameMenuHudIconTapAsync() async {
     if (_isPetInfoBannerOpen) {
       _closePetInfoBanner();
       return;
     }
-    unawaited(_openMenuSheet());
+    if (!await _guardAccountAliveBeforeUserAction('open game menu')) return;
+    await _openMenuSheet();
   }
 
   String? _validateToyPlayEligibility() {
@@ -10559,6 +10796,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _onPetInfoBannerAction(String action) async {
+    if (!await _guardAccountAliveBeforeUserAction('pet info action ($action)')) {
+      return;
+    }
     if (_handleMaturePetBlockedInteraction()) return;
     if (action == 'play') {
       final err = _validateToyPlayEligibility();
@@ -11882,6 +12122,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openToyPlaySheet({bool fromPetBanner = false}) async {
+    if (!await _guardAccountAliveBeforeUserAction('open toy play')) return;
     if (_handleMaturePetBlockedInteraction()) return;
     final err = _validateToyPlayEligibility();
     if (err != null) {
@@ -12650,6 +12891,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openMealSheet({bool fromPetBanner = false}) async {
+    if (!await _guardAccountAliveBeforeUserAction('open meal panel')) return;
     if (_activePet == null) return;
     if (_handleMaturePetBlockedInteraction()) return;
 
@@ -13606,12 +13848,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openProfilePanelFromGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open profile panel')) return;
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
     final user = supabase.auth.currentUser;
     if (user == null || _profile == null) {
-      _showSnack(AppLocalizations.of(context).snackProfileLoadFailed);
+      _showSnack(l10n.snackProfileLoadFailed);
       return;
     }
     _gameDietDiarySwapController.stop();
@@ -14232,6 +14477,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openDietDiaryFromGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open diet diary')) return;
     if (_dietDiaryPanelSwapInProgress) return;
     if (_gameDietDiarySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
@@ -14310,6 +14556,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openMenuSheet() async {
+    if (!await _guardAccountAliveBeforeUserAction('open game menu sheet')) {
+      return;
+    }
     if (_gameMenuPanelRetracting) return;
 
     if (_gameMenuPanelOpen) {
@@ -14351,6 +14600,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _openSettingsFromGameMenu() async {
+    if (!await _guardAccountAliveBeforeUserAction('open settings panel')) return;
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
     _instantResetStoryPanelIfOpen();
