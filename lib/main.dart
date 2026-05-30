@@ -644,6 +644,10 @@ class _HomePageState extends State<HomePage>
   /// 방지하기 위한 가드 플래그.
   bool _isResettingDeletedAccountSession = false;
 
+  /// 회원탈퇴/stale reset 직후 UI는 fresh guest로 보이지만, Supabase anonymous
+  /// session 확보가 아직 진행 중일 수 있음을 표시한다.
+  bool _freshGuestAuthResetInProgress = false;
+
   Timer? _accountHealthCheckTimer;
   RealtimeChannel? _accountProfileWatchChannel;
   String? _accountProfileWatchUserId;
@@ -1135,7 +1139,11 @@ class _HomePageState extends State<HomePage>
     bool forceProfileFormSync = false,
     bool clearProfileForm = false,
   }) {
-    if (_isResettingDeletedAccountSession) {
+    final isEmailSession = _isCurrentEmailAuthSession();
+
+    // email session reset 중에만 stale profile form 주입을 막는다.
+    // anonymous guest bootstrap 은 reset 플래그가 켜져 있어도 정상 적용해야 한다.
+    if (_isResettingDeletedAccountSession && isEmailSession) {
       _clearProfileFormState();
       return;
     }
@@ -1161,6 +1169,161 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionInFlight = false;
       }
     });
+  }
+
+  /// 회원탈퇴·stale session reset 직후 새 anonymous guest 프로필 입력창을 즉시 확정한다.
+  /// (이메일 복구·기존 계정 reload 흐름에서는 사용하지 않는다.)
+  void _forceFreshGuestProfileSetupState() {
+    _instantCloseYardConfirmOverlays();
+    _clearProfileFormState();
+    _clearUserScopedCaches();
+
+    _safeSetState(() {
+      _status = _ViewStatus.ready;
+      _errorMessage = null;
+
+      _profile = null;
+      _activePet = null;
+      _residentPets = [];
+      _todayMealLogs = [];
+      _pokedexEntries = [];
+      _pokedexPanelSelectedEntry = null;
+      _diaryLogsByDate = {};
+      _diaryLogsCachedMonthKey = null;
+      _randomTicketCount = 0;
+      _selectedSpeciesId = null;
+
+      _isProfileSetupPanelVisible = true;
+      _isProfileSetupClosing = false;
+
+      _isInitialAdoptionPanelVisible = false;
+      _isInitialAdoptionPanelClosing = false;
+      _isInitialAdoptionInFlight = false;
+
+      _isSavingProfile = false;
+      _isDeletingAccount = false;
+
+      _isWithdrawConfirmOpen = false;
+      _isWithdrawFinalConfirmOpen = false;
+
+      _isNamingDialogOpen = false;
+      _isPetNamingPanelClosing = false;
+      _canShowActivePetDuringNaming = false;
+
+      _isPetInfoBannerOpen = false;
+      _isMealPanelOpen = false;
+      _isToyMenuOpen = false;
+      _gameMenuPanelOpen = false;
+      _gameMenuPanelRetracting = false;
+
+      _isProfilePanelOpen = false;
+      _profilePanelSwapInProgress = false;
+      _isDietDiaryPanelOpen = false;
+      _dietDiaryPanelSwapInProgress = false;
+      _isBagPanelOpen = false;
+      _bagPanelSwapInProgress = false;
+      _isPokedexPanelOpen = false;
+      _pokedexPanelSwapInProgress = false;
+      _isStoryPanelOpen = false;
+      _storyPanelSwapInProgress = false;
+      _isSettingsPanelOpen = false;
+      _settingsPanelSwapInProgress = false;
+      _isHelpPanelOpen = false;
+      _helpPanelSwapInProgress = false;
+      _isEmailLinkPanelOpen = false;
+      _isCustomerCenterPanelOpen = false;
+    });
+  }
+
+  /// anonymous guest + profile 없음인데 프로필 입력창이 안 떠 있는 먹통 상태를 복구한다.
+  void _ensureFreshGuestProfileSetupVisible() {
+    final user = supabase.auth.currentUser;
+    final isAnonymous =
+        user != null && (user.email == null || user.email!.trim().isEmpty);
+
+    if (!isAnonymous) return;
+    if (_profile != null) return;
+    if (_activePet != null) return;
+    if (!mounted) return;
+
+    _safeSetState(() {
+      _status = _ViewStatus.ready;
+      _errorMessage = null;
+      _isProfileSetupPanelVisible = true;
+      _isProfileSetupClosing = false;
+      _isInitialAdoptionPanelVisible = false;
+      _isInitialAdoptionPanelClosing = false;
+      _isInitialAdoptionInFlight = false;
+    });
+  }
+
+  /// fresh guest reset 후 분양창용 pet_species만 백그라운드 갱신한다.
+  /// 실패해도 프로필 입력창 표시를 막지 않는다.
+  Future<void> _refreshPetSpeciesAfterFreshGuestReset() async {
+    try {
+      await _fetchPetSpecies();
+      if (!mounted) return;
+      _safeSetState(() {});
+    } catch (e, st) {
+      debugPrint('refresh pet species after fresh guest reset failed: $e\n$st');
+    }
+  }
+
+  /// stale session 정리 후 anonymous session을 timeout과 함께 확보한다.
+  /// 실패해도 throw하지 않으며, UI fresh guest 상태는 유지한다.
+  Future<void> _ensureAnonymousSessionAfterFreshGuestReset() async {
+    try {
+      try {
+        await supabase.auth.signOut().timeout(const Duration(seconds: 5));
+      } catch (e) {
+        debugPrint('fresh guest reset signOut skipped/failed: $e');
+      }
+
+      final current = supabase.auth.currentUser;
+      final currentIsAnonymous =
+          current != null &&
+          (current.email == null || current.email!.trim().isEmpty);
+
+      if (currentIsAnonymous) {
+        debugPrint('fresh guest reset: already anonymous ${current.id}');
+        return;
+      }
+
+      try {
+        await supabase.auth
+            .signInAnonymously()
+            .timeout(const Duration(seconds: 8));
+        debugPrint(
+          'fresh guest reset signInAnonymously success: '
+          '${supabase.auth.currentUser?.id}',
+        );
+      } catch (e) {
+        debugPrint('fresh guest reset signInAnonymously failed: $e');
+      }
+    } catch (e, st) {
+      debugPrint('ensure anonymous session after reset failed: $e\n$st');
+    }
+  }
+
+  /// fresh guest 프로필 저장 직전 anonymous session이 없으면 확보를 시도한다.
+  Future<void> _ensureAnonymousSessionBeforeProfileSaveIfNeeded() async {
+    final user = supabase.auth.currentUser;
+    final isAnonymous =
+        user != null && (user.email == null || user.email!.trim().isEmpty);
+
+    if (isAnonymous) return;
+
+    if (_profile == null && _activePet == null) {
+      try {
+        await _ensureAnonymousSessionAfterFreshGuestReset();
+        debugPrint(
+          'saveProfile ensure anonymous user id '
+          '${supabase.auth.currentUser?.id}',
+        );
+      } catch (e) {
+        debugPrint('ensure anonymous before profile save failed: $e');
+      }
+    }
   }
 
   void _enforceProfileNicknameMaxLength() {
@@ -1229,6 +1392,9 @@ class _HomePageState extends State<HomePage>
     // dispose 타이밍 오류가 날 수 있다. 먼저 포커스를 정리한다.
     _dismissFocus();
     await _closeProfileSelectOverlay(animated: true);
+
+    if (!mounted) return;
+    await _ensureAnonymousSessionBeforeProfileSaveIfNeeded();
 
     if (!mounted) return;
     final user = supabase.auth.currentUser;
@@ -1725,6 +1891,7 @@ class _HomePageState extends State<HomePage>
       await _syncAuthEmailToProfileIfNeeded();
 
       _applyPostFetchUiState();
+      _ensureFreshGuestProfileSetupVisible();
       _syncProfileDeletionWatchForCurrentSession();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -2479,6 +2646,8 @@ class _HomePageState extends State<HomePage>
   Future<void> _resetToFreshGuestAfterDeletedAccount() async {
     if (_isResettingDeletedAccountSession) return;
     _isResettingDeletedAccountSession = true;
+    _freshGuestAuthResetInProgress = true;
+
     try {
       _dismissFocus();
       _unsubscribeProfileDeletionWatch();
@@ -2488,33 +2657,39 @@ class _HomePageState extends State<HomePage>
 
       if (mounted) {
         _safeSetState(_dismissAllUiForDeletedAccountReset);
+
+        // auth reset을 기다리지 않고 즉시 공란 프로필 입력창을 확정 표시한다.
+        debugPrint('force fresh guest ui before auth reset');
+        _forceFreshGuestProfileSetupState();
       } else {
         _dismissAllUiForDeletedAccountReset();
       }
 
       _clearEmailLinkOtpSession();
 
-      try {
-        await supabase.auth.signOut();
-      } catch (e) {
-        debugPrint('signOut after deleted account failed: $e');
-      }
+      // auth 정리는 UI를 막지 않도록 timeout을 건다.
+      await _ensureAnonymousSessionAfterFreshGuestReset();
 
-      try {
-        await supabase.auth.signInAnonymously();
-        debugPrint(
-          'deleted account reset: signed in as fresh guest '
-          '${supabase.auth.currentUser?.id}',
-        );
-      } catch (e) {
-        debugPrint('signInAnonymously after deleted account failed: $e');
-      }
+      debugPrint('force fresh guest ui after auth reset');
 
-      if (!mounted) return;
-      _isResettingDeletedAccountSession = false;
-      await _bootstrap();
+      if (mounted) {
+        _forceFreshGuestProfileSetupState();
+        unawaited(_refreshPetSpeciesAfterFreshGuestReset());
+      }
+    } catch (e, st) {
+      debugPrint('reset to fresh guest failed: $e\n$st');
+
+      // 어떤 오류가 나도 UI는 fresh guest 프로필 입력 상태로 유지한다.
+      if (mounted) {
+        _forceFreshGuestProfileSetupState();
+      }
     } finally {
       _isResettingDeletedAccountSession = false;
+      _freshGuestAuthResetInProgress = false;
+
+      if (mounted) {
+        _ensureFreshGuestProfileSetupVisible();
+      }
     }
   }
 
@@ -7423,6 +7598,21 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildGameCanvas() {
+    final user = supabase.auth.currentUser;
+    final isAnonymous =
+        user != null && (user.email == null || user.email!.trim().isEmpty);
+    if (_profile == null &&
+        _activePet == null &&
+        _status != _ViewStatus.error &&
+        !_isProfileSetupPanelVisible &&
+        !_isProfileSetupClosing &&
+        (isAnonymous || user == null || _freshGuestAuthResetInProgress)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _ensureFreshGuestProfileSetupVisible();
+      });
+    }
+
     final profileComplete = _isProfileComplete();
     final hasActivePet = _activePet != null;
     final showProfileSetup = _status == _ViewStatus.ready && !profileComplete;
@@ -15132,107 +15322,15 @@ class _HomePageState extends State<HomePage>
           .eq('id', uid);
 
       await _deleteCurrentAuthUserByEdgeFunction();
-      await supabase.auth.signOut();
+
+      debugPrint('withdraw success before reset');
+
+      // DB 삭제·auth user 삭제 후 세션/UI 초기화는 공통 fresh guest reset helper로
+      // 일원화한다. (UI 즉시 확정 → auth reset timeout 후속 처리)
+      await _resetToFreshGuestAfterDeletedAccount();
 
       if (!mounted) return;
-      _safeSetState(() {
-        _emailOtpCooldownTimer?.cancel();
-        _emailOtpCooldownTimer = null;
-        _emailOtpCooldownSeconds = 0;
-        _profile = null;
-        _petSpecies = [];
-        _activePet = null;
-        _residentPets = [];
-        _selectedSpeciesId = null;
-        _todayMealLogs = [];
-        _firstMealPopupShownThisSession = false;
-        _randomTicketCount = 0;
-        _pokedexEntries = [];
-        _diaryVisibleMonth = _todayDiaryMonth();
-        _diaryLogsByDate = {};
-        _isUploadingMeal = false;
-        _uploadingSlot = null;
-        _isInteracting = false;
-        _isUsingRandomTicket = false;
-        _isInitialAdoptionPanelVisible = false;
-        _isInitialAdoptionPanelClosing = false;
-        _isInitialAdoptionInFlight = false;
-        _isNamingDialogOpen = false;
-        _canShowActivePetDuringNaming = false;
-        _isPetNamingPanelClosing = false;
-        _petNamingController.clear();
-        if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
-          _petNamingCompleter!.complete(null);
-        }
-        _petNamingCompleter = null;
-        _petNamingPanelEnterController.stop();
-        _petNamingPanelEnterController.value = 0;
-        _isToyMenuOpen = false;
-        _isToyDropHovering = false;
-        _isCompletingToyPlay = false;
-        _petToySwapInProgress = false;
-        _toyOpenedFromPetBanner = false;
-        _isMealPanelOpen = false;
-        _petMealSwapInProgress = false;
-        _mealOpenedFromPetBanner = false;
-        _petChildPanelDismissingToYard = false;
-        _gameMenuPanelOpen = false;
-        _gameMenuPanelRetracting = false;
-        _isProfilePanelOpen = false;
-        _profilePanelSwapInProgress = false;
-        _profileOpenedFromGameMenu = false;
-        _isDietDiaryPanelOpen = false;
-        _dietDiaryPanelSwapInProgress = false;
-        _isBagPanelOpen = false;
-        _bagPanelSwapInProgress = false;
-        _bagPanelDetailItem = null;
-        _isPokedexPanelOpen = false;
-        _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
-        _isSettingsPanelOpen = false;
-        _settingsPanelSwapInProgress = false;
-        _activeSettingsSupportDoc = null;
-        _renderingSettingsSupportDoc = null;
-        _settingsSupportDocSwapInProgress = false;
-        _settingsSupportDocScrollbarReady = false;
-        _isEmailLinkPanelOpen = false;
-        _isCustomerCenterPanelOpen = false;
-        _instantCloseYardConfirmOverlays();
-        _isStoryPanelOpen = false;
-        _storyPanelSwapInProgress = false;
-        _isHelpPanelOpen = false;
-        _helpPanelSwapInProgress = false;
-        _resetEmailLinkPanelOtpFlow();
-        _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
-        _clearProfileFormState();
-        _isProfileSetupPanelVisible = true;
-        _isProfileSetupClosing = false;
-
-        _lastResultType = null;
-        _lastFeedbackText = null;
-        _lastStatusMessage = null;
-        _lastAffectionGain = null;
-        _lastImagePath = null;
-        _isAdopting = false;
-        _isSavingProfile = false;
-        _isLoggingMeal = false;
-      });
-      _petToySwapController.value = 0;
-      _petMealSwapController.value = 0;
-      _gameMenuPanelController.value = 0;
-      _gameProfileSwapController.value = 0;
-      _gameDietDiarySwapController.value = 0;
-      _gameBagSwapController.value = 0;
-      _gamePokedexSwapController.value = 0;
-      _gameSettingsSwapController.value = 0;
-      _gameHelpSwapController.value = 0;
-      _gameMenuSubOutsideDismissController.value = 0;
-
-      await _waitForUiSettle();
-      if (!mounted) return;
-      await _bootstrap();
-
-      if (!mounted) return;
+      _ensureFreshGuestProfileSetupVisible();
       _showSnack(l10n.snackWithdrawCompleted);
     } catch (e) {
       if (!mounted) return;
