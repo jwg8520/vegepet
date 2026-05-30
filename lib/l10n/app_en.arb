@@ -294,6 +294,7 @@
   "snackWithdrawCompleted": "Your account has been deleted.",
   "snackWithdrawError": "An error occurred while deleting your account: {error}",
   "@snackWithdrawError": {"placeholders": {"error": {"type": "String"}}},
+  "snackWithdrawErrorGeneric": "Something went wrong while deleting your account. Please try again in a moment.",
   "snackWeightNumberOnly": "Please enter a valid weight.",
   "snackDiarySaveFailed": "Failed to save diet diary: {error}",
   "@snackDiarySaveFailed": {"placeholders": {"error": {"type": "String"}}},

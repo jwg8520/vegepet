@@ -850,6 +850,10 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String get snackWithdrawErrorGeneric =>
+      '회원 탈퇴 처리 중 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
+
+  @override
   String get snackWeightNumberOnly => '체중은 숫자로 입력해주세요.';
 
   @override

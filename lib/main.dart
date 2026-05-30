@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -25,6 +26,14 @@ import 'package:vegepet/ui/vegepet_gradient_text.dart';
 import 'package:vegepet/ui/vegepet_notice_dialog.dart';
 
 const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
+// 보안 주의:
+//   - 이 값은 Supabase "publishable(anon)" 키로, 클라이언트 노출이 전제된 공개 키다.
+//     (`sb_publishable_` 접두사 확인됨) 따라서 앱 코드에 포함되어도 무방하다.
+//   - 단, 이 키만으로 데이터가 보호되지 않는다. **모든 테이블/Storage에 RLS 필수**:
+//     profiles / user_pets / meal_logs / meal_diary_notes / pokedex_entries /
+//     user_items 는 반드시 `auth.uid() = user_id` (또는 id) 기준 RLS 정책이 있어야 한다.
+//   - `service_role` / secret 키는 절대 이 파일(또는 어떤 Flutter 코드)에도 넣지 않는다.
+//     RLS bypass가 필요한 작업은 Edge Function 환경변수의 service_role 로만 수행한다.
 const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
 
 // ============================================================================
@@ -1300,11 +1309,12 @@ class _HomePageState extends State<HomePage>
       await _fetchActivePet();
       if (!mounted) return;
 
+      // 보안: 로그에 email 등 PII 전체(_profile)를 덤프하지 않는다. 진단에 필요한
+      //       비민감 플래그만 남긴다.
       debugPrint(
         'profile upsert success: '
-        'profile=$_profile, '
         'savedProfileComplete=$savedProfileComplete, '
-        'activePetId=${_activePet?['id']}',
+        'hasActivePet=${_activePet != null}',
       );
 
       _safeSetState(() {
@@ -4551,6 +4561,12 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _resetForTesting() async {
+    // 보안 방어선(이중화): 호출 진입점인 디버그 패널이 release 에서 숨겨져 있어도,
+    // 이 파괴적 초기화 함수 자체가 release 에서 절대 실행되지 않도록 가드한다.
+    if (!kDebugMode) return;
+    // TODO(vegepet/security): 현재는 클라이언트에서 user_id 필터로 여러 테이블을 직접
+    //   delete/update 한다. RLS 가 전제되어야 안전하며, 향후 security definer RPC
+    //   (예: debug_reset_user_data)로 이전해 서버에서 일괄 처리하도록 한다.
     _dismissFocus();
 
     final user = supabase.auth.currentUser;
@@ -10140,6 +10156,12 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildInYardDebugPanel() {
+    // 보안: 디버그 패널(개발용 전체 초기화·애정도 조작·DB 덤프 등)은 debug 빌드에서만
+    // 렌더링한다. release 빌드에서는 플로팅 버튼/창 자체가 위젯 트리에 추가되지 않아
+    // 일반 사용자가 접근할 수 없다.
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: _status != _ViewStatus.ready,
@@ -15019,7 +15041,9 @@ class _HomePageState extends State<HomePage>
       );
 
       final data = response.data;
-      debugPrint('delete-auth-user: status=${response.status} data=$data');
+      // 보안: 응답 body 전체(이메일/식별자 등 포함 가능)를 로그에 덤프하지 않고
+      //       상태 코드만 남긴다. 실패 시 상세는 아래 분기에서 최소 항목만 기록한다.
+      debugPrint('delete-auth-user: status=${response.status}');
       if (data is Map) {
         if (data['ok'] == false) {
           debugPrint(
@@ -15059,6 +15083,10 @@ class _HomePageState extends State<HomePage>
 
     final uid = user.id;
 
+    // TODO(vegepet/security): 회원 탈퇴 시 클라이언트에서 user_id 필터로 다중 테이블을
+    //   직접 delete 한다. RLS(`auth.uid() = user_id`) 가 반드시 전제되어야 안전하며,
+    //   향후 단일 트랜잭션 처리를 위해 security definer RPC 로 이전하는 것을 권장한다.
+    //   (auth.users 행 삭제는 이미 Edge Function `delete-auth-user` 로 분리되어 있다.)
     try {
       await supabase.from('meal_logs').delete().eq('user_id', uid);
       try {
@@ -15208,7 +15236,10 @@ class _HomePageState extends State<HomePage>
       _showSnack(l10n.snackWithdrawCompleted);
     } catch (e) {
       if (!mounted) return;
-      _showSnack(l10n.snackWithdrawError(e.toString()));
+      // 보안: 내부 오류 상세(PostgREST/RLS/SQL 메시지)는 사용자에게 노출하지 않는다.
+      //       원인 분석용 상세는 debugPrint 로만 남기고, 사용자에게는 일반 문구를 보여준다.
+      debugPrint('withdraw account failed: $e');
+      _showSnack(l10n.snackWithdrawErrorGeneric);
     }
   }
 

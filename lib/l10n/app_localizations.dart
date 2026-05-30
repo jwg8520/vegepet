@@ -1688,6 +1688,12 @@ abstract class AppLocalizations {
   /// **'회원 탈퇴 처리 중 오류가 발생했어요: {error}'**
   String snackWithdrawError(String error);
 
+  /// No description provided for @snackWithdrawErrorGeneric.
+  ///
+  /// In ko, this message translates to:
+  /// **'회원 탈퇴 처리 중 문제가 발생했어요. 잠시 후 다시 시도해주세요.'**
+  String get snackWithdrawErrorGeneric;
+
   /// No description provided for @snackWeightNumberOnly.
   ///
   /// In ko, this message translates to:

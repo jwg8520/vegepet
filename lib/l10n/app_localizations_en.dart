@@ -882,6 +882,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get snackWithdrawErrorGeneric =>
+      'Something went wrong while deleting your account. Please try again in a moment.';
+
+  @override
   String get snackWeightNumberOnly => 'Please enter a valid weight.';
 
   @override

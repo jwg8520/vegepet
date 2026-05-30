@@ -294,6 +294,7 @@
   "snackWithdrawCompleted": "회원 탈퇴가 완료되었어요.",
   "snackWithdrawError": "회원 탈퇴 처리 중 오류가 발생했어요: {error}",
   "@snackWithdrawError": {"placeholders": {"error": {"type": "String"}}},
+  "snackWithdrawErrorGeneric": "회원 탈퇴 처리 중 문제가 발생했어요. 잠시 후 다시 시도해주세요.",
   "snackWeightNumberOnly": "체중은 숫자로 입력해주세요.",
   "snackDiarySaveFailed": "식단일지 저장 실패: {error}",
   "@snackDiarySaveFailed": {"placeholders": {"error": {"type": "String"}}},
