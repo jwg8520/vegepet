@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ import 'package:vegepet/features/bag/bag_models.dart';
 import 'package:vegepet/features/profile/profile_label_helpers.dart';
 import 'package:vegepet/features/profile/profile_select_helpers.dart';
 import 'package:vegepet/features/settings/support_documents.dart';
+import 'package:vegepet/game/yard_game.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
 import 'package:vegepet/ui/vegepet_gradient_text.dart';
 import 'package:vegepet/ui/vegepet_notice_dialog.dart';
@@ -386,6 +388,10 @@ class _HomePageState extends State<HomePage>
 
   static const int _kProfileNicknameMaxLength = 8;
   static final RegExp _nameAllowedRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
+
+  /// Flame 2.5D 아이소메트릭 마당 배경 게임(하늘/구름/지면). State 1회 생성으로
+  /// 매 build 마다 재생성되지 않도록 필드로 보관한다.
+  final YardGame _yardGame = YardGame();
 
   _ViewStatus _status = _ViewStatus.loading;
   String? _errorMessage;
@@ -9381,12 +9387,14 @@ class _HomePageState extends State<HomePage>
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(20),
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFFDAF3DD), Color(0xFFA9DEB0)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+          // Flame GameWidget 으로 마당 배경(하늘/구름/지면)을 렌더링한다.
+          // 펫 이동/상호작용은 아직 없으므로 포인터 이벤트를 무시해, 기존
+          // GestureDetector 의 탭(키보드/오버레이 닫기) 동작을 그대로 유지한다.
+          child: IgnorePointer(
+            child: GameWidget(
+              game: _yardGame,
+              backgroundBuilder: (context) => const ColoredBox(
+                color: Color(0xFFDAF3DD),
               ),
             ),
           ),
