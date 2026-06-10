@@ -10593,6 +10593,11 @@ class _HomePageState extends State<HomePage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const Text(
+          'top/bottom inset 값이 클수록 육각형 위·아래 모서리가 안쪽으로 들어갑니다.',
+          style: TextStyle(color: Colors.white54, fontSize: 9),
+        ),
+        const SizedBox(height: 4),
         _buildYardTuningSliderRow(
           label: 'x',
           value: hut.x,
@@ -10630,6 +10635,26 @@ class _HomePageState extends State<HomePage>
           max: 240,
           onChanged: (v) {
             _yardGame.updateHutCollisionTuning(height: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'top',
+          value: hut.topInset,
+          min: 0,
+          max: 120,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(topInset: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'bot',
+          value: hut.bottomInset,
+          min: 0,
+          max: 120,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(bottomInset: v);
             _safeSetState(() {});
           },
         ),

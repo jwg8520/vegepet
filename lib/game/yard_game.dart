@@ -116,25 +116,32 @@ const List<CloudTuning> kCloudTunings = [
   ),
 ];
 
-/// 오두막 접근 불가 충돌 영역(Rectangle) 튜닝 값.
+/// 오두막 접근 불가 충돌 영역(Hexagon Polygon) 튜닝 값.
 ///
-/// - 844 x 390 논리 좌표 기준. 베지펫이 접근하면 안 되는 바닥 + 그림자 일부를
-///   감싸는 보이지 않는 사각형이다.
-/// - 이번 단계에서는 실제 이동 충돌 반응은 붙이지 않고, debug overlay 로 위치를
-///   확인/조정할 수 있게만 한다. 다음 베지펫 이동 단계에서 그대로 사용한다.
-/// - 향후 polygon 으로 확장할 수 있도록 Rectangle 기반으로 분리해 둔다.
+/// - 844 x 390 논리 좌표 기준. [x]/[y]/[width]/[height] 는 육각형 bounding box 이다.
+/// - [topInset]/[bottomInset] 으로 위·아래 좌우 모서리가 안쪽으로 들어가 2.5D
+///   아이소메트릭에 맞는 육각형 모양을 만든다.
+/// - 실제 이동 충돌 반응은 다음 베지펫 이동 단계에서 [isInsideHutCollision] 으로 연결.
 class HutCollisionTuning {
   const HutCollisionTuning({
     required this.x,
     required this.y,
     required this.width,
     required this.height,
+    required this.topInset,
+    required this.bottomInset,
   });
 
   final double x;
   final double y;
   final double width;
   final double height;
+
+  /// 육각형 위쪽 모서리 사선 깊이. 클수록 위쪽 좌우 꼭짓점이 안쪽으로 들어온다.
+  final double topInset;
+
+  /// 육각형 아래쪽 모서리 사선 깊이. 클수록 아래쪽 좌우 꼭짓점이 안쪽으로 들어온다.
+  final double bottomInset;
 }
 
 /// debug 튜닝 패널에서 실시간으로 변경하는 오두막 충돌 영역 런타임 설정.
@@ -144,20 +151,26 @@ class HutCollisionRuntimeTuning {
     required this.y,
     required this.width,
     required this.height,
+    required this.topInset,
+    required this.bottomInset,
   });
 
   double x;
   double y;
   double width;
   double height;
+  double topInset;
+  double bottomInset;
 }
 
 /// 오두막 충돌 영역 초기값. 실제 위치는 debug 튜닝 패널로 조정한다(임시값).
 const HutCollisionTuning kHutCollisionTuning = HutCollisionTuning(
-  x: 349.5,
-  y: 25.2,
-  width: 204.5,
+  x: 341.6,
+  y: 25.7,
+  width: 221.6,
   height: 182.5,
+  topInset: 50.3,
+  bottomInset: 23.7,
 );
 
 /// 굴뚝 연기 효과 튜닝 값.
@@ -270,6 +283,8 @@ class YardGame extends FlameGame {
         y: kHutCollisionTuning.y,
         width: kHutCollisionTuning.width,
         height: kHutCollisionTuning.height,
+        topInset: kHutCollisionTuning.topInset,
+        bottomInset: kHutCollisionTuning.bottomInset,
       );
   _HutCollisionDebugComponent? _hutCollisionDebug;
 
@@ -294,7 +309,7 @@ class YardGame extends FlameGame {
   /// debug 튜닝 패널에서 접근하는 오두막 충돌 영역 런타임 설정.
   HutCollisionRuntimeTuning get hutCollisionTuning => _hutCollisionTuning;
 
-  /// 현재 오두막 충돌 영역을 [Rect] 로 반환한다(844×390 논리 좌표).
+  /// 현재 오두막 충돌 육각형의 bounding box(844×390 논리 좌표).
   Rect get hutCollisionRect => Rect.fromLTWH(
     _hutCollisionTuning.x,
     _hutCollisionTuning.y,
@@ -302,22 +317,54 @@ class YardGame extends FlameGame {
     _hutCollisionTuning.height,
   );
 
-  /// [point] 가 오두막 충돌 영역 안에 있는지 여부. 향후 베지펫 이동 차단에 사용.
-  bool isInsideHutCollision(Vector2 point) =>
-      hutCollisionRect.contains(Offset(point.x, point.y));
+  /// 현재 오두막 충돌 육각형 꼭짓점 6개(844×390 논리 좌표, 시계 방향).
+  List<Vector2> get hutCollisionPolygonPoints {
+    final t = _hutCollisionTuning;
+    final topInset = t.topInset.clamp(0.0, t.width / 2);
+    final bottomInset = t.bottomInset.clamp(0.0, t.width / 2);
+    final midY = t.y + t.height * 0.5;
 
-  /// 오두막 충돌 영역 값을 즉시 반영한다(debug overlay 위치/크기도 즉시 갱신).
+    return [
+      Vector2(t.x + topInset, t.y),
+      Vector2(t.x + t.width - topInset, t.y),
+      Vector2(t.x + t.width, midY),
+      Vector2(t.x + t.width - bottomInset, t.y + t.height),
+      Vector2(t.x + bottomInset, t.y + t.height),
+      Vector2(t.x, midY),
+    ];
+  }
+
+  /// [point] 가 오두막 충돌 육각형 안에 있는지 여부. 향후 베지펫 이동 차단에 사용.
+  bool isInsideHutCollision(Vector2 point) =>
+      _isPointInsidePolygon(point, hutCollisionPolygonPoints);
+
+  /// 오두막 충돌 영역 값을 즉시 반영한다(debug polygon overlay 도 즉시 갱신).
   void updateHutCollisionTuning({
     double? x,
     double? y,
     double? width,
     double? height,
+    double? topInset,
+    double? bottomInset,
   }) {
     if (x != null) _hutCollisionTuning.x = x;
     if (y != null) _hutCollisionTuning.y = y;
     if (width != null) _hutCollisionTuning.width = width;
     if (height != null) _hutCollisionTuning.height = height;
-    _hutCollisionDebug?.syncFromTuning();
+    if (topInset != null) _hutCollisionTuning.topInset = topInset;
+    if (bottomInset != null) _hutCollisionTuning.bottomInset = bottomInset;
+    _refreshHutCollisionDebugOverlay();
+  }
+
+  /// debug 전용 육각형 충돌 overlay 를 최신 polygon points 로 다시 만든다.
+  void _refreshHutCollisionDebugOverlay() {
+    if (!kDebugMode) return;
+    _hutCollisionDebug?.removeFromParent();
+    final debug = _HutCollisionDebugComponent(
+      points: hutCollisionPolygonPoints,
+    );
+    _hutCollisionDebug = debug;
+    world.add(debug);
   }
 
   /// 현재 오두막 충돌 값을 [kHutCollisionTuning] const 코드 형태로 반환한다.
@@ -330,8 +377,32 @@ class YardGame extends FlameGame {
     buffer.writeln('  y: ${_formatTuningNumber(t.y)},');
     buffer.writeln('  width: ${_formatTuningNumber(t.width)},');
     buffer.writeln('  height: ${_formatTuningNumber(t.height)},');
+    buffer.writeln('  topInset: ${_formatTuningNumber(t.topInset)},');
+    buffer.writeln('  bottomInset: ${_formatTuningNumber(t.bottomInset)},');
     buffer.write(');');
     return buffer.toString();
+  }
+
+  /// ray casting 으로 [point] 가 [polygon] 내부인지 판정한다.
+  static bool _isPointInsidePolygon(Vector2 point, List<Vector2> polygon) {
+    if (polygon.length < 3) return false;
+
+    var inside = false;
+    for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      final xi = polygon[i].x;
+      final yi = polygon[i].y;
+      final xj = polygon[j].x;
+      final yj = polygon[j].y;
+      final denom = yj - yi;
+
+      final intersects =
+          ((yi > point.y) != (yj > point.y)) &&
+          (point.x <
+              (xj - xi) * (point.y - yi) / (denom == 0 ? 0.000001 : denom) +
+                  xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
   }
 
   // ---------------------------------------------------------------------------
@@ -484,12 +555,10 @@ class YardGame extends FlameGame {
     // 3) 굴뚝 연기: yard_ground(priority 2) 위에 표시. release 에서도 보인다.
     world.add(_SmokeEmitterComponent(tuning: _smokeTuning));
 
-    // 4) 오두막 충돌 영역 debug overlay: debug 빌드에서만 추가한다.
+    // 4) 오두막 충돌 영역 debug polygon overlay: debug 빌드에서만 추가한다.
     //    release 에서는 위젯/컴포넌트 트리에 들어가지 않아 절대 보이지 않는다.
     if (kDebugMode) {
-      final debug = _HutCollisionDebugComponent(tuning: _hutCollisionTuning);
-      _hutCollisionDebug = debug;
-      world.add(debug);
+      _refreshHutCollisionDebugOverlay();
     }
   }
 
@@ -560,29 +629,21 @@ class _CloudComponent extends SpriteComponent {
   }
 }
 
-/// 오두막 충돌 영역을 시각화하는 debug 전용 반투명 사각형.
+/// 오두막 충돌 육각형을 시각화하는 debug 전용 반투명 polygon.
 ///
-/// debug 빌드에서만 [YardGame.onLoad] 에서 world 에 추가된다. release 에서는
-/// 절대 생성/추가되지 않으므로 사용자에게 보이지 않는다. 튜닝 값이 바뀌면
-/// [syncFromTuning] 으로 position/size 가 즉시 갱신된다.
-class _HutCollisionDebugComponent extends RectangleComponent {
-  _HutCollisionDebugComponent({required HutCollisionRuntimeTuning tuning})
-    : _tuning = tuning,
-      super(
-        position: Vector2(tuning.x, tuning.y),
-        size: Vector2(tuning.width, tuning.height),
+/// debug 빌드에서만 [YardGame._refreshHutCollisionDebugOverlay] 로 world 에
+/// 추가된다. release 에서는 절대 생성/추가되지 않는다.
+class _HutCollisionDebugComponent extends PolygonComponent {
+  _HutCollisionDebugComponent({required List<Vector2> points})
+    : super(
+        points,
+        // position 을 지정하지 않아야 Flame 이 bounding box topLeft 로
+        // position 을 자동 설정한다. position: Vector2.zero() 를 넘기면
+        // manuallyPositioned=true 가 되어 x/y 튜닝 시 polygon 이 이동하지 않는다.
         anchor: Anchor.topLeft,
         priority: 5,
         paint: Paint()..color = const Color(0x55FF5722),
       );
-
-  final HutCollisionRuntimeTuning _tuning;
-
-  /// 런타임 튜닝 값을 position/size 에 즉시 반영한다.
-  void syncFromTuning() {
-    position.setValues(_tuning.x, _tuning.y);
-    size.setValues(_tuning.width, _tuning.height);
-  }
 }
 
 /// 굴뚝 연기 이미터. [spawnInterval] 마다 [puffsPerBurst] 개의 puff 를 생성한다.
