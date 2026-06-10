@@ -368,6 +368,10 @@ class _MealNotificationTexts {
 
 enum _ViewStatus { loading, error, ready }
 
+/// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/오두막/연기).
+/// release 빌드에서는 패널 자체가 노출되지 않으므로 사용되지 않는다.
+enum _YardTuningSection { cloud, hut, smoke }
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -460,6 +464,14 @@ class _HomePageState extends State<HomePage>
 
   /// 개발 확인용 디버그 오버레이 창 열림 (버튼으로 토글).
   bool _isDebugPanelOpen = false;
+
+  /// debug 전용 마당 구름 튜닝 패널 (release 에서는 UI 미노출).
+  bool _isYardTuningPanelOpen = false;
+  int _selectedTuningCloudIndex = 0;
+
+  /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기). debug 전용.
+  _YardTuningSection _yardTuningSection = _YardTuningSection.cloud;
+
   bool _isInteracting = false;
 
   // 가방 안의 랜덤 분양권(user_items.quantity 합계) 상태.
@@ -7659,6 +7671,7 @@ class _HomePageState extends State<HomePage>
         _buildYardBaseLayer(),
         _buildYardPetLayer(),
         _buildInYardDebugPanel(),
+        _buildInYardYardTuningPanel(),
         _buildTopHudLayer(),
         if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
         if (_status == _ViewStatus.error)
@@ -10351,6 +10364,511 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildInYardAdoptionPanel() {
     return _buildInYardInitialAdoptionPanel();
+  }
+
+  Widget _buildInYardYardTuningPanel() {
+    // debug 전용: Flame 구름 x/y/width/speed 실시간 튜닝. release 에서는 위젯 트리에 없음.
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isYardTuningPanelOpen)
+            Positioned(
+              left: 16,
+              bottom: 52,
+              width: 272,
+              height: 300,
+              child: _buildYardTuningPanelContent(),
+            ),
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: _buildYardTuningToggleButton(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildYardTuningToggleButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _safeSetState(
+          () => _isYardTuningPanelOpen = !_isYardTuningPanelOpen,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Yard Tune',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYardTuningPanelContent() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _buildYardTuningSectionChip(
+                    label: 'Clouds',
+                    section: _YardTuningSection.cloud,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildYardTuningSectionChip(
+                    label: 'Hut',
+                    section: _YardTuningSection.hut,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildYardTuningSectionChip(
+                    label: 'Smoke',
+                    section: _YardTuningSection.smoke,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: SingleChildScrollView(
+                child: switch (_yardTuningSection) {
+                  _YardTuningSection.cloud => _buildYardTuningCloudSection(),
+                  _YardTuningSection.hut => _buildYardTuningHutSection(),
+                  _YardTuningSection.smoke => _buildYardTuningSmokeSection(),
+                },
+              ),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isYardTuningPanelOpen = false),
+                    child: const Text('Close', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.lightGreenAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _printCurrentYardTuningSectionConfig,
+                    child: Text(
+                      switch (_yardTuningSection) {
+                        _YardTuningSection.cloud => 'Print Config',
+                        _YardTuningSection.hut => 'Print Hut Config',
+                        _YardTuningSection.smoke => 'Print Smoke Config',
+                      },
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _printCurrentYardTuningSectionConfig() {
+    switch (_yardTuningSection) {
+      case _YardTuningSection.cloud:
+        debugPrint(_yardGame.buildCloudTuningDebugText());
+      case _YardTuningSection.hut:
+        debugPrint(_yardGame.buildHutCollisionDebugText());
+      case _YardTuningSection.smoke:
+        debugPrint(_yardGame.buildSmokeTuningDebugText());
+    }
+  }
+
+  Widget _buildYardTuningCloudSection() {
+    final tunings = _yardGame.cloudTunings;
+    if (tunings.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final index = _selectedTuningCloudIndex.clamp(0, tunings.length - 1);
+    final selected = tunings[index];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            for (var i = 0; i < tunings.length; i++)
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    right: i < tunings.length - 1 ? 4 : 0,
+                  ),
+                  child: _buildYardTuningCloudChip(
+                    label: 'C${i + 1}',
+                    selected: i == index,
+                    onTap: () =>
+                        _safeSetState(() => _selectedTuningCloudIndex = i),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _buildYardTuningSliderRow(
+          label: 'x',
+          value: selected.x,
+          min: -500,
+          max: 1000,
+          onChanged: (v) {
+            _yardGame.updateCloudTuning(index, x: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'y',
+          value: selected.y,
+          min: 0,
+          max: kYardSkyBandMaxY,
+          onChanged: (v) {
+            _yardGame.updateCloudTuning(index, y: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'w',
+          value: selected.width,
+          min: 80,
+          max: 700,
+          onChanged: (v) {
+            _yardGame.updateCloudTuning(index, width: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'spd',
+          value: selected.speed,
+          min: 0,
+          max: 30,
+          onChanged: (v) {
+            _yardGame.updateCloudTuning(index, speed: v);
+            _safeSetState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYardTuningHutSection() {
+    final hut = _yardGame.hutCollisionTuning;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildYardTuningSliderRow(
+          label: 'x',
+          value: hut.x,
+          min: 0,
+          max: 844,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(x: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'y',
+          value: hut.y,
+          min: 0,
+          max: 390,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(y: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'w',
+          value: hut.width,
+          min: 20,
+          max: 300,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(width: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'h',
+          value: hut.height,
+          min: 20,
+          max: 240,
+          onChanged: (v) {
+            _yardGame.updateHutCollisionTuning(height: v);
+            _safeSetState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYardTuningSmokeSection() {
+    final smoke = _yardGame.smokeTuning;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildYardTuningSliderRow(
+          label: 'oX',
+          value: smoke.originX,
+          min: 0,
+          max: 844,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(originX: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'oY',
+          value: smoke.originY,
+          min: 0,
+          max: 390,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(originY: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'size',
+          value: smoke.baseSize,
+          min: 2,
+          max: 30,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(baseSize: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'rise',
+          value: smoke.riseDistance,
+          min: 10,
+          max: 120,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(riseDistance: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'dur',
+          value: smoke.duration,
+          min: 1.5,
+          max: 8,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(duration: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'intv',
+          value: smoke.spawnInterval,
+          min: 1,
+          max: 8,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(spawnInterval: v);
+            _safeSetState(() {});
+          },
+        ),
+        _buildYardTuningSliderRow(
+          label: 'opac',
+          value: smoke.opacity,
+          min: 0.05,
+          max: 0.6,
+          valueDecimals: 2,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(opacity: v);
+            _safeSetState(() {});
+          },
+        ),
+        Row(
+          children: [
+            const SizedBox(
+              width: 26,
+              child: Text(
+                'puff',
+                style: TextStyle(color: Colors.white70, fontSize: 10),
+              ),
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 5,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 10,
+                  ),
+                  activeTrackColor: Colors.lightGreenAccent.withValues(
+                    alpha: 0.8,
+                  ),
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: Colors.lightGreenAccent,
+                ),
+                child: Slider(
+                  value: smoke.puffsPerBurst.clamp(1, 4).toDouble(),
+                  min: 1,
+                  max: 4,
+                  divisions: 3,
+                  onChanged: (v) {
+                    _yardGame.updateSmokeTuning(puffsPerBurst: v.round());
+                    _safeSetState(() {});
+                  },
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 36,
+              child: Text(
+                '${smoke.puffsPerBurst}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYardTuningSectionChip({
+    required String label,
+    required _YardTuningSection section,
+  }) {
+    final selected = _yardTuningSection == section;
+    return Material(
+      color: selected
+          ? Colors.lightGreenAccent.withValues(alpha: 0.28)
+          : Colors.white.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => _safeSetState(() => _yardTuningSection = section),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white70,
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYardTuningCloudChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected
+          ? Colors.white.withValues(alpha: 0.28)
+          : Colors.white.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white70,
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYardTuningSliderRow({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+    int valueDecimals = 1,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 26,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 10),
+          ),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+              activeTrackColor: Colors.lightGreenAccent.withValues(alpha: 0.8),
+              inactiveTrackColor: Colors.white24,
+              thumbColor: Colors.lightGreenAccent,
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 36,
+          child: Text(
+            value.toStringAsFixed(valueDecimals),
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildInYardDebugPanel() {
