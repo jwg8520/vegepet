@@ -165,10 +165,10 @@ class HutCollisionRuntimeTuning {
 
 /// 오두막 충돌 영역 초기값. 실제 위치는 debug 튜닝 패널로 조정한다(임시값).
 const HutCollisionTuning kHutCollisionTuning = HutCollisionTuning(
-  x: 341.6,
-  y: 25.7,
-  width: 221.6,
-  height: 182.5,
+  x: 349.5,
+  y: 29.4,
+  width: 221.1,
+  height: 176.3,
   topInset: 50.3,
   bottomInset: 23.7,
 );
@@ -689,14 +689,105 @@ class _SmokeEmitterComponent extends Component {
           maxOpacity: _tuning.opacity,
           driftPhase: _random.nextDouble() * pi * 2,
           driftAmplitude: 3 + _random.nextDouble() * 3,
+          blobSeed: _random.nextInt(0x7FFFFFFF),
         ),
       );
     }
   }
 }
 
+/// Blob 구름 덩어리를 구성하는 타원 1개의 고정 형태 정보.
+///
+/// 파티클 생성 시 [blobSeed] 로 한 번만 결정되며, 생명주기 동안 변하지 않는다.
+class _SmokeBlobLobe {
+  const _SmokeBlobLobe({
+    required this.offsetX,
+    required this.offsetY,
+    required this.widthScale,
+    required this.heightScale,
+    required this.rotation,
+  });
+
+  /// 중심 기준 상대 x 오프셋 (scale 배수).
+  final double offsetX;
+
+  /// 중심 기준 상대 y 오프셋 (scale 배수).
+  final double offsetY;
+
+  /// 타원 가로 반지름 배수.
+  final double widthScale;
+
+  /// 타원 세로 반지름 배수.
+  final double heightScale;
+
+  /// 타원 회전(라디안).
+  final double rotation;
+}
+
+/// [seed] 로 결정되는 3~5개 타원으로 몽글몽글한 Blob 형태를 만든다.
+List<_SmokeBlobLobe> _createSmokeBlobLobes(int seed) {
+  final random = Random(seed);
+  final lobeCount = 3 + random.nextInt(3);
+  final lobes = <_SmokeBlobLobe>[];
+
+  // 중앙 메인 타원.
+  lobes.add(
+    _SmokeBlobLobe(
+      offsetX: (random.nextDouble() - 0.5) * 0.08,
+      offsetY: (random.nextDouble() - 0.5) * 0.06,
+      widthScale: 0.92 + random.nextDouble() * 0.14,
+      heightScale: 0.72 + random.nextDouble() * 0.16,
+      rotation: (random.nextDouble() - 0.5) * 0.22,
+    ),
+  );
+
+  // 좌·우·위·뒤 보조 타원 템플릿 (seed 기반 미세 지터).
+  const extraTemplates = <(double, double, double, double)>[
+    (-0.36, 0.05, 0.50, 0.40),
+    (0.34, 0.03, 0.46, 0.44),
+    (-0.10, -0.26, 0.42, 0.36),
+    (0.16, -0.16, 0.36, 0.32),
+  ];
+
+  for (var i = 1; i < lobeCount; i++) {
+    final template = extraTemplates[i - 1];
+    lobes.add(
+      _SmokeBlobLobe(
+        offsetX: template.$1 + (random.nextDouble() - 0.5) * 0.10,
+        offsetY: template.$2 + (random.nextDouble() - 0.5) * 0.08,
+        widthScale: template.$3 + (random.nextDouble() - 0.5) * 0.12,
+        heightScale: template.$4 + (random.nextDouble() - 0.5) * 0.10,
+        rotation: (random.nextDouble() - 0.5) * 0.32,
+      ),
+    );
+  }
+
+  return lobes;
+}
+
+/// 겹친 타원들로 말랑한 Blob 구름 덩어리를 그린다.
+void _drawSmokeBlob(
+  Canvas canvas,
+  List<_SmokeBlobLobe> lobes,
+  double scale,
+  Paint paint,
+) {
+  for (final lobe in lobes) {
+    canvas.save();
+    canvas.translate(lobe.offsetX * scale, lobe.offsetY * scale);
+    canvas.rotate(lobe.rotation);
+    final width = lobe.widthScale * scale * 2;
+    final height = lobe.heightScale * scale * 2;
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: width, height: height),
+      paint,
+    );
+    canvas.restore();
+  }
+}
+
 /// 굴뚝에서 천천히 올라오며 점점 투명해지고 커지는 연기 한 조각.
-class _SmokePuffComponent extends CircleComponent {
+class _SmokePuffComponent extends PositionComponent {
   _SmokePuffComponent({
     required double startX,
     required double startY,
@@ -706,6 +797,7 @@ class _SmokePuffComponent extends CircleComponent {
     required double maxOpacity,
     required double driftPhase,
     required double driftAmplitude,
+    required int blobSeed,
   }) : _startX = startX,
        _startY = startY,
        _baseSize = baseSize,
@@ -714,13 +806,11 @@ class _SmokePuffComponent extends CircleComponent {
        _maxOpacity = maxOpacity,
        _driftPhase = driftPhase,
        _driftAmplitude = driftAmplitude,
+       _lobes = _createSmokeBlobLobes(blobSeed),
        super(
-         radius: baseSize,
          anchor: Anchor.center,
          position: Vector2(startX, startY),
          priority: 3,
-         paint: Paint()
-           ..color = _smokeBaseColor.withValues(alpha: maxOpacity),
        );
 
   static const Color _smokeBaseColor = Color(0xFFECECEC);
@@ -733,8 +823,26 @@ class _SmokePuffComponent extends CircleComponent {
   final double _maxOpacity;
   final double _driftPhase;
   final double _driftAmplitude;
+  final List<_SmokeBlobLobe> _lobes;
 
   double _elapsed = 0;
+  double _currentScale = 0;
+  double _currentOpacity = 0;
+
+  @override
+  void onMount() {
+    super.onMount();
+    _currentScale = _baseSize;
+    _currentOpacity = _maxOpacity;
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final paint = Paint()
+      ..color = _smokeBaseColor.withValues(alpha: _currentOpacity)
+      ..style = PaintingStyle.fill;
+    _drawSmokeBlob(canvas, _lobes, _currentScale, paint);
+  }
 
   @override
   void update(double dt) {
@@ -751,10 +859,10 @@ class _SmokePuffComponent extends CircleComponent {
     position.setValues(_startX + drift, _startY - _riseDistance * t);
 
     // 시간이 지날수록 1.0배 → 약 2.2배로 천천히 커진다.
-    radius = _baseSize * (1.0 + t * 1.2);
+    _currentScale = _baseSize * (1.0 + t * 1.2);
 
     // 시간이 지날수록 0 으로 사라진다(처음엔 약간 부드럽게).
     final fade = (1.0 - t);
-    paint.color = _smokeBaseColor.withValues(alpha: _maxOpacity * fade);
+    _currentOpacity = _maxOpacity * fade;
   }
 }
