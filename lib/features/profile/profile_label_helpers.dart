@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vegepet/features/pet/vegepet_species_identity.dart';
 import 'package:vegepet/l10n/app_localizations.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
 
@@ -63,49 +64,23 @@ String localizedDietGoalValue(String? raw, {required bool isEnglishLocale}) {
   }
 }
 
-/// pet_species.name_ko 기반 종류명 표시. 정보창 Type·도감 종 이름에 사용.
+/// pet_species row 기반 종류명 표시. 정보창 Type·도감 종 이름에 사용.
 String localizedPetSpeciesNameFromRaw({
   required String? nameKo,
   String? family,
   String? code,
+  int? id,
   required bool isEnglishLocale,
 }) {
-  final rawName = nameKo?.trim() ?? '';
-  if (!isEnglishLocale) return rawName;
-
-  final lowerFamily = family?.trim().toLowerCase() ?? '';
-  final lowerCode = code?.trim().toLowerCase() ?? '';
-
-  int? number;
-  final numberMatch = RegExp(r'(\d+)$').firstMatch(rawName);
-  if (numberMatch != null) {
-    number = int.tryParse(numberMatch.group(1)!);
-  }
-
-  String familyLabel;
-  if (rawName.contains('고양이') ||
-      rawName.contains('냥') ||
-      lowerFamily == 'cat' ||
-      lowerCode.contains('cat')) {
-    familyLabel = 'Cat';
-  } else if (rawName.contains('강아지') ||
-      rawName.contains('댕') ||
-      lowerFamily == 'dog' ||
-      lowerCode.contains('dog')) {
-    familyLabel = 'Dog';
-  } else {
-    familyLabel = 'VegePet';
-  }
-
-  if (number != null) {
-    return '$familyLabel $number';
-  }
-
-  if (rawName.isNotEmpty) {
-    return familyLabel == 'VegePet' ? rawName : familyLabel;
-  }
-
-  return familyLabel;
+  return speciesDisplayNameForLocale(
+    {
+      'id': ?id,
+      'name_ko': nameKo,
+      'family': family,
+      'code': code,
+    },
+    isEnglishLocale: isEnglishLocale,
+  );
 }
 
 /// 메뉴 라벨 key → 현재 locale 표시 문자열.

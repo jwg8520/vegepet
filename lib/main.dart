@@ -19,9 +19,11 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:vegepet/l10n/app_localizations.dart';
 import 'package:vegepet/features/bag/bag_models.dart';
+import 'package:vegepet/features/pet/vegepet_species_identity.dart';
 import 'package:vegepet/features/profile/profile_label_helpers.dart';
 import 'package:vegepet/features/profile/profile_select_helpers.dart';
 import 'package:vegepet/features/settings/support_documents.dart';
+import 'package:vegepet/game/pet_motion.dart';
 import 'package:vegepet/game/yard_game.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
 import 'package:vegepet/ui/vegepet_gradient_text.dart';
@@ -471,6 +473,11 @@ class _HomePageState extends State<HomePage>
 
   /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기). debug 전용.
   _YardTuningSection _yardTuningSection = _YardTuningSection.cloud;
+
+  /// debug 전용 cat_sco baby 모션 테스트 패널 (release 미노출).
+  bool _isPetMotionTestPanelOpen = false;
+  double _petMotionSpeedMultiplier = 1.0;
+  int _petMotionRepeatCount = 1;
 
   bool _isInteracting = false;
 
@@ -1187,6 +1194,7 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionInFlight = false;
       }
     });
+    _scheduleSyncActivePetToYardGame();
   }
 
   /// 회원탈퇴·stale session reset 직후 새 anonymous guest 프로필 입력창을 즉시 확정한다.
@@ -1251,6 +1259,7 @@ class _HomePageState extends State<HomePage>
       _isEmailLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
     });
+    unawaited(_yardGame.removeActivePetComponent());
   }
 
   /// anonymous guest + profile 없음인데 프로필 입력창이 안 떠 있는 먹통 상태를 복구한다.
@@ -2219,6 +2228,8 @@ class _HomePageState extends State<HomePage>
         _isProfileSetupClosing = false;
         _status = _ViewStatus.loading;
       });
+
+      unawaited(_yardGame.removeActivePetComponent());
 
       _petToySwapController.value = 0;
       _petMealSwapController.value = 0;
@@ -3396,6 +3407,7 @@ class _HomePageState extends State<HomePage>
     final user = supabase.auth.currentUser;
     if (user == null) {
       _activePet = null;
+      _scheduleSyncActivePetToYardGame();
       return;
     }
 
@@ -3409,6 +3421,7 @@ class _HomePageState extends State<HomePage>
         .maybeSingle();
 
     _activePet = data == null ? null : Map<String, dynamic>.from(data);
+    _scheduleSyncActivePetToYardGame();
   }
 
   // 성숙기 졸업 후 마당에 거주 중인 펫 목록 조회.
@@ -3764,18 +3777,124 @@ class _HomePageState extends State<HomePage>
     return null;
   }
 
-  // 도감 entry 에서 종 이름(name_ko)을 안전하게 꺼낸다.
+  VegePetSpeciesIdentity? _speciesIdentityFromSpeciesRow(
+    Map<String, dynamic>? species,
+  ) =>
+      speciesIdentityFromSpeciesRow(species);
+
+  String _speciesDisplayNameKo(Map<String, dynamic>? species) =>
+      speciesDisplayNameKo(species);
+
+  String _speciesDisplayNameEn(Map<String, dynamic>? species) =>
+      speciesDisplayNameEn(species);
+
+  String _speciesDisplayNameForCurrentLocale(Map<String, dynamic>? species) =>
+      _isEnglishLocale
+          ? _speciesDisplayNameEn(species)
+          : _speciesDisplayNameKo(species);
+
+  String _speciesInternalCode(Map<String, dynamic>? species) {
+    final identity = _speciesIdentityFromSpeciesRow(species);
+    if (identity != null) return identity.internalCode;
+    return species?['code']?.toString().trim() ?? '';
+  }
+
+  int? _speciesIdFromPet(Map<String, dynamic>? pet) {
+    if (pet == null) return null;
+    final raw = pet['pet_species_id'];
+    if (raw is int) return raw;
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  /// cat_sco baby 가 Flame 펫으로 표시되어야 하는지 여부.
+  bool _shouldUseFlamePetForActivePet() {
+    final pet = _activePet;
+    if (pet == null) return false;
+    final stage = pet['stage']?.toString();
+    if (stage != 'baby') return false;
+
+    final species = _speciesForPet(pet);
+    final code = _speciesInternalCode(species);
+    if (code == 'cat_sco') return true;
+
+    final speciesId = _speciesIdFromPet(pet);
+    return speciesId == 1;
+  }
+
+  void _scheduleSyncActivePetToYardGame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_syncActivePetToYardGame());
+    });
+  }
+
+  Future<void> _syncActivePetToYardGame() async {
+    final pet = _activePet;
+    if (pet == null) {
+      debugPrint('YardGame sync: no activePet, removing Flame pet');
+      await _yardGame.removeActivePetComponent();
+      if (mounted) _safeSetState(() {});
+      return;
+    }
+
+    final stage = pet['stage']?.toString();
+    final speciesId = _speciesIdFromPet(pet);
+    final species = _speciesForPet(pet);
+    final embeddedCode = species?['code']?.toString();
+    final code = _speciesInternalCode(species);
+    final shouldUseFlame = _shouldUseFlamePetForActivePet();
+
+    debugPrint(
+      'YardGame sync check: petId=${pet['id']}, speciesId=$speciesId, embeddedCode=$embeddedCode, code=$code, stage=$stage, shouldUseFlame=$shouldUseFlame',
+    );
+
+    if (!shouldUseFlame) {
+      debugPrint('YardGame sync: unsupported pet for Flame, removing Flame pet');
+      await _yardGame.removeActivePetComponent();
+      if (mounted) _safeSetState(() {});
+      return;
+    }
+
+    final petId = pet['id']?.toString();
+    if (petId == null || petId.isEmpty) {
+      debugPrint('YardGame sync: missing pet id');
+      return;
+    }
+
+    final shown = await _yardGame.showCatScoBabyPet(userPetId: petId);
+    debugPrint(
+      'YardGame sync result: shown=$shown, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
+    );
+    if (mounted) _safeSetState(() {});
+  }
+
+  void _triggerPetKneadingIfApplicable(int affectionGain) {
+    if (!_shouldUseFlamePetForActivePet()) return;
+    if (!_yardGame.hasActiveVegePet) return;
+    if (affectionGain != 3 && affectionGain != 5) return;
+    _yardGame.playPetMotion(
+      PetMotion.kneading,
+      speedMultiplier: _petMotionSpeedMultiplier,
+      repeatCount: _petMotionRepeatCount,
+    );
+  }
+
+  void _triggerPetPlayMotion() {
+    if (!_shouldUseFlamePetForActivePet()) return;
+    if (!_yardGame.hasActiveVegePet) return;
+    _yardGame.playPetMotion(
+      PetMotion.play,
+      speedMultiplier: _petMotionSpeedMultiplier,
+      repeatCount: _petMotionRepeatCount,
+    );
+  }
+
+  // 도감 entry 에서 종 이름을 안전하게 꺼낸다 (새 표시명 override 적용).
   String _pokedexSpeciesNameOf(Map<String, dynamic> entry) {
     final species = entry['pet_species'];
     if (species is Map) {
       final m = Map<String, dynamic>.from(species);
-      final nameKo = m['name_ko']?.toString();
-      final code = m['code']?.toString();
-      final localized = _localizedPetSpeciesNameFromRaw(
-        nameKo: nameKo,
-        family: m['family']?.toString(),
-        code: code,
-      );
+      final localized = _speciesDisplayNameForCurrentLocale(m);
       if (localized.isNotEmpty) return localized;
     }
     return AppLocalizations.of(context).pokedexDefaultPetName;
@@ -4284,6 +4403,10 @@ class _HomePageState extends State<HomePage>
       );
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+
+      if (isPlay) {
+        _triggerPetPlayMotion();
+      }
     } catch (e) {
       if (_isAuthUserMissingForeignKeyError(e)) {
         if (mounted) {
@@ -4513,6 +4636,9 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionInFlight = false;
       });
 
+      // 분양 직후 Flame pet 생성 동기화 (이름짓기 패널 전에 스폰).
+      _scheduleSyncActivePetToYardGame();
+
       if (!mounted) return;
       await _showNicknameDialog();
     } catch (e) {
@@ -4574,6 +4700,9 @@ class _HomePageState extends State<HomePage>
 
       if (!mounted) return;
       _safeSetState(() {});
+
+      // 이름 저장 후 activePet 재조회 → Flame pet 상태 재동기화.
+      _scheduleSyncActivePetToYardGame();
 
       await _waitForUiSettle();
       if (!mounted) return;
@@ -5921,13 +6050,7 @@ class _HomePageState extends State<HomePage>
         ? _pokedexEntryForSpeciesId(speciesId)
         : null;
     final unlocked = entry != null;
-    final speciesName = species['name_ko']?.toString().trim();
-    final codeFallback = species['code']?.toString().trim();
-    String unlockedLabel = _localizedPetSpeciesNameFromRaw(
-      nameKo: speciesName,
-      family: species['family']?.toString(),
-      code: codeFallback,
-    );
+    String unlockedLabel = _speciesDisplayNameForCurrentLocale(species);
     if (unlockedLabel.isEmpty) {
       unlockedLabel = l10n.pokedexDefaultPetName;
     }
@@ -7672,6 +7795,7 @@ class _HomePageState extends State<HomePage>
         _buildYardPetLayer(),
         _buildInYardDebugPanel(),
         _buildInYardYardTuningPanel(),
+        _buildInYardPetMotionTestPanel(),
         _buildTopHudLayer(),
         if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
         if (_status == _ViewStatus.error)
@@ -9421,15 +9545,29 @@ class _HomePageState extends State<HomePage>
       return const SizedBox.shrink();
     }
     if (_activePet == null) return const SizedBox.shrink();
+    final useFlamePet = _shouldUseFlamePetForActivePet();
+    final flamePetReady = useFlamePet && _yardGame.hasActiveVegePet;
     return Positioned.fill(
       child: Stack(
         children: [
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 56,
-            child: _buildCenterPetVisual(),
-          ),
+          if (!flamePetReady)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 56,
+              child: _buildCenterPetVisual(),
+            ),
+          if (useFlamePet)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 40,
+              height: 140,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => unawaited(_onYardPetTapped()),
+              ),
+            ),
           Positioned(
             left: 8,
             right: 8,
@@ -10164,13 +10302,9 @@ class _HomePageState extends State<HomePage>
   }) {
     if (species == null) return const SizedBox(width: 76);
     final id = species['id']?.toString();
-    final localizedSpeciesName = _localizedPetSpeciesNameFromRaw(
-      nameKo: species['name_ko']?.toString(),
-      family: species['family']?.toString(),
-      code: species['code']?.toString(),
-    );
-    final speciesName = localizedSpeciesName.trim().isNotEmpty
-        ? localizedSpeciesName
+    final speciesName = _speciesDisplayNameForCurrentLocale(species);
+    final displaySpeciesName = speciesName.trim().isNotEmpty
+        ? speciesName
         : species['code']?.toString().trim().isNotEmpty == true
         ? species['code']?.toString().trim() ?? '-'
         : '-';
@@ -10228,7 +10362,7 @@ class _HomePageState extends State<HomePage>
             ),
             const SizedBox(height: 4),
             Text(
-              speciesName,
+              displaySpeciesName,
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -10738,6 +10872,16 @@ class _HomePageState extends State<HomePage>
             _safeSetState(() {});
           },
         ),
+        _buildYardTuningSliderRow(
+          label: 'spd',
+          value: smoke.windDriftSpeed,
+          min: 0,
+          max: 30,
+          onChanged: (v) {
+            _yardGame.updateSmokeTuning(windDriftSpeed: v);
+            _safeSetState(() {});
+          },
+        ),
         Row(
           children: [
             const SizedBox(
@@ -10893,6 +11037,202 @@ class _HomePageState extends State<HomePage>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildInYardPetMotionTestPanel() {
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isPetMotionTestPanelOpen)
+            Positioned(
+              right: 16,
+              bottom: 52,
+              width: 292,
+              height: 360,
+              child: _buildPetMotionTestPanelContent(),
+            ),
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: _buildPetMotionTestToggleButton(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPetMotionTestToggleButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _safeSetState(
+          () => _isPetMotionTestPanelOpen = !_isPetMotionTestPanelOpen,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Pet Motion',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPetMotionTestPanelContent() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Pet Motion Test (cat_sco baby)',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _buildYardTuningSliderRow(
+              label: 'spd',
+              value: _petMotionSpeedMultiplier,
+              min: 0.25,
+              max: 3.0,
+              onChanged: (v) =>
+                  _safeSetState(() => _petMotionSpeedMultiplier = v),
+            ),
+            _buildYardTuningSliderRow(
+              label: 'rep',
+              value: _petMotionRepeatCount.toDouble(),
+              min: 1,
+              max: 10,
+              valueDecimals: 0,
+              onChanged: (v) =>
+                  _safeSetState(() => _petMotionRepeatCount = v.round()),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final entry in <(PetMotion, String)>[
+                      (PetMotion.idle, 'Idle'),
+                      (PetMotion.walk, 'Walk'),
+                      (PetMotion.run, 'Run'),
+                      (PetMotion.lieDown, 'Lie Down'),
+                      (PetMotion.lyingIdle, 'Lying Idle'),
+                      (PetMotion.standUp, 'Stand Up'),
+                      (PetMotion.kneading, 'Kneading'),
+                      (PetMotion.play, 'Play'),
+                    ])
+                      _buildPetMotionTestChip(
+                        label: entry.$2,
+                        onTap: () => _yardGame.playPetMotion(
+                          entry.$1,
+                          speedMultiplier: _petMotionSpeedMultiplier,
+                          repeatCount: _petMotionRepeatCount,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.lightBlueAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () async {
+                      final ok = await _yardGame.showCatScoBabyPetDebug();
+                      debugPrint(
+                        'Pet Motion debug spawn: shown=$ok, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
+                      );
+                      if (mounted) _safeSetState(() {});
+                    },
+                    child: const Text(
+                      'Spawn Sco',
+                      style: TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orangeAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        unawaited(_yardGame.removeActivePetComponent()),
+                    child: const Text(
+                      'Remove Pet',
+                      style: TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isPetMotionTestPanelOpen = false),
+                    child: const Text('Close', style: TextStyle(fontSize: 10)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPetMotionTestChip({
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        ),
+      ),
     );
   }
 
@@ -11263,23 +11603,16 @@ class _HomePageState extends State<HomePage>
 
     final species = _speciesForPet(pet) ?? <String, dynamic>{};
     final family = species['family']?.toString().toLowerCase() ?? '';
-    final speciesNameKo = species['name_ko']?.toString() ?? '펫';
-    final typeDisplay = _localizedPetSpeciesNameFromRaw(
-      nameKo: species['name_ko']?.toString(),
-      family: species['family']?.toString(),
-      code: species['code']?.toString(),
-    );
+    final speciesDisplayName = _speciesDisplayNameForCurrentLocale(species);
     final nickname = pet['nickname']?.toString();
-    final speciesDisplayName = _localizedPetSpeciesNameFromRaw(
-      nameKo: species['name_ko']?.toString(),
-      family: species['family']?.toString(),
-      code: species['code']?.toString(),
-    );
     final displayName = (nickname == null || nickname.isEmpty)
-        ? (_isEnglishLocale && speciesDisplayName.isNotEmpty
+        ? (speciesDisplayName.isNotEmpty
               ? speciesDisplayName
-              : speciesNameKo)
+              : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
+    final typeDisplay = speciesDisplayName.isNotEmpty
+        ? speciesDisplayName
+        : (_isEnglishLocale ? 'VegePet' : '펫');
     final stage = pet['stage']?.toString() ?? 'baby';
     final stageKo = _stageToKorean(stage);
     final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
@@ -11684,14 +12017,12 @@ class _HomePageState extends State<HomePage>
   // 상호작용 대상이 아니라 "함께 사는 펫" 의 시각적 표현이라 클릭 핸들러는 없다.
   Widget _buildResidentPetChip(Map<String, dynamic> pet) {
     final theme = Theme.of(context);
-    final species = pet['pet_species'] is Map
-        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
-        : <String, dynamic>{};
+    final species = _speciesForPet(pet) ?? <String, dynamic>{};
     final family = species['family']?.toString() ?? '';
-    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final speciesName = _speciesDisplayNameForCurrentLocale(species);
     final nickname = pet['nickname']?.toString();
     final displayName = (nickname == null || nickname.isEmpty)
-        ? speciesName
+        ? (speciesName.isNotEmpty ? speciesName : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
 
     return Padding(
@@ -12601,16 +12932,14 @@ class _HomePageState extends State<HomePage>
   }) {
     final theme = Theme.of(context);
     final pet = _activePet!;
-    final species = pet['pet_species'] is Map
-        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
-        : <String, dynamic>{};
+    final species = _speciesForPet(pet) ?? <String, dynamic>{};
 
     final family = species['family']?.toString() ?? '';
     final familyKo = _familyToKorean(family);
-    final speciesName = species['name_ko']?.toString() ?? '펫';
+    final speciesName = _speciesDisplayNameForCurrentLocale(species);
     final nickname = pet['nickname']?.toString();
     final displayName = (nickname == null || nickname.isEmpty)
-        ? speciesName
+        ? (speciesName.isNotEmpty ? speciesName : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
     final stage = pet['stage']?.toString() ?? 'baby';
     final stageKo = _stageToKorean(stage);
@@ -13257,6 +13586,10 @@ class _HomePageState extends State<HomePage>
     // 클라이언트에서 affection 기준으로 stage 를 동기화한다.
     if (ok && gain > 0 && !_isCurrentPetMature()) {
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+    }
+
+    if (ok && (gain == 3 || gain == 5)) {
+      _triggerPetKneadingIfApplicable(gain);
     }
   }
 
@@ -17262,14 +17595,27 @@ class _HomePageState extends State<HomePage>
     }
 
     final pet = _activePet!;
-    final species = pet['pet_species'] is Map
-        ? Map<String, dynamic>.from(pet['pet_species'] as Map)
-        : const <String, dynamic>{};
+    final species = _speciesForPet(pet) ?? const <String, dynamic>{};
 
     return [
       _kv('id', pet['id']?.toString() ?? '-'),
       _kv('pet_species_id', pet['pet_species_id']?.toString() ?? '-'),
-      _kv('species.name_ko', species['name_ko']?.toString() ?? '-'),
+      () {
+        final displayName = _speciesDisplayNameForCurrentLocale(species);
+        return _kv(
+          'species.name_ko',
+          displayName.isNotEmpty
+              ? displayName
+              : species['name_ko']?.toString() ?? '-',
+        );
+      }(),
+      () {
+        final code = _speciesInternalCode(species);
+        return _kv(
+          'species.internal_code',
+          code.isNotEmpty ? code : '-',
+        );
+      }(),
       _kv('species.family', species['family']?.toString() ?? '-'),
       _kv('nickname', pet['nickname']?.toString() ?? '(없음)'),
       _kv('stage', pet['stage']?.toString() ?? '-'),
@@ -17337,19 +17683,6 @@ class _HomePageState extends State<HomePage>
 
   String _localizedDietGoalValue(String? raw, AppLocalizations l10n) {
     return localizedDietGoalValue(raw, isEnglishLocale: _isEnglishLocale);
-  }
-
-  String _localizedPetSpeciesNameFromRaw({
-    required String? nameKo,
-    String? family,
-    String? code,
-  }) {
-    return localizedPetSpeciesNameFromRaw(
-      nameKo: nameKo,
-      family: family,
-      code: code,
-      isEnglishLocale: _isEnglishLocale,
-    );
   }
 
   String _menuLabelForKey(String key) {

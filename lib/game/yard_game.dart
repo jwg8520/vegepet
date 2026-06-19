@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flame/components.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/vegepet_component.dart';
 
 /// Flame 마당 논리 캔버스 폭 (기존 Flutter 844×390 좌표계와 동일).
 const double kYardGameWidth = 844;
@@ -178,7 +181,7 @@ const HutCollisionTuning kHutCollisionTuning = HutCollisionTuning(
 /// - 844 x 390 논리 좌표 기준. [originX]/[originY] 가 굴뚝(연기 시작점)이다.
 /// - 아주 약하고 느린 연기를 의도한다. 기본은 [spawnInterval] 마다
 ///   [puffsPerBurst] 개의 작은 puff 가 [riseDistance] 만큼 천천히 상승하며
-///   점점 투명해지고 커진다.
+///   [windDriftSpeed] 에 따라 우측으로 drift 하고 점점 투명해지고 커진다.
 /// - 연기 효과는 debug/release 양쪽에서 모두 보인다(튜닝 UI 만 debug 전용).
 class SmokeTuning {
   const SmokeTuning({
@@ -190,6 +193,7 @@ class SmokeTuning {
     required this.spawnInterval,
     required this.puffsPerBurst,
     required this.opacity,
+    required this.windDriftSpeed,
   });
 
   final double originX;
@@ -200,6 +204,9 @@ class SmokeTuning {
   final double spawnInterval;
   final int puffsPerBurst;
   final double opacity;
+
+  /// 바람에 의한 우측 drift 속도(px/sec). 양수는 우측 이동.
+  final double windDriftSpeed;
 }
 
 /// debug 튜닝 패널에서 실시간으로 변경하는 굴뚝 연기 런타임 설정.
@@ -213,6 +220,7 @@ class SmokeRuntimeTuning {
     required this.spawnInterval,
     required this.puffsPerBurst,
     required this.opacity,
+    required this.windDriftSpeed,
   });
 
   double originX;
@@ -223,6 +231,7 @@ class SmokeRuntimeTuning {
   double spawnInterval;
   int puffsPerBurst;
   double opacity;
+  double windDriftSpeed;
 }
 
 /// 굴뚝 연기 초기값. 실제 굴뚝 위치는 debug 튜닝 패널로 조정한다(대략값).
@@ -232,10 +241,20 @@ const SmokeTuning kSmokeTuning = SmokeTuning(
   baseSize: 5.7,
   riseDistance: 51.4,
   duration: 3.4,
-  spawnInterval: 2.1,
+  spawnInterval: 1.7,
   puffsPerBurst: 4,
   opacity: 0.6,
+  windDriftSpeed: 5,
 );
+
+/// 베지펫이 이동 가능한 마당 영역 (844×390, 추후 튜닝).
+final List<Vector2> kYardWalkableAreaPolygon = [
+  Vector2(0, 145),
+  Vector2(230, 55),
+  Vector2(844, 145),
+  Vector2(844, 390),
+  Vector2(0, 390),
+];
 
 /// VegePet 2.5D 아이소메트릭 마당 Flame 게임 (1단계: 배경 + 구름).
 ///
@@ -288,6 +307,17 @@ class YardGame extends FlameGame {
       );
   _HutCollisionDebugComponent? _hutCollisionDebug;
 
+  VegePetComponent? _vegePetComponent;
+  String? _activePetUserId;
+  String? _lastPetSpawnError;
+  Future<bool>? _petSpawnInFlight;
+  String? _petSpawnInFlightUserId;
+
+  final Completer<void> _onLoadCompleter = Completer<void>();
+
+  /// 마지막 Flame 펫 spawn 실패 메시지 (debug 추적용).
+  String? get lastPetSpawnError => _lastPetSpawnError;
+
   final SmokeRuntimeTuning _smokeTuning = SmokeRuntimeTuning(
     originX: kSmokeTuning.originX,
     originY: kSmokeTuning.originY,
@@ -297,6 +327,7 @@ class YardGame extends FlameGame {
     spawnInterval: kSmokeTuning.spawnInterval,
     puffsPerBurst: kSmokeTuning.puffsPerBurst,
     opacity: kSmokeTuning.opacity,
+    windDriftSpeed: kSmokeTuning.windDriftSpeed,
   );
 
   /// debug 튜닝 패널에서 읽기 전용으로 접근하는 구름 런타임 설정.
@@ -334,9 +365,212 @@ class YardGame extends FlameGame {
     ];
   }
 
-  /// [point] 가 오두막 충돌 육각형 안에 있는지 여부. 향후 베지펫 이동 차단에 사용.
+  /// [point] 가 오두막 충돌 육각형 안에 있는지 여부.
   bool isInsideHutCollision(Vector2 point) =>
       _isPointInsidePolygon(point, hutCollisionPolygonPoints);
+
+  /// 오두막 충돌 polygon 중심 (빠져나오는 방향 판정용).
+  Vector2 get hutCollisionCenter {
+    final pts = hutCollisionPolygonPoints;
+    if (pts.isEmpty) return Vector2.zero();
+    var sx = 0.0;
+    var sy = 0.0;
+    for (final p in pts) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return Vector2(sx / pts.length, sy / pts.length);
+  }
+
+  double distanceToHutCenter(Vector2 point) =>
+      (point - hutCollisionCenter).length;
+
+  /// [point] 가 마당 이동 가능 polygon 안에 있는지 여부.
+  bool isInsideWalkableArea(Vector2 point) =>
+      _isPointInsidePolygon(point, kYardWalkableAreaPolygon);
+
+  /// 베지펫 이동 가능 여부 (walkable + 오두막 충돌 회피).
+  bool canPetMoveTo(Vector2 current, Vector2 next) {
+    if (!isInsideWalkableArea(next)) return false;
+
+    final currentInsideHut = isInsideHutCollision(current);
+    final nextInsideHut = isInsideHutCollision(next);
+    if (!nextInsideHut) return true;
+    if (currentInsideHut) {
+      return distanceToHutCenter(next) > distanceToHutCenter(current);
+    }
+    return false;
+  }
+
+  bool _isVegePetAlive(VegePetComponent? pet) {
+    if (pet == null) return false;
+    return pet.isMounted || pet.parent != null;
+  }
+
+  bool get hasActiveVegePet => _isVegePetAlive(_vegePetComponent);
+
+  Future<void> _ensureGameLoaded() async {
+    if (!_onLoadCompleter.isCompleted) {
+      debugPrint('YardGame: waiting for onLoad before pet spawn');
+      await _onLoadCompleter.future;
+    }
+  }
+
+  Future<bool> _spawnCatScoBabyComponent({
+    required String userPetId,
+    bool isDebugOnly = false,
+  }) async {
+    await removeActivePetComponent();
+
+    final component = VegePetComponent(
+      userPetId: userPetId,
+      isDebugOnly: isDebugOnly,
+    );
+    _vegePetComponent = component;
+    _activePetUserId = userPetId;
+
+    await world.add(component);
+    await Future<void>.delayed(Duration.zero);
+
+    final alive = _isVegePetAlive(component);
+    if (!alive) {
+      _lastPetSpawnError =
+          'VegePetComponent was not mounted after world.add (mounted=${component.isMounted}, parent=${component.parent != null})';
+      debugPrint('YardGame: $_lastPetSpawnError');
+      _vegePetComponent = null;
+      _activePetUserId = null;
+      return false;
+    }
+
+    debugPrint(
+      'YardGame: cat_sco baby spawned, userPetId=$userPetId, mounted=${component.isMounted}, parent=${component.parent != null}',
+    );
+    return true;
+  }
+
+  /// cat_sco baby 펫을 마당에 표시한다. 동일 userPetId 가 이미 있으면 skip.
+  Future<bool> showCatScoBabyPet({required String userPetId}) async {
+    if (_petSpawnInFlight != null && _petSpawnInFlightUserId == userPetId) {
+      debugPrint(
+        'YardGame: showCatScoBabyPet join in-flight spawn (userPetId=$userPetId)',
+      );
+      return _petSpawnInFlight!;
+    }
+
+    final future = _showCatScoBabyPetImpl(userPetId: userPetId);
+    _petSpawnInFlight = future;
+    _petSpawnInFlightUserId = userPetId;
+    try {
+      return await future;
+    } finally {
+      if (identical(_petSpawnInFlight, future)) {
+        _petSpawnInFlight = null;
+        _petSpawnInFlightUserId = null;
+      }
+    }
+  }
+
+  Future<bool> _showCatScoBabyPetImpl({required String userPetId}) async {
+    try {
+      _lastPetSpawnError = null;
+      await _ensureGameLoaded();
+
+      if (_vegePetComponent != null &&
+          _activePetUserId == userPetId &&
+          _isVegePetAlive(_vegePetComponent)) {
+        debugPrint(
+          'YardGame: cat_sco baby already shown (userPetId=$userPetId)',
+        );
+        return true;
+      }
+
+      return await _spawnCatScoBabyComponent(userPetId: userPetId);
+    } catch (e, st) {
+      _lastPetSpawnError = e.toString();
+      debugPrint('YardGame.showCatScoBabyPet failed: $e\n$st');
+      _vegePetComponent = null;
+      _activePetUserId = null;
+      return false;
+    }
+  }
+
+  /// debug 전용: DB 변경 없이 cat_sco baby 를 스폰한다.
+  Future<bool> showCatScoBabyPetDebug() async {
+    const debugId = 'debug-cat-sco-baby';
+    if (_petSpawnInFlight != null && _petSpawnInFlightUserId == debugId) {
+      return _petSpawnInFlight!;
+    }
+
+    final future = _showCatScoBabyPetDebugImpl();
+    _petSpawnInFlight = future;
+    _petSpawnInFlightUserId = debugId;
+    try {
+      return await future;
+    } finally {
+      if (identical(_petSpawnInFlight, future)) {
+        _petSpawnInFlight = null;
+        _petSpawnInFlightUserId = null;
+      }
+    }
+  }
+
+  Future<bool> _showCatScoBabyPetDebugImpl() async {
+    try {
+      _lastPetSpawnError = null;
+      await _ensureGameLoaded();
+
+      final debugId = 'debug-cat-sco-baby';
+      if (_vegePetComponent != null &&
+          _activePetUserId == debugId &&
+          _isVegePetAlive(_vegePetComponent)) {
+        debugPrint('YardGame: debug cat_sco baby already shown');
+        return true;
+      }
+
+      final ok = await _spawnCatScoBabyComponent(
+        userPetId: debugId,
+        isDebugOnly: true,
+      );
+      if (ok) {
+        debugPrint('YardGame: debug cat_sco baby spawned');
+      } else {
+        debugPrint(
+          'YardGame: debug cat_sco baby spawn failed, error=$_lastPetSpawnError',
+        );
+      }
+      return ok;
+    } catch (e, st) {
+      _lastPetSpawnError = e.toString();
+      debugPrint('YardGame.showCatScoBabyPetDebug failed: $e\n$st');
+      _vegePetComponent = null;
+      _activePetUserId = null;
+      return false;
+    }
+  }
+
+  /// 활성 Flame 펫 컴포넌트를 제거한다.
+  Future<void> removeActivePetComponent() async {
+    _vegePetComponent?.removeFromParent();
+    _vegePetComponent = null;
+    _activePetUserId = null;
+  }
+
+  /// 활성 펫에 모션을 발동한다. 펫이 없으면 no-op.
+  void playPetMotion(
+    PetMotion motion, {
+    double speedMultiplier = 1.0,
+    int repeatCount = 1,
+  }) {
+    final pet = _vegePetComponent;
+    if (pet == null || !_isVegePetAlive(pet)) return;
+    unawaited(
+      pet.playMotion(
+        motion,
+        speedMultiplier: speedMultiplier,
+        repeatCount: repeatCount,
+      ),
+    );
+  }
 
   /// 오두막 충돌 영역 값을 즉시 반영한다(debug polygon overlay 도 즉시 갱신).
   void updateHutCollisionTuning({
@@ -422,6 +656,7 @@ class YardGame extends FlameGame {
     double? spawnInterval,
     int? puffsPerBurst,
     double? opacity,
+    double? windDriftSpeed,
   }) {
     if (originX != null) _smokeTuning.originX = originX;
     if (originY != null) _smokeTuning.originY = originY;
@@ -431,6 +666,7 @@ class YardGame extends FlameGame {
     if (spawnInterval != null) _smokeTuning.spawnInterval = spawnInterval;
     if (puffsPerBurst != null) _smokeTuning.puffsPerBurst = puffsPerBurst;
     if (opacity != null) _smokeTuning.opacity = opacity;
+    if (windDriftSpeed != null) _smokeTuning.windDriftSpeed = windDriftSpeed;
   }
 
   /// 현재 연기 값을 [kSmokeTuning] const 코드 형태로 반환한다.
@@ -447,6 +683,7 @@ class YardGame extends FlameGame {
     buffer.writeln('  spawnInterval: ${_formatTuningNumber(t.spawnInterval)},');
     buffer.writeln('  puffsPerBurst: ${t.puffsPerBurst},');
     buffer.writeln('  opacity: ${_formatTuningNumber(t.opacity)},');
+    buffer.writeln('  windDriftSpeed: ${_formatTuningNumber(t.windDriftSpeed)},');
     buffer.write(');');
     return buffer.toString();
   }
@@ -513,52 +750,63 @@ class YardGame extends FlameGame {
 
   @override
   Future<void> onLoad() async {
-    await super.onLoad();
+    try {
+      await super.onLoad();
 
-    // 844×390 논리 좌표계: 좌상단 (0,0) 기준으로 전체 캔버스가 보이도록 카메라 정렬.
-    // viewfinder 기본 anchor(center) 상태에서는 (0,0) 배치 스프라이트가 화면 밖으로
-    // 밀려 검은 영역이 생길 수 있다.
-    camera.viewfinder.anchor = Anchor.topLeft;
-    camera.viewfinder.position = Vector2.zero();
+      // yard / pets asset 모두 assets/images/ 하위에 있다.
+      images.prefix = 'assets/images/';
 
-    final skySprite = await loadSprite('yard/sky_background.png');
-    final groundSprite = await loadSprite('yard/yard_ground.png');
+      // 844×390 논리 좌표계: 좌상단 (0,0) 기준으로 전체 캔버스가 보이도록 카메라 정렬.
+      // viewfinder 기본 anchor(center) 상태에서는 (0,0) 배치 스프라이트가 화면 밖으로
+      // 밀려 검은 영역이 생길 수 있다.
+      camera.viewfinder.anchor = Anchor.topLeft;
+      camera.viewfinder.position = Vector2.zero();
 
-    // 0) 하늘 배경: 844 x 390 전체를 빈틈없이 덮는다.
-    _addFullCanvasSprite(skySprite, priority: 0);
+      final skySprite = await loadSprite('yard/sky_background.png');
+      final groundSprite = await loadSprite('yard/yard_ground.png');
 
-    // 1) 구름 4개: sky_background 위, yard_ground 아래. 상단 하늘 영역(y=0~120)만.
-    _cloudTunings
-      ..clear()
-      ..addAll(
-        kCloudTunings.map(
-          (tuning) => CloudRuntimeTuning(
-            asset: tuning.asset,
-            x: tuning.x,
-            y: tuning.y,
-            width: tuning.width,
-            speed: tuning.speed,
+      // 0) 하늘 배경: 844 x 390 전체를 빈틈없이 덮는다.
+      _addFullCanvasSprite(skySprite, priority: 0);
+
+      // 1) 구름 4개: sky_background 위, yard_ground 아래. 상단 하늘 영역(y=0~120)만.
+      _cloudTunings
+        ..clear()
+        ..addAll(
+          kCloudTunings.map(
+            (tuning) => CloudRuntimeTuning(
+              asset: tuning.asset,
+              x: tuning.x,
+              y: tuning.y,
+              width: tuning.width,
+              speed: tuning.speed,
+            ),
           ),
-        ),
-      );
-    _cloudComponents.clear();
-    for (final tuning in _cloudTunings) {
-      final cloudSprite = await loadSprite(tuning.asset);
-      final component = _CloudComponent(tuning: tuning, sprite: cloudSprite);
-      _cloudComponents.add(component);
-      world.add(component);
-    }
+        );
+      _cloudComponents.clear();
+      for (final tuning in _cloudTunings) {
+        final cloudSprite = await loadSprite(tuning.asset);
+        final component = _CloudComponent(tuning: tuning, sprite: cloudSprite);
+        _cloudComponents.add(component);
+        world.add(component);
+      }
 
-    // 2) 마당 지면(오두막 포함): 하늘/구름 위에 844 x 390 전체로 배치.
-    _addFullCanvasSprite(groundSprite, priority: 2);
+      // 2) 마당 지면(오두막 포함): 하늘/구름 위에 844 x 390 전체로 배치.
+      _addFullCanvasSprite(groundSprite, priority: 2);
 
-    // 3) 굴뚝 연기: yard_ground(priority 2) 위에 표시. release 에서도 보인다.
-    world.add(_SmokeEmitterComponent(tuning: _smokeTuning));
+      // 3) 굴뚝 연기: yard_ground(priority 2) 위에 표시. release 에서도 보인다.
+      world.add(_SmokeEmitterComponent(tuning: _smokeTuning));
 
-    // 4) 오두막 충돌 영역 debug polygon overlay: debug 빌드에서만 추가한다.
-    //    release 에서는 위젯/컴포넌트 트리에 들어가지 않아 절대 보이지 않는다.
-    if (kDebugMode) {
-      _refreshHutCollisionDebugOverlay();
+      // 4) 오두막 충돌 영역 debug polygon overlay: debug 빌드에서만 추가한다.
+      //    release 에서는 위젯/컴포넌트 트리에 들어가지 않아 절대 보이지 않는다.
+      if (kDebugMode) {
+        _refreshHutCollisionDebugOverlay();
+      }
+    } catch (e, st) {
+      debugPrint('YardGame.onLoad failed: $e\n$st');
+    } finally {
+      if (!_onLoadCompleter.isCompleted) {
+        _onLoadCompleter.complete();
+      }
     }
   }
 
@@ -687,8 +935,7 @@ class _SmokeEmitterComponent extends Component {
           riseDistance: _tuning.riseDistance,
           duration: _tuning.duration <= 0 ? 1.0 : _tuning.duration,
           maxOpacity: _tuning.opacity,
-          driftPhase: _random.nextDouble() * pi * 2,
-          driftAmplitude: 3 + _random.nextDouble() * 3,
+          windDriftSpeed: _tuning.windDriftSpeed,
           blobSeed: _random.nextInt(0x7FFFFFFF),
         ),
       );
@@ -795,8 +1042,7 @@ class _SmokePuffComponent extends PositionComponent {
     required double riseDistance,
     required double duration,
     required double maxOpacity,
-    required double driftPhase,
-    required double driftAmplitude,
+    required double windDriftSpeed,
     required int blobSeed,
   }) : _startX = startX,
        _startY = startY,
@@ -804,8 +1050,7 @@ class _SmokePuffComponent extends PositionComponent {
        _riseDistance = riseDistance,
        _duration = duration,
        _maxOpacity = maxOpacity,
-       _driftPhase = driftPhase,
-       _driftAmplitude = driftAmplitude,
+       _windDriftSpeed = windDriftSpeed,
        _lobes = _createSmokeBlobLobes(blobSeed),
        super(
          anchor: Anchor.center,
@@ -821,8 +1066,7 @@ class _SmokePuffComponent extends PositionComponent {
   final double _riseDistance;
   final double _duration;
   final double _maxOpacity;
-  final double _driftPhase;
-  final double _driftAmplitude;
+  final double _windDriftSpeed;
   final List<_SmokeBlobLobe> _lobes;
 
   double _elapsed = 0;
@@ -854,9 +1098,11 @@ class _SmokePuffComponent extends PositionComponent {
       return;
     }
 
-    // 위로 천천히 상승 + sin 기반의 아주 약한 좌우 흔들림.
-    final drift = sin(_driftPhase + t * pi * 2) * _driftAmplitude;
-    position.setValues(_startX + drift, _startY - _riseDistance * t);
+    // 위로 천천히 상승 + 바람에 의해 우측으로 drift.
+    position.setValues(
+      _startX + _windDriftSpeed * _elapsed,
+      _startY - _riseDistance * t,
+    );
 
     // 시간이 지날수록 1.0배 → 약 2.2배로 천천히 커진다.
     _currentScale = _baseSize * (1.0 + t * 1.2);
