@@ -166,15 +166,67 @@ class HutCollisionRuntimeTuning {
   double bottomInset;
 }
 
+/// 추가 접근 불가 충돌 영역(Custom Hex Obstacle) 튜닝 값.
+///
+/// debug Yard Tune 패널에서 출력한 값을 [kCustomObstacleTunings] 에 붙여 넣으면
+/// release 빌드에서도 실제 이동 collision 에 반영된다.
+class CustomObstacleTuning {
+  const CustomObstacleTuning({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.topInset,
+    required this.bottomInset,
+    this.enabled = true,
+  });
+
+  final String id;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final double topInset;
+  final double bottomInset;
+  final bool enabled;
+}
+
+/// debug 튜닝 패널에서 실시간으로 변경하는 추가 충돌 영역 런타임 설정.
+class CustomObstacleRuntimeTuning {
+  CustomObstacleRuntimeTuning({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.topInset,
+    required this.bottomInset,
+    required this.enabled,
+  });
+
+  String id;
+  double x;
+  double y;
+  double width;
+  double height;
+  double topInset;
+  double bottomInset;
+  bool enabled;
+}
+
 /// 오두막 충돌 영역 초기값. 실제 위치는 debug 튜닝 패널로 조정한다(임시값).
 const HutCollisionTuning kHutCollisionTuning = HutCollisionTuning(
-  x: 349.5,
-  y: 29.4,
-  width: 221.1,
-  height: 176.3,
-  topInset: 50.3,
-  bottomInset: 23.7,
+  x: 337.6,
+  y: 25.7,
+  width: 234.8,
+  height: 200.1,
+  topInset: 36.1,
+  bottomInset: 24.8,
 );
+
+/// 추가 충돌 영역 초기값. 비워두면 runtime Add Hex 로만 튜닝한다.
+const List<CustomObstacleTuning> kCustomObstacleTunings = [];
 
 /// 굴뚝 연기 효과 튜닝 값.
 ///
@@ -306,12 +358,34 @@ class YardGame extends FlameGame {
         bottomInset: kHutCollisionTuning.bottomInset,
       );
   _HutCollisionDebugComponent? _hutCollisionDebug;
+  final List<CustomObstacleRuntimeTuning> _customObstacleTunings =
+      kCustomObstacleTunings
+          .map(
+            (tuning) => CustomObstacleRuntimeTuning(
+              id: tuning.id,
+              x: tuning.x,
+              y: tuning.y,
+              width: tuning.width,
+              height: tuning.height,
+              topInset: tuning.topInset,
+              bottomInset: tuning.bottomInset,
+              enabled: tuning.enabled,
+            ),
+          )
+          .toList();
+  final List<_CustomObstacleDebugComponent> _customObstacleDebugComponents = [];
+  _WalkableBlockedAreaDebugOverlay? _walkableBlockedAreaDebugOverlay;
 
   VegePetComponent? _vegePetComponent;
   String? _activePetUserId;
   String? _lastPetSpawnError;
   Future<bool>? _petSpawnInFlight;
   String? _petSpawnInFlightUserId;
+
+  bool _showPetCollisionDebug = true;
+  bool _showCustomObstacleDebug = true;
+  bool _showWalkableBlockedAreaDebug = true;
+  _PetCollisionDebugComponent? _petCollisionDebug;
 
   final Completer<void> _onLoadCompleter = Completer<void>();
 
@@ -385,21 +459,218 @@ class YardGame extends FlameGame {
   double distanceToHutCenter(Vector2 point) =>
       (point - hutCollisionCenter).length;
 
+  /// debug 튜닝 패널에서 접근하는 추가 충돌 영역 런타임 설정.
+  List<CustomObstacleRuntimeTuning> get customObstacleTunings =>
+      List.unmodifiable(_customObstacleTunings);
+
+  /// 추가 충돌 영역 육각형 꼭짓점 6개(844×390 논리 좌표, 시계 방향).
+  List<Vector2> customObstaclePolygonPoints(CustomObstacleRuntimeTuning t) {
+    final topInset = t.topInset.clamp(0.0, t.width / 2);
+    final bottomInset = t.bottomInset.clamp(0.0, t.width / 2);
+    final midY = t.y + t.height * 0.5;
+
+    return [
+      Vector2(t.x + topInset, t.y),
+      Vector2(t.x + t.width - topInset, t.y),
+      Vector2(t.x + t.width, midY),
+      Vector2(t.x + t.width - bottomInset, t.y + t.height),
+      Vector2(t.x + bottomInset, t.y + t.height),
+      Vector2(t.x, midY),
+    ];
+  }
+
+  /// [point] 가 활성화된 추가 충돌 영역 중 하나 안에 있는지 여부.
+  bool isInsideCustomObstacle(Vector2 point) =>
+      isInsideAnyCustomObstacle(point);
+
+  /// [point] 가 활성화된 추가 충돌 영역 중 하나 안에 있는지 여부.
+  bool isInsideAnyCustomObstacle(Vector2 point) {
+    for (final obstacle in _customObstacleTunings) {
+      if (!obstacle.enabled) continue;
+      if (_isPointInsidePolygon(point, customObstaclePolygonPoints(obstacle))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// [point] 가 마당 이동 가능 polygon 안에 있는지 여부.
   bool isInsideWalkableArea(Vector2 point) =>
       _isPointInsidePolygon(point, kYardWalkableAreaPolygon);
 
   /// 베지펫 이동 가능 여부 (walkable + 오두막 충돌 회피).
   bool canPetMoveTo(Vector2 current, Vector2 next) {
+    final allowed = _computeCanPetMoveTo(current, next);
+    if (!allowed && kDebugMode) {
+      _logMoveBlocked(current, next);
+    }
+    return allowed;
+  }
+
+  bool _computeCanPetMoveTo(Vector2 current, Vector2 next) {
     if (!isInsideWalkableArea(next)) return false;
 
-    final currentInsideHut = isInsideHutCollision(current);
-    final nextInsideHut = isInsideHutCollision(next);
-    if (!nextInsideHut) return true;
-    if (currentInsideHut) {
-      return distanceToHutCenter(next) > distanceToHutCenter(current);
+    if (!_canMoveAcrossPolygon(
+      current: current,
+      next: next,
+      polygon: hutCollisionPolygonPoints,
+      center: hutCollisionCenter,
+    )) {
+      return false;
+    }
+
+    for (final obstacle in _customObstacleTunings) {
+      if (!obstacle.enabled) continue;
+      final polygon = customObstaclePolygonPoints(obstacle);
+      if (!_canMoveAcrossPolygon(
+        current: current,
+        next: next,
+        polygon: polygon,
+        center: _polygonCenter(polygon),
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// footprint(발밑 sample point 목록) 기준 이동 가능 여부.
+  ///
+  /// 발밑 한 점이 아니라 footprint 전체를 검사해 오두막에 시각적으로 살짝 겹치는
+  /// 문제를 줄인다. footprint 크기 자체는 [VegePetComponent] 의 상수로 튜닝한다.
+  bool canPetFootprintMoveTo(
+    List<Vector2> currentPoints,
+    List<Vector2> nextPoints,
+  ) {
+    final allowed = _computeCanPetFootprintMoveTo(currentPoints, nextPoints);
+    if (!allowed && kDebugMode) {
+      _logFootprintBlocked(currentPoints, nextPoints);
+    }
+    return allowed;
+  }
+
+  bool _computeCanPetFootprintMoveTo(
+    List<Vector2> currentPoints,
+    List<Vector2> nextPoints,
+  ) {
+    // 어느 한 점이라도 walkable 밖이면 불가.
+    for (final p in nextPoints) {
+      if (!isInsideWalkableArea(p)) return false;
+    }
+
+    if (!_canFootprintMoveAcrossPolygon(
+      currentPoints: currentPoints,
+      nextPoints: nextPoints,
+      polygon: hutCollisionPolygonPoints,
+      center: hutCollisionCenter,
+    )) {
+      return false;
+    }
+
+    for (final obstacle in _customObstacleTunings) {
+      if (!obstacle.enabled) continue;
+      final polygon = customObstaclePolygonPoints(obstacle);
+      if (!_canFootprintMoveAcrossPolygon(
+        currentPoints: currentPoints,
+        nextPoints: nextPoints,
+        polygon: polygon,
+        center: _polygonCenter(polygon),
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _canMoveAcrossPolygon({
+    required Vector2 current,
+    required Vector2 next,
+    required List<Vector2> polygon,
+    required Vector2 center,
+  }) {
+    final nextInside = _isPointInsidePolygon(next, polygon);
+    if (!nextInside) return true;
+    final currentInside = _isPointInsidePolygon(current, polygon);
+    if (currentInside) {
+      return (next - center).length > (current - center).length;
     }
     return false;
+  }
+
+  bool _canFootprintMoveAcrossPolygon({
+    required List<Vector2> currentPoints,
+    required List<Vector2> nextPoints,
+    required List<Vector2> polygon,
+    required Vector2 center,
+  }) {
+    final nextInside = nextPoints.any(
+      (point) => _isPointInsidePolygon(point, polygon),
+    );
+    if (!nextInside) return true;
+
+    final currentInside = currentPoints.any(
+      (point) => _isPointInsidePolygon(point, polygon),
+    );
+    if (currentInside) {
+      return _averageDistanceToCenter(nextPoints, center) >
+          _averageDistanceToCenter(currentPoints, center);
+    }
+    return false;
+  }
+
+  Vector2 _polygonCenter(List<Vector2> points) {
+    if (points.isEmpty) return Vector2.zero();
+    var sx = 0.0;
+    var sy = 0.0;
+    for (final p in points) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return Vector2(sx / points.length, sy / points.length);
+  }
+
+  double _averageDistanceToCenter(List<Vector2> points, Vector2 center) {
+    if (points.isEmpty) return 0;
+    var sum = 0.0;
+    for (final p in points) {
+      sum += (p - center).length;
+    }
+    return sum / points.length;
+  }
+
+  double _lastBlockLogSeconds = 0;
+
+  /// 이동이 막혔을 때만, 그리고 0.5초에 한 번만 debug 로그를 남긴다(과도한 로그 방지).
+  void _logMoveBlocked(Vector2 current, Vector2 next) {
+    final nowSeconds = DateTime.now().millisecondsSinceEpoch / 1000.0;
+    if (nowSeconds - _lastBlockLogSeconds < 0.5) return;
+    _lastBlockLogSeconds = nowSeconds;
+    debugPrint(
+      'Pet move blocked: current=$current next=$next '
+      'insideHut=${isInsideHutCollision(next)} '
+      'insideCustom=${isInsideAnyCustomObstacle(next)} '
+      'insideWalkable=${isInsideWalkableArea(next)}',
+    );
+  }
+
+  /// footprint 이동이 막혔을 때만, 0.5초 throttle 로 debug 로그를 남긴다.
+  void _logFootprintBlocked(
+    List<Vector2> currentPoints,
+    List<Vector2> nextPoints,
+  ) {
+    final nowSeconds = DateTime.now().millisecondsSinceEpoch / 1000.0;
+    if (nowSeconds - _lastBlockLogSeconds < 0.5) return;
+    _lastBlockLogSeconds = nowSeconds;
+    final current = currentPoints.isNotEmpty
+        ? currentPoints.first
+        : Vector2.zero();
+    final next = nextPoints.isNotEmpty ? nextPoints.first : Vector2.zero();
+    debugPrint(
+      'Pet footprint move blocked: current=$current next=$next '
+      'nextInsideHut=${nextPoints.any(isInsideHutCollision)} '
+      'nextInsideCustom=${nextPoints.any(isInsideAnyCustomObstacle)} '
+      'nextAllWalkable=${nextPoints.every(isInsideWalkableArea)}',
+    );
   }
 
   bool _isVegePetAlive(VegePetComponent? pet) {
@@ -408,6 +679,60 @@ class YardGame extends FlameGame {
   }
 
   bool get hasActiveVegePet => _isVegePetAlive(_vegePetComponent);
+
+  // ---------------------------------------------------------------------------
+  // 활성 Flame 펫 tap hitbox 판정 API.
+  //
+  // GameWidget 은 IgnorePointer 로 감싸져 있어 Flame 이 직접 pointer event 를
+  // 받지 않는다. 대신 Flutter overlay 의 GestureDetector 가 tapDown 위치를 받아
+  // 이 API 로 현재 움직이는 펫의 위치와 비교한다.
+  // ---------------------------------------------------------------------------
+
+  /// 현재 활성 펫의 tap hitbox(844×390 논리 좌표계). 펫이 없거나 mount 전이면 null.
+  ///
+  /// [VegePetComponent] 는 anchor=bottomCenter 라 position 은 펫 발밑 중앙이다.
+  /// 실제 sprite 보다 약간 넉넉하게(가로 1.3배, 세로 1.25배) 잡아 클릭을 쉽게 하되,
+  /// 빈 공간이 과하게 반응하지 않도록 한다. size 기반이라 성숙기 크기 확장도 따라간다.
+  Rect? get activePetHitboxRect {
+    final pet = _vegePetComponent;
+    if (pet == null || !_isVegePetAlive(pet)) return null;
+
+    final pos = pet.position;
+    final size = pet.size;
+    final width = size.x * 1.3;
+    final height = size.y * 1.25;
+    return Rect.fromLTWH(
+      pos.x - width / 2,
+      pos.y - size.y * 1.125,
+      width,
+      height,
+    );
+  }
+
+  /// Flutter overlay 의 tap 위치([point], GameWidget 과 동일 영역의 widget-local
+  /// Offset)가 현재 펫 hitbox 안에 있는지 판정한다.
+  bool isPointInsideActivePetHitbox(Offset point) {
+    final rect = activePetHitboxRect;
+    if (rect == null) return false;
+    final logical = widgetPointToLogical(point);
+    if (logical == null) return false;
+    return rect.contains(Offset(logical.x, logical.y));
+  }
+
+  /// widget-local 픽셀 좌표([point], GameWidget 렌더 박스 기준)를 844×390 논리
+  /// 좌표로 변환한다.
+  ///
+  /// [CameraComponent.globalToLocal] 이 FixedResolution viewport 의 letterbox 와
+  /// viewfinder 변환을 모두 처리한다. 아직 mount 전이거나 변환 불가 시 null.
+  Vector2? widgetPointToLogical(Offset point) {
+    if (!isMounted) return null;
+    try {
+      return camera.globalToLocal(Vector2(point.dx, point.dy));
+    } catch (e) {
+      debugPrint('YardGame.widgetPointToLogical failed: $e');
+      return null;
+    }
+  }
 
   Future<void> _ensureGameLoaded() async {
     if (!_onLoadCompleter.isCompleted) {
@@ -425,6 +750,7 @@ class YardGame extends FlameGame {
     final component = VegePetComponent(
       userPetId: userPetId,
       isDebugOnly: isDebugOnly,
+      canMoveFootprintTo: canPetFootprintMoveTo,
     );
     _vegePetComponent = component;
     _activePetUserId = userPetId;
@@ -572,6 +898,60 @@ class YardGame extends FlameGame {
     );
   }
 
+  /// debug 방향키: 활성 펫을 [direction] 방향으로 run 수동 이동시킨다. 펫 없으면 no-op.
+  void startPetManualRunDirection(
+    Vector2 direction, {
+    double speedMultiplier = 1.0,
+  }) {
+    final pet = _vegePetComponent;
+    if (pet == null || !_isVegePetAlive(pet)) return;
+    pet.startManualRun(direction, speedMultiplier: speedMultiplier);
+  }
+
+  /// debug 방향키: 수동 run 이동을 멈춘다. 펫 없으면 no-op.
+  void stopPetManualRunDirection() {
+    final pet = _vegePetComponent;
+    if (pet == null || !_isVegePetAlive(pet)) return;
+    pet.stopManualRun();
+  }
+
+  /// 활성 펫의 발밑 충돌 footprint 사각형(844×390 논리 좌표). 펫 없으면 null.
+  Rect? get activePetCollisionFootprintRect {
+    final pet = _vegePetComponent;
+    if (pet == null || !_isVegePetAlive(pet)) return null;
+    return pet.collisionFootprintRect;
+  }
+
+  /// debug 전용: active pet 이동 collision footprint overlay 표시 여부. release 무시.
+  bool get petCollisionDebugVisible => _showPetCollisionDebug;
+
+  /// debug 전용: 추가 충돌 영역 overlay 표시 여부. release 에서는 표시되지 않는다.
+  bool get customObstacleDebugVisible => _showCustomObstacleDebug;
+
+  /// debug 전용: walkableArea 밖 blocked overlay 표시 여부. release 에서는 표시되지 않는다.
+  bool get walkableBlockedAreaDebugVisible => _showWalkableBlockedAreaDebug;
+
+  /// debug 전용: 이동 collision footprint overlay 표시를 토글한다. release 무시.
+  void setActivePetCollisionDebugVisible(bool visible) {
+    if (!kDebugMode) return;
+    _showPetCollisionDebug = visible;
+    _petCollisionDebug?.visibleOverride = visible;
+  }
+
+  /// debug 전용: 추가 충돌 영역 overlay 표시를 토글한다. release 무시.
+  void setCustomObstacleDebugVisible(bool visible) {
+    if (!kDebugMode) return;
+    _showCustomObstacleDebug = visible;
+    _refreshCustomObstacleDebugOverlay();
+  }
+
+  /// debug 전용: walkableArea 밖 blocked overlay 표시를 토글한다. release 무시.
+  void setWalkableBlockedAreaDebugVisible(bool visible) {
+    if (!kDebugMode) return;
+    _showWalkableBlockedAreaDebug = visible;
+    _refreshWalkableBlockedAreaDebugOverlay();
+  }
+
   /// 오두막 충돌 영역 값을 즉시 반영한다(debug polygon overlay 도 즉시 갱신).
   void updateHutCollisionTuning({
     double? x,
@@ -590,6 +970,64 @@ class YardGame extends FlameGame {
     _refreshHutCollisionDebugOverlay();
   }
 
+  /// debug 패널에서 runtime 전용 추가 충돌 육각형을 하나 만든다.
+  void addCustomObstacle() {
+    final idNumber = _nextCustomObstacleIdNumber();
+    _customObstacleTunings.add(
+      CustomObstacleRuntimeTuning(
+        id: 'custom_${idNumber.toString().padLeft(2, '0')}',
+        x: 360,
+        y: 220,
+        width: 120,
+        height: 80,
+        topInset: 24,
+        bottomInset: 24,
+        enabled: true,
+      ),
+    );
+    _refreshCustomObstacleDebugOverlay();
+  }
+
+  /// debug 패널에서 선택한 runtime 추가 충돌 육각형을 제거한다.
+  void removeCustomObstacle(int index) {
+    if (index < 0 || index >= _customObstacleTunings.length) return;
+    _customObstacleTunings.removeAt(index);
+    _refreshCustomObstacleDebugOverlay();
+  }
+
+  /// 추가 충돌 영역 값을 즉시 반영한다(debug polygon overlay 도 즉시 갱신).
+  void updateCustomObstacleTuning(
+    int index, {
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+    double? topInset,
+    double? bottomInset,
+    bool? enabled,
+  }) {
+    if (index < 0 || index >= _customObstacleTunings.length) return;
+    final tuning = _customObstacleTunings[index];
+    if (x != null) tuning.x = x;
+    if (y != null) tuning.y = y;
+    if (width != null) tuning.width = width;
+    if (height != null) tuning.height = height;
+    if (topInset != null) tuning.topInset = topInset;
+    if (bottomInset != null) tuning.bottomInset = bottomInset;
+    if (enabled != null) tuning.enabled = enabled;
+    _refreshCustomObstacleDebugOverlay();
+  }
+
+  int _nextCustomObstacleIdNumber() {
+    var maxId = 0;
+    for (final obstacle in _customObstacleTunings) {
+      final match = RegExp(r'^custom_(\d+)$').firstMatch(obstacle.id);
+      final parsed = match == null ? null : int.tryParse(match.group(1)!);
+      if (parsed != null && parsed > maxId) maxId = parsed;
+    }
+    return maxId + 1;
+  }
+
   /// debug 전용 육각형 충돌 overlay 를 최신 polygon points 로 다시 만든다.
   void _refreshHutCollisionDebugOverlay() {
     if (!kDebugMode) return;
@@ -599,6 +1037,39 @@ class YardGame extends FlameGame {
     );
     _hutCollisionDebug = debug;
     world.add(debug);
+  }
+
+  /// debug 전용 custom obstacle overlay 를 최신 polygon points 로 다시 만든다.
+  void _refreshCustomObstacleDebugOverlay() {
+    if (!kDebugMode) return;
+    for (final debug in _customObstacleDebugComponents) {
+      debug.removeFromParent();
+    }
+    _customObstacleDebugComponents.clear();
+    if (!_showCustomObstacleDebug) return;
+
+    for (final obstacle in _customObstacleTunings) {
+      final debug = _CustomObstacleDebugComponent(
+        points: customObstaclePolygonPoints(obstacle),
+        enabled: obstacle.enabled,
+      );
+      _customObstacleDebugComponents.add(debug);
+      world.add(debug);
+    }
+  }
+
+  /// debug 전용 walkableArea 바깥 overlay 를 최신 표시 상태로 다시 만든다.
+  void _refreshWalkableBlockedAreaDebugOverlay() {
+    if (!kDebugMode) return;
+    _walkableBlockedAreaDebugOverlay?.removeFromParent();
+    _walkableBlockedAreaDebugOverlay = null;
+    if (!_showWalkableBlockedAreaDebug) return;
+
+    final overlay = _WalkableBlockedAreaDebugOverlay(
+      walkablePoints: kYardWalkableAreaPolygon,
+    );
+    _walkableBlockedAreaDebugOverlay = overlay;
+    world.add(overlay);
   }
 
   /// 현재 오두막 충돌 값을 [kHutCollisionTuning] const 코드 형태로 반환한다.
@@ -614,6 +1085,29 @@ class YardGame extends FlameGame {
     buffer.writeln('  topInset: ${_formatTuningNumber(t.topInset)},');
     buffer.writeln('  bottomInset: ${_formatTuningNumber(t.bottomInset)},');
     buffer.write(');');
+    return buffer.toString();
+  }
+
+  /// 현재 추가 충돌 영역 값을 [kCustomObstacleTunings] const 리스트 코드로 반환한다.
+  String buildCustomObstaclesDebugText() {
+    final buffer = StringBuffer(
+      'const List<CustomObstacleTuning> kCustomObstacleTunings = [\n',
+    );
+    for (final tuning in _customObstacleTunings) {
+      buffer.writeln('  CustomObstacleTuning(');
+      buffer.writeln("    id: '${tuning.id}',");
+      buffer.writeln('    x: ${_formatTuningNumber(tuning.x)},');
+      buffer.writeln('    y: ${_formatTuningNumber(tuning.y)},');
+      buffer.writeln('    width: ${_formatTuningNumber(tuning.width)},');
+      buffer.writeln('    height: ${_formatTuningNumber(tuning.height)},');
+      buffer.writeln('    topInset: ${_formatTuningNumber(tuning.topInset)},');
+      buffer.writeln(
+        '    bottomInset: ${_formatTuningNumber(tuning.bottomInset)},',
+      );
+      buffer.writeln('    enabled: ${tuning.enabled},');
+      buffer.writeln('  ),');
+    }
+    buffer.write('];');
     return buffer.toString();
   }
 
@@ -683,7 +1177,9 @@ class YardGame extends FlameGame {
     buffer.writeln('  spawnInterval: ${_formatTuningNumber(t.spawnInterval)},');
     buffer.writeln('  puffsPerBurst: ${t.puffsPerBurst},');
     buffer.writeln('  opacity: ${_formatTuningNumber(t.opacity)},');
-    buffer.writeln('  windDriftSpeed: ${_formatTuningNumber(t.windDriftSpeed)},');
+    buffer.writeln(
+      '  windDriftSpeed: ${_formatTuningNumber(t.windDriftSpeed)},',
+    );
     buffer.write(');');
     return buffer.toString();
   }
@@ -799,7 +1295,17 @@ class YardGame extends FlameGame {
       // 4) 오두막 충돌 영역 debug polygon overlay: debug 빌드에서만 추가한다.
       //    release 에서는 위젯/컴포넌트 트리에 들어가지 않아 절대 보이지 않는다.
       if (kDebugMode) {
+        _refreshWalkableBlockedAreaDebugOverlay();
         _refreshHutCollisionDebugOverlay();
+        _refreshCustomObstacleDebugOverlay();
+
+        // 5) 이동 collision footprint debug overlay (노란색): debug 빌드에서만
+        //    추가한다. release 에서는 트리에 들어가지 않아 절대 보이지 않는다.
+        //    펫 이동에 따라 매 프레임 갱신된다. (쓰다듬기 hitbox 와는 별개)
+        final collisionDebug = _PetCollisionDebugComponent(game: this)
+          ..visibleOverride = _showPetCollisionDebug;
+        _petCollisionDebug = collisionDebug;
+        world.add(collisionDebug);
       }
     } catch (e, st) {
       debugPrint('YardGame.onLoad failed: $e\n$st');
@@ -851,8 +1357,9 @@ class _CloudComponent extends SpriteComponent {
   /// [width] 기준으로 원본 종횡비를 유지한 크기를 계산한다.
   static Vector2 _sizeFromWidth(Sprite sprite, double width) {
     final srcSize = sprite.srcSize;
-    final aspect =
-        srcSize.x <= 0 || srcSize.y <= 0 ? 1.0 : srcSize.x / srcSize.y;
+    final aspect = srcSize.x <= 0 || srcSize.y <= 0
+        ? 1.0
+        : srcSize.x / srcSize.y;
     return Vector2(width, width / aspect);
   }
 
@@ -892,6 +1399,91 @@ class _HutCollisionDebugComponent extends PolygonComponent {
         priority: 5,
         paint: Paint()..color = const Color(0x55FF5722),
       );
+}
+
+/// 추가 충돌 육각형을 시각화하는 debug 전용 반투명 polygon.
+class _CustomObstacleDebugComponent extends PolygonComponent {
+  _CustomObstacleDebugComponent({
+    required List<Vector2> points,
+    required bool enabled,
+  }) : super(
+         points,
+         anchor: Anchor.topLeft,
+         priority: 6,
+         paint: Paint()
+           ..color = enabled
+               ? const Color(0x55F44336)
+               : const Color(0x18F44336),
+       );
+}
+
+/// walkableArea 밖 이동 불가 영역을 시각화하는 debug 전용 overlay.
+class _WalkableBlockedAreaDebugOverlay extends PositionComponent {
+  _WalkableBlockedAreaDebugOverlay({required List<Vector2> walkablePoints})
+    : _walkablePoints = walkablePoints.map((p) => p.clone()).toList(),
+      super(
+        position: Vector2.zero(),
+        size: Vector2(YardGame.gameWidth, YardGame.gameHeight),
+        anchor: Anchor.topLeft,
+        priority: 4,
+      );
+
+  final List<Vector2> _walkablePoints;
+  final Paint _paint = Paint()..color = const Color(0x33F44336);
+
+  @override
+  void render(Canvas canvas) {
+    final path = Path()..fillType = PathFillType.evenOdd;
+    path.addRect(Rect.fromLTWH(0, 0, YardGame.gameWidth, YardGame.gameHeight));
+
+    if (_walkablePoints.isNotEmpty) {
+      final walkablePath = Path()
+        ..moveTo(_walkablePoints.first.x, _walkablePoints.first.y);
+      for (final p in _walkablePoints.skip(1)) {
+        walkablePath.lineTo(p.x, p.y);
+      }
+      walkablePath.close();
+      path.addPath(walkablePath, Offset.zero);
+    }
+
+    canvas.drawPath(path, _paint);
+  }
+}
+
+/// 활성 펫의 이동 collision footprint 를 시각화하는 debug 전용 반투명 사각형.
+///
+/// debug 빌드에서만 world 에 추가되며 release 에서는 절대 생성되지 않는다. 매
+/// 프레임 [YardGame.activePetCollisionFootprintRect] 를 읽어 펫 이동을 따라
+/// 갱신한다. 쓰다듬기 hitbox(파란색)와 혼동되지 않도록 노란색으로 표시한다.
+class _PetCollisionDebugComponent extends Component {
+  _PetCollisionDebugComponent({required YardGame game})
+    : _game = game,
+      super(priority: 9);
+
+  final YardGame _game;
+  bool visibleOverride = true;
+
+  final Paint _fillPaint = Paint()..color = const Color(0x55FFEB3B);
+  final Paint _strokePaint = Paint()
+    ..color = const Color(0xCCFFC107)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.0;
+
+  Rect? _rect;
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    _rect = visibleOverride ? _game.activePetCollisionFootprintRect : null;
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final rect = _rect;
+    if (rect == null) return;
+    canvas.drawRect(rect, _fillPaint);
+    canvas.drawRect(rect, _strokePaint);
+  }
 }
 
 /// 굴뚝 연기 이미터. [spawnInterval] 마다 [puffsPerBurst] 개의 puff 를 생성한다.

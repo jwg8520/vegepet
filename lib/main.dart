@@ -370,9 +370,9 @@ class _MealNotificationTexts {
 
 enum _ViewStatus { loading, error, ready }
 
-/// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/오두막/연기).
+/// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/오두막/연기/추가 충돌영역).
 /// release 빌드에서는 패널 자체가 노출되지 않으므로 사용되지 않는다.
-enum _YardTuningSection { cloud, hut, smoke }
+enum _YardTuningSection { cloud, hut, smoke, obstacles }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -470,14 +470,20 @@ class _HomePageState extends State<HomePage>
   /// debug 전용 마당 구름 튜닝 패널 (release 에서는 UI 미노출).
   bool _isYardTuningPanelOpen = false;
   int _selectedTuningCloudIndex = 0;
+  int _selectedCustomObstacleIndex = 0;
 
-  /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기). debug 전용.
+  /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기/추가 충돌영역). debug 전용.
   _YardTuningSection _yardTuningSection = _YardTuningSection.cloud;
+  bool _customObstacleDebugVisible = true;
+  bool _walkableBlockedAreaDebugVisible = true;
 
   /// debug 전용 cat_sco baby 모션 테스트 패널 (release 미노출).
   bool _isPetMotionTestPanelOpen = false;
   double _petMotionSpeedMultiplier = 1.0;
   int _petMotionRepeatCount = 1;
+
+  /// debug 전용: 이동 collision footprint overlay 표시 여부(YardGame 과 동기화).
+  bool _petCollisionDebugVisible = true;
 
   bool _isInteracting = false;
 
@@ -699,8 +705,8 @@ class _HomePageState extends State<HomePage>
   String? _activeKeyboardInputKey;
   TextInputType _activeKeyboardInputType = TextInputType.text;
   final Set<String> _keyboardBoundInputKeys = <String>{};
-  final Map<String, List<TextInputFormatter>> _keyboardAccessoryFormattersByKey =
-      {};
+  final Map<String, List<TextInputFormatter>>
+  _keyboardAccessoryFormattersByKey = {};
 
   static const double _kKeyboardAccessoryBarHeight = 46;
 
@@ -750,6 +756,7 @@ class _HomePageState extends State<HomePage>
   static const String _kSoundEffectsPrefKey = 'vegepet_sound_effects_enabled';
   static const int _kMealReminderNotificationIdBase = 120000;
   static const int _kMealReminderDaysToSchedule = 14;
+
   /// 우측 게임 메뉴 6셀 + 2셀. String 슬롯은 표시용 라벨이 아니라
   /// **안정적인 key** 다. 실제 화면 라벨은 [_menuLabelForKey] 가 l10n 으로
   /// 매핑하고, onTap 분기도 이 key 를 기준으로 한다.
@@ -868,7 +875,9 @@ class _HomePageState extends State<HomePage>
         FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
       ],
     );
-    _emailLinkController.addListener(_onEmailLinkControllerChangedForOtpSession);
+    _emailLinkController.addListener(
+      _onEmailLinkControllerChangedForOtpSession,
+    );
     _ensureKeyboardFocusBinding(
       key: 'email_link_otp',
       controller: _emailLinkOtpController,
@@ -1125,11 +1134,15 @@ class _HomePageState extends State<HomePage>
       _selectedGender = gender;
     }
 
-    if (force || _selectedAgeRange == null || _selectedAgeRange!.trim().isEmpty) {
+    if (force ||
+        _selectedAgeRange == null ||
+        _selectedAgeRange!.trim().isEmpty) {
       _selectedAgeRange = ageRange;
     }
 
-    if (force || _selectedDietGoal == null || _selectedDietGoal!.trim().isEmpty) {
+    if (force ||
+        _selectedDietGoal == null ||
+        _selectedDietGoal!.trim().isEmpty) {
       _selectedDietGoal = dietGoal;
     }
   }
@@ -1317,9 +1330,9 @@ class _HomePageState extends State<HomePage>
       }
 
       try {
-        await supabase.auth
-            .signInAnonymously()
-            .timeout(const Duration(seconds: 8));
+        await supabase.auth.signInAnonymously().timeout(
+          const Duration(seconds: 8),
+        );
         debugPrint(
           'fresh guest reset signInAnonymously success: '
           '${supabase.auth.currentUser?.id}',
@@ -1437,7 +1450,8 @@ class _HomePageState extends State<HomePage>
       await _showNameInterlockNotice();
       return;
     }
-    final hasMissingProfileSelect = _selectedGender == null ||
+    final hasMissingProfileSelect =
+        _selectedGender == null ||
         _selectedGender!.trim().isEmpty ||
         _selectedAgeRange == null ||
         _selectedAgeRange!.trim().isEmpty ||
@@ -1903,8 +1917,7 @@ class _HomePageState extends State<HomePage>
         await supabase.auth.signInAnonymously();
       }
       final currentUser = supabase.auth.currentUser;
-      final isEmailSession =
-          currentUser?.email?.trim().isNotEmpty == true;
+      final isEmailSession = currentUser?.email?.trim().isNotEmpty == true;
 
       await _fetchCoreUserData();
 
@@ -2351,7 +2364,8 @@ class _HomePageState extends State<HomePage>
     final sentAt = _emailLinkOtpSentAt;
     if (sentAt == null) return;
 
-    final remaining = _kEmailLinkOtpSessionDuration - DateTime.now().difference(sentAt);
+    final remaining =
+        _kEmailLinkOtpSessionDuration - DateTime.now().difference(sentAt);
     if (remaining <= Duration.zero) {
       if (_expireEmailLinkOtpSessionIfNeeded() && mounted) {
         _safeSetState(() {});
@@ -2492,17 +2506,14 @@ class _HomePageState extends State<HomePage>
   void _startAccountHealthCheckTimer() {
     _accountHealthCheckTimer?.cancel();
 
-    _accountHealthCheckTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) {
-        if (!mounted) return;
-        if (_isResettingDeletedAccountSession) return;
-        if (!_isCurrentEmailAuthSession()) return;
-        unawaited(
-          _checkDeletedAccountAndResetIfNeeded('periodic account health check'),
-        );
-      },
-    );
+    _accountHealthCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!mounted) return;
+      if (_isResettingDeletedAccountSession) return;
+      if (!_isCurrentEmailAuthSession()) return;
+      unawaited(
+        _checkDeletedAccountAndResetIfNeeded('periodic account health check'),
+      );
+    });
   }
 
   void _syncProfileDeletionWatchForCurrentSession() {
@@ -3343,8 +3354,7 @@ class _HomePageState extends State<HomePage>
       return false;
     }
     final wasRestoreMode = _emailLinkRestoreMode;
-    final otpType =
-        wasRestoreMode ? OtpType.email : OtpType.emailChange;
+    final otpType = wasRestoreMode ? OtpType.email : OtpType.emailChange;
     try {
       await supabase.auth.verifyOTP(
         email: trimmedEmail,
@@ -3779,8 +3789,7 @@ class _HomePageState extends State<HomePage>
 
   VegePetSpeciesIdentity? _speciesIdentityFromSpeciesRow(
     Map<String, dynamic>? species,
-  ) =>
-      speciesIdentityFromSpeciesRow(species);
+  ) => speciesIdentityFromSpeciesRow(species);
 
   String _speciesDisplayNameKo(Map<String, dynamic>? species) =>
       speciesDisplayNameKo(species);
@@ -3790,8 +3799,8 @@ class _HomePageState extends State<HomePage>
 
   String _speciesDisplayNameForCurrentLocale(Map<String, dynamic>? species) =>
       _isEnglishLocale
-          ? _speciesDisplayNameEn(species)
-          : _speciesDisplayNameKo(species);
+      ? _speciesDisplayNameEn(species)
+      : _speciesDisplayNameKo(species);
 
   String _speciesInternalCode(Map<String, dynamic>? species) {
     final identity = _speciesIdentityFromSpeciesRow(species);
@@ -3849,7 +3858,9 @@ class _HomePageState extends State<HomePage>
     );
 
     if (!shouldUseFlame) {
-      debugPrint('YardGame sync: unsupported pet for Flame, removing Flame pet');
+      debugPrint(
+        'YardGame sync: unsupported pet for Flame, removing Flame pet',
+      );
       await _yardGame.removeActivePetComponent();
       if (mounted) _safeSetState(() {});
       return;
@@ -4398,9 +4409,7 @@ class _HomePageState extends State<HomePage>
 
       if (!mounted) return;
       setState(() => _isInteracting = false);
-      _showSnack(
-        AppLocalizations.of(context).snackPlayActionSuccess(label),
-      );
+      _showSnack(AppLocalizations.of(context).snackPlayActionSuccess(label));
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
 
@@ -5509,9 +5518,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildStoryIllustrationArea() {
     final paths = _storyPageAssetPaths;
     final hasAssets = paths.isNotEmpty;
-    final index = hasAssets
-        ? _storyPageIndex.clamp(0, paths.length - 1)
-        : 0;
+    final index = hasAssets ? _storyPageIndex.clamp(0, paths.length - 1) : 0;
 
     Widget illustrationChild;
     if (!hasAssets) {
@@ -5520,8 +5527,7 @@ class _HomePageState extends State<HomePage>
       illustrationChild = Image.asset(
         paths[index],
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
-            const SizedBox.expand(),
+        errorBuilder: (context, error, stackTrace) => const SizedBox.expand(),
       );
     }
 
@@ -5580,41 +5586,41 @@ class _HomePageState extends State<HomePage>
             Positioned(
               top: 8,
               right: 8,
-                  width: 24,
-                  height: 24,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => unawaited(_closeStoryPanelToGameMenu()),
-                      borderRadius: BorderRadius.circular(12),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        size: 18,
-                        color: Color(0xFF4A4A4A),
-                      ),
-                    ),
+              width: 24,
+              height: 24,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => unawaited(_closeStoryPanelToGameMenu()),
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: Color(0xFF4A4A4A),
                   ),
                 ),
-                Positioned(
-                  left: _kStoryIllustrationLeft,
-                  top: _kStoryIllustrationTop,
-                  child: _buildStoryIllustrationArea(),
-                ),
-                Positioned(
-                  left: 8,
-                  top: navButtonTop,
-                  child: _buildStoryPageNavButton(
-                    icon: Icons.chevron_left,
-                    onTap: canPrev ? _goStoryPrevPage : null,
-                  ),
-                ),
-                Positioned(
-                  left: _kStoryIllustrationLeft + _kStoryIllustrationW + 8,
-                  top: navButtonTop,
-                  child: _buildStoryPageNavButton(
-                    icon: Icons.chevron_right,
-                    onTap: canNext ? _goStoryNextPage : null,
-                  ),
+              ),
+            ),
+            Positioned(
+              left: _kStoryIllustrationLeft,
+              top: _kStoryIllustrationTop,
+              child: _buildStoryIllustrationArea(),
+            ),
+            Positioned(
+              left: 8,
+              top: navButtonTop,
+              child: _buildStoryPageNavButton(
+                icon: Icons.chevron_left,
+                onTap: canPrev ? _goStoryPrevPage : null,
+              ),
+            ),
+            Positioned(
+              left: _kStoryIllustrationLeft + _kStoryIllustrationW + 8,
+              top: navButtonTop,
+              child: _buildStoryPageNavButton(
+                icon: Icons.chevron_right,
+                onTap: canNext ? _goStoryNextPage : null,
+              ),
             ),
           ],
         ),
@@ -5625,9 +5631,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildStoryPanelLayer() {
     final yardExitFade =
         _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none;
-    if (!_isStoryPanelOpen &&
-        !_storyPanelSwapInProgress &&
-        !yardExitFade) {
+    if (!_isStoryPanelOpen && !_storyPanelSwapInProgress && !yardExitFade) {
       return const SizedBox.shrink();
     }
 
@@ -5816,9 +5820,8 @@ class _HomePageState extends State<HomePage>
                 alignment: Alignment.centerLeft,
                 child: _buildBagWireframeDummyTile(
                   item: ticketDef,
-                  onTap: () => _safeSetState(
-                    () => _bagPanelDetailItem = ticketDef,
-                  ),
+                  onTap: () =>
+                      _safeSetState(() => _bagPanelDetailItem = ticketDef),
                 ),
               ),
             const SizedBox(height: 14),
@@ -5829,16 +5832,14 @@ class _HomePageState extends State<HomePage>
               children: [
                 _buildBagWireframeDummyTile(
                   item: toys[0],
-                  onTap: () => _safeSetState(
-                    () => _bagPanelDetailItem = toys[0],
-                  ),
+                  onTap: () =>
+                      _safeSetState(() => _bagPanelDetailItem = toys[0]),
                 ),
                 const SizedBox(width: 10),
                 _buildBagWireframeDummyTile(
                   item: toys[1],
-                  onTap: () => _safeSetState(
-                    () => _bagPanelDetailItem = toys[1],
-                  ),
+                  onTap: () =>
+                      _safeSetState(() => _bagPanelDetailItem = toys[1]),
                 ),
               ],
             ),
@@ -5907,67 +5908,67 @@ class _HomePageState extends State<HomePage>
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
           child: LayoutBuilder(
-                builder: (context, c) {
-                  return SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: c.maxHeight),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.78),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: const Color(
-                                  0xFFE5E5E5,
-                                ).withValues(alpha: 0.75),
-                                width: 0.9,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              iconData,
-                              size: 22,
-                              color: const Color(0xFF5C5C5C),
-                            ),
+            builder: (context, c) {
+              return SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: c.maxHeight),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: const Color(
+                              0xFFE5E5E5,
+                            ).withValues(alpha: 0.75),
+                            width: 0.9,
                           ),
-                          const SizedBox(height: 10),
-                          Text(
-                            speciesName,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF000000),
-                              height: 1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            nicknameLine,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF4A4A4A),
-                              height: 1.25,
-                            ),
-                          ),
-                        ],
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          iconData,
+                          size: 22,
+                          color: const Color(0xFF5C5C5C),
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                      const SizedBox(height: 10),
+                      Text(
+                        speciesName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF000000),
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        nicknameLine,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4A4A4A),
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -6206,31 +6207,31 @@ class _HomePageState extends State<HomePage>
                 alignment: Alignment.topCenter,
                 child: _buildBagDetailPreviewIcon(item),
               ),
-                  const SizedBox(height: 8),
-                  // 영어 "Random Adoption Ticket" 같은 긴 이름이 detail 패널 폭을
-                  // 넘기지 않도록 FittedBox 로 한 단계 축소 허용.
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.center,
-                    child: Text(
-                      _localizedBagItemName(item),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: nameStyle,
-                    ),
+              const SizedBox(height: 8),
+              // 영어 "Random Adoption Ticket" 같은 긴 이름이 detail 패널 폭을
+              // 넘기지 않도록 FittedBox 로 한 단계 축소 허용.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  _localizedBagItemName(item),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: nameStyle,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Text(
+                    _localizedBagItemDescription(item),
+                    textAlign: TextAlign.left,
+                    style: descStyle,
                   ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Text(
-                        _localizedBagItemDescription(item),
-                        textAlign: TextAlign.left,
-                        style: descStyle,
-                      ),
-                    ),
-                  ),
+                ),
+              ),
               if (showUseInPanel) ...[
                 const SizedBox(height: 8),
                 _buildBagTicketGradientUseButton(),
@@ -6955,9 +6956,7 @@ class _HomePageState extends State<HomePage>
               : const Color(0xFFEFEFEF),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: enabled
-                ? const Color(0xFFE6E6E6)
-                : const Color(0xFFDADADA),
+            color: enabled ? const Color(0xFFE6E6E6) : const Color(0xFFDADADA),
             width: 1,
           ),
         );
@@ -7003,7 +7002,7 @@ class _HomePageState extends State<HomePage>
                       : TextOverflow.fade,
                   style: isEmpty
                       ? (hintStyle ??
-                          style.copyWith(color: const Color(0xFFB0B0B0)))
+                            style.copyWith(color: const Color(0xFFB0B0B0)))
                       : style,
                 ),
               ),
@@ -7733,6 +7732,8 @@ class _HomePageState extends State<HomePage>
           ),
           _buildKeyboardDismissBarrier(context),
           _buildKeyboardAccessoryOverlay(context),
+          if (kDebugMode) _buildFullScreenYardTuningOverlay(),
+          if (kDebugMode) _buildFullScreenPetMotionTestOverlay(),
         ],
       ),
     );
@@ -7794,8 +7795,6 @@ class _HomePageState extends State<HomePage>
         _buildYardBaseLayer(),
         _buildYardPetLayer(),
         _buildInYardDebugPanel(),
-        _buildInYardYardTuningPanel(),
-        _buildInYardPetMotionTestPanel(),
         _buildTopHudLayer(),
         if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
         if (_status == _ViewStatus.error)
@@ -7916,6 +7915,7 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
+
   Widget _buildEmailLinkInviteNoticeGlobalOverlay() {
     if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkInviteNoticeOpen)) {
       return const SizedBox.shrink();
@@ -7969,9 +7969,7 @@ class _HomePageState extends State<HomePage>
                         children: [
                           SizedBox(height: emailInviteTitleTop),
                           Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -7982,123 +7980,123 @@ class _HomePageState extends State<HomePage>
                                   overflow: TextOverflow.ellipsis,
                                   style: titleStyle,
                                 ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    l10n.emailLinkInviteBodyLine1,
-                                    textAlign: TextAlign.left,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.visible,
-                                    style: bodyStyle,
+                                const SizedBox(height: 4),
+                                Text(
+                                  l10n.emailLinkInviteBodyLine1,
+                                  textAlign: TextAlign.left,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.visible,
+                                  style: bodyStyle,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  l10n.emailLinkInviteBodyLine2,
+                                  textAlign: TextAlign.left,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.visible,
+                                  style: bodyStyle,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                onTap: () =>
+                                    unawaited(_onEmailLinkInviteLinkTap()),
+                                borderRadius: BorderRadius.circular(14),
+                                child: Ink(
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(0xFFF1F1F1),
+                                      width: 0.8,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.03,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    l10n.emailLinkInviteBodyLine2,
-                                    textAlign: TextAlign.left,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.visible,
-                                    style: bodyStyle,
+                                  child: Center(
+                                    child: _buildPastelBlueGradientButtonText(
+                                      l10n.emailLinkInviteNow,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Material(
-                                color: Colors.transparent,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                onTap: _closeEmailLinkInviteNoticeOverlay,
                                 borderRadius: BorderRadius.circular(14),
-                                child: InkWell(
-                                  onTap: () =>
-                                      unawaited(_onEmailLinkInviteLinkTap()),
-                                  borderRadius: BorderRadius.circular(14),
-                                  child: Ink(
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(
-                                        color: const Color(0xFFF1F1F1),
-                                        width: 0.8,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.03,
-                                          ),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 1),
-                                        ),
-                                      ],
+                                child: Ink(
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(0xFFF1F1F1),
+                                      width: 0.8,
                                     ),
-                                    child: Center(
-                                      child: _buildPastelBlueGradientButtonText(
-                                        l10n.emailLinkInviteNow,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.03,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      l10n.emailLinkInviteLater,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
+                                        color: Color(0xFFB92020),
+                                        height: 1.0,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Material(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(14),
-                                child: InkWell(
-                                  onTap: _closeEmailLinkInviteNoticeOverlay,
-                                  borderRadius: BorderRadius.circular(14),
-                                  child: Ink(
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(
-                                        color: const Color(0xFFF1F1F1),
-                                        width: 0.8,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.03,
-                                          ),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 1),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        l10n.emailLinkInviteLater,
-                                        textAlign: TextAlign.center,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontFamily: 'Pretendard',
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFFB92020),
-                                          height: 1.0,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -8245,7 +8243,8 @@ class _HomePageState extends State<HomePage>
               child: InkWell(
                 onTap: resetting
                     ? null
-                    : () => unawaited(_confirmRemoteEmailLinkedLogoutAndReset()),
+                    : () =>
+                          unawaited(_confirmRemoteEmailLinkedLogoutAndReset()),
                 borderRadius: BorderRadius.circular(14),
                 child: Ink(
                   height: 30,
@@ -8281,7 +8280,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isRemoteEmailLinkedLogoutNoticeOpen)) {
+    if (!_isYardConfirmOverlayFadeVisible(
+      _isRemoteEmailLinkedLogoutNoticeOpen,
+    )) {
       return const SizedBox.shrink();
     }
 
@@ -8426,15 +8427,9 @@ class _HomePageState extends State<HomePage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      l10n.randomTicketUseConfirmMessage,
-                      style: titleStyle,
-                    ),
+                    Text(l10n.randomTicketUseConfirmMessage, style: titleStyle),
                     const SizedBox(height: 5),
-                    Text(
-                      l10n.randomTicketUseConfirmDesc,
-                      style: descStyle,
-                    ),
+                    Text(l10n.randomTicketUseConfirmDesc, style: descStyle),
                   ],
                 ),
               ),
@@ -8603,114 +8598,114 @@ class _HomePageState extends State<HomePage>
                                   ),
                                 ],
                               ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Material(
-                              color: Colors.transparent,
-                              borderRadius: BorderRadius.circular(14),
-                              child: InkWell(
-                                onTap: _isDeletingAccount
-                                    ? null
-                                    : _closeWithdrawConfirmOverlay,
-                                borderRadius: BorderRadius.circular(14),
-                                child: Ink(
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: const Color(0xFFF1F1F1),
-                                      width: 0.8,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.03,
-                                        ),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 1),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Center(
-                                    child: _buildPastelBlueGradientButtonText(
-                                      l10n.cancelLabel,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Material(
-                              color: Colors.transparent,
-                              borderRadius: BorderRadius.circular(14),
-                              child: InkWell(
-                                onTap: _isDeletingAccount
-                                    ? null
-                                    : _openWithdrawFinalConfirmFromFirst,
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
                                 borderRadius: BorderRadius.circular(14),
-                                child: Ink(
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: const Color(0xFFF1F1F1),
-                                      width: 0.8,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.03,
-                                        ),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 1),
+                                child: InkWell(
+                                  onTap: _isDeletingAccount
+                                      ? null
+                                      : _closeWithdrawConfirmOverlay,
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Ink(
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: const Color(0xFFF1F1F1),
+                                        width: 0.8,
                                       ),
-                                    ],
-                                  ),
-                                  child: Center(
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        l10n.withdrawConfirmDeleteButton,
-                                        textAlign: TextAlign.center,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontFamily: 'Pretendard',
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFFB92020),
-                                          height: 1.0,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.03,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
                                         ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: _buildPastelBlueGradientButtonText(
+                                        l10n.cancelLabel,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(14),
+                                child: InkWell(
+                                  onTap: _isDeletingAccount
+                                      ? null
+                                      : _openWithdrawFinalConfirmFromFirst,
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Ink(
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: const Color(0xFFF1F1F1),
+                                        width: 0.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.03,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          l10n.withdrawConfirmDeleteButton,
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontFamily: 'Pretendard',
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFFB92020),
+                                            height: 1.0,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -8796,55 +8791,58 @@ class _HomePageState extends State<HomePage>
                                   ),
                                 ],
                               ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
-                        child: InkWell(
-                          onTap: _isDeletingAccount
-                              ? null
-                              : () {
-                                  unawaited(_onWithdrawFinalConfirmDeleteTap());
-                                },
-                          borderRadius: BorderRadius.circular(14),
-                          child: Ink(
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFF1F1F1),
-                                width: 0.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.03),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
                             ),
-                            child: Center(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  l10n.withdrawFinalDeleteButton,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFFB92020),
-                                    height: 1.0,
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            onTap: _isDeletingAccount
+                                ? null
+                                : () {
+                                    unawaited(
+                                      _onWithdrawFinalConfirmDeleteTap(),
+                                    );
+                                  },
+                            borderRadius: BorderRadius.circular(14),
+                            child: Ink(
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: const Color(0xFFF1F1F1),
+                                  width: 0.8,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.03),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    l10n.withdrawFinalDeleteButton,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFFB92020),
+                                      height: 1.0,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -8852,13 +8850,12 @@ class _HomePageState extends State<HomePage>
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -9042,104 +9039,104 @@ class _HomePageState extends State<HomePage>
               alignment: Alignment.center,
               child: Text(
                 l10n.supportCenter,
-                    textAlign: TextAlign.center,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            height: 28,
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                onTap: () async {
+                  await Clipboard.setData(
+                    const ClipboardData(text: _kCustomerCenterEmail),
+                  );
+                  if (!mounted) return;
+                  _showSnack(AppLocalizations.of(context).emailCopied);
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: const Color(0xFFF1F1F1),
+                      width: 0.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      gradientIcon(Icons.copy_rounded),
+                      const SizedBox(width: 4),
+                      _buildPastelBlueGradientButtonText(
+                        l10n.copyEmail,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 16 + 13,
+            left: 16,
+            right: 16,
+            bottom: 8 + 28,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '• ${l10n.contactAndFeedback}',
+                    textAlign: TextAlign.left,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: titleStyle,
+                    style: labelStyle,
                   ),
                 ),
-              ),
-              Positioned(
-                left: 8,
-                right: 8,
-                bottom: 8,
-                height: 28,
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    onTap: () async {
-                      await Clipboard.setData(
-                        const ClipboardData(text: _kCustomerCenterEmail),
-                      );
-                      if (!mounted) return;
-                      _showSnack(AppLocalizations.of(context).emailCopied);
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: const Color(0xFFF1F1F1),
-                          width: 0.8,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.03),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          gradientIcon(Icons.copy_rounded),
-                          const SizedBox(width: 4),
-                          _buildPastelBlueGradientButtonText(
-                            l10n.copyEmail,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ],
-                      ),
+                Container(
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFEFEF),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _kCustomerCenterEmail,
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      style: emailStyle,
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                top: 16 + 13,
-                left: 16,
-                right: 16,
-                bottom: 8 + 28,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '• ${l10n.contactAndFeedback}',
-                        textAlign: TextAlign.left,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: labelStyle,
-                      ),
-                    ),
-                    Container(
-                      height: 24,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFEFEF),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          _kCustomerCenterEmail,
-                          maxLines: 1,
-                          textAlign: TextAlign.center,
-                          style: emailStyle,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -9237,10 +9234,7 @@ class _HomePageState extends State<HomePage>
       height: 1.15,
     );
 
-    Widget labeledSection({
-      required String label,
-      required Widget field,
-    }) {
+    Widget labeledSection({required String label, required Widget field}) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
@@ -9381,28 +9375,28 @@ class _HomePageState extends State<HomePage>
                             ),
                           )
                         : cooldownActive
-                            ? Text(
-                                l10n.emailOtpRetryAfterSeconds(
-                                  _emailOtpCooldownSeconds,
-                                ),
-                                textAlign: TextAlign.center,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: _settingsPanelTextStyle(
-                                  11,
-                                  FontWeight.w600,
-                                  const Color(0xFFB92020),
-                                  height: 1.0,
-                                ),
-                              )
-                            : _buildPastelBlueGradientButtonText(
-                                l10n.emailLinkResendCodeButton,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                textAlign: TextAlign.center,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                        ? Text(
+                            l10n.emailOtpRetryAfterSeconds(
+                              _emailOtpCooldownSeconds,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _settingsPanelTextStyle(
+                              11,
+                              FontWeight.w600,
+                              const Color(0xFFB92020),
+                              height: 1.0,
+                            ),
+                          )
+                        : _buildPastelBlueGradientButtonText(
+                            l10n.emailLinkResendCodeButton,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ),
                 ),
               ),
@@ -9430,84 +9424,84 @@ class _HomePageState extends State<HomePage>
                 alignment: Alignment.center,
                 child: Text(
                   l10n.emailAccountLink,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _settingsPanelTextStyle(
-                        13,
-                        FontWeight.w600,
-                        const Color(0xFF000000),
-                        height: 1.0,
-                      ),
-                    ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _settingsPanelTextStyle(
+                    13,
+                    FontWeight.w600,
+                    const Color(0xFF000000),
+                    height: 1.0,
                   ),
                 ),
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                  height: 28,
-                  child: Material(
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(18),
-                    child: InkWell(
-                      onTap: primaryDisabled
-                          ? null
-                          : () => unawaited(_onEmailLinkPanelPrimaryTap()),
+              ),
+            ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              height: 28,
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(18),
+                child: InkWell(
+                  onTap: primaryDisabled
+                      ? null
+                      : () => unawaited(_onEmailLinkPanelPrimaryTap()),
+                  borderRadius: BorderRadius.circular(18),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(18),
-                      child: Ink(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: const Color(0xFFF1F1F1),
-                            width: 0.8,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.03),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Opacity(
-                              opacity: primaryBusy ? 0.35 : 1,
-                              child: _buildPastelBlueGradientButtonText(
-                                primaryLabel,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (primaryBusy)
-                              const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Color(0xFF6B6B6B),
-                                ),
-                              ),
-                          ],
-                        ),
+                      border: Border.all(
+                        color: const Color(0xFFF1F1F1),
+                        width: 0.8,
                       ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Opacity(
+                          opacity: primaryBusy ? 0.35 : 1,
+                          child: _buildPastelBlueGradientButtonText(
+                            primaryLabel,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (primaryBusy)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF6B6B6B),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
-                Positioned(
-                  top: 16 + 13,
-                  left: 0,
-                  right: 0,
-                  bottom: 8 + 28,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: middleSections,
-                  ),
-                ),
+              ),
+            ),
+            Positioned(
+              top: 16 + 13,
+              left: 0,
+              right: 0,
+              bottom: 8 + 28,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: middleSections,
+              ),
+            ),
           ],
         ),
       ),
@@ -9530,9 +9524,8 @@ class _HomePageState extends State<HomePage>
           child: IgnorePointer(
             child: GameWidget(
               game: _yardGame,
-              backgroundBuilder: (context) => const ColoredBox(
-                color: Color(0xFFDAF3DD),
-              ),
+              backgroundBuilder: (context) =>
+                  const ColoredBox(color: Color(0xFFDAF3DD)),
             ),
           ),
         ),
@@ -9546,26 +9539,47 @@ class _HomePageState extends State<HomePage>
     }
     if (_activePet == null) return const SizedBox.shrink();
     final useFlamePet = _shouldUseFlamePetForActivePet();
-    final flamePetReady = useFlamePet && _yardGame.hasActiveVegePet;
     return Positioned.fill(
       child: Stack(
         children: [
-          if (!flamePetReady)
+          // useFlamePet 인 펫(cat_sco baby)은 Flame mount 전 짧은 순간에도 더미
+          // 아이콘이 보이면 안 되므로 절대 더미를 표시하지 않는다(분양 직후 flicker
+          // 제거). Flame 펫 로드 실패 시에도 더미 fallback 을 즉시 보여주지 않고
+          // YardGame 의 debug 로그(lastPetSpawnError)에만 남긴다.
+          // useFlamePet == false 인 기존 펫은 기존 더미 표시를 그대로 유지한다.
+          if (!useFlamePet)
             Positioned(
               left: 0,
               right: 0,
               bottom: 56,
               child: _buildCenterPetVisual(),
             ),
+          // Flame 펫은 IgnorePointer 로 감싼 GameWidget 안에서 움직이므로, 마당
+          // 전체를 덮는 투명 GestureDetector 가 tapDown 위치를 받아 현재 펫 hitbox
+          // 와 비교한다. 실제 움직이는 펫 위를 눌렀을 때만 쓰다듬기가 발동하고,
+          // 예전 고정 위치(빈 공간)를 눌러도 발동하지 않는다.
           if (useFlamePet)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 40,
-              height: 140,
+            Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onTap: () => unawaited(_onYardPetTapped()),
+                onTapDown: (details) {
+                  final point = details.localPosition;
+                  final hit = _yardGame.isPointInsideActivePetHitbox(point);
+                  if (kDebugMode) {
+                    debugPrint(
+                      'Yard pet tap: point=$point, hit=$hit, '
+                      'rect=${_yardGame.activePetHitboxRect}',
+                    );
+                  }
+                  if (hit) {
+                    unawaited(_onYardPetTapped());
+                    return;
+                  }
+                  // 펫이 아닌 마당 영역: 기존 마당 탭 동작(키보드/프로필 select
+                  // overlay 닫기)을 그대로 유지한다.
+                  if (_dismissKeyboardIfVisibleOnly()) return;
+                  unawaited(_closeProfileSelectOverlay());
+                },
               ),
             ),
           Positioned(
@@ -10007,8 +10021,7 @@ class _HomePageState extends State<HomePage>
       color: Color(0xFF4A4A4A),
     );
 
-    final panelInteractive =
-        _isNamingDialogOpen && !_isPetNamingPanelClosing;
+    final panelInteractive = _isNamingDialogOpen && !_isPetNamingPanelClosing;
 
     return Positioned(
       left: _kPetNicknameDialogLeft,
@@ -10023,10 +10036,7 @@ class _HomePageState extends State<HomePage>
             final t = _petNamingPanelEnterCurve.value.clamp(0.0, 1.0);
             return Opacity(
               opacity: t,
-              child: Transform.scale(
-                scale: 0.985 + (0.015 * t),
-                child: child,
-              ),
+              child: Transform.scale(scale: 0.985 + (0.015 * t), child: child),
             );
           },
           child: ClipRRect(
@@ -10193,10 +10203,7 @@ class _HomePageState extends State<HomePage>
                             shaderCallback: (bounds) => const LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [
-                                Color(0xFFA9C9FF),
-                                Color(0xFFBFD9FF),
-                              ],
+                              colors: [Color(0xFFA9C9FF), Color(0xFFBFD9FF)],
                             ).createShader(bounds),
                             blendMode: BlendMode.srcIn,
                             child: Text(
@@ -10500,8 +10507,9 @@ class _HomePageState extends State<HomePage>
     return _buildInYardInitialAdoptionPanel();
   }
 
-  Widget _buildInYardYardTuningPanel() {
-    // debug 전용: Flame 구름 x/y/width/speed 실시간 튜닝. release 에서는 위젯 트리에 없음.
+  /// debug 전용: Yard Tune 패널을 844×390 캔버스 밖 전체 화면 overlay에 띄운다.
+  /// release 에서는 위젯 트리에 없으며, HUD 버튼보다 위 레이어에 배치된다.
+  Widget _buildFullScreenYardTuningOverlay() {
     if (!kDebugMode) {
       return const SizedBox.shrink();
     }
@@ -10512,9 +10520,9 @@ class _HomePageState extends State<HomePage>
           if (_isYardTuningPanelOpen)
             Positioned(
               left: 16,
-              bottom: 52,
-              width: 272,
-              height: 300,
+              top: 72,
+              bottom: 56,
+              width: 324,
               child: _buildYardTuningPanelContent(),
             ),
           Positioned(
@@ -10582,6 +10590,13 @@ class _HomePageState extends State<HomePage>
                     section: _YardTuningSection.smoke,
                   ),
                 ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _buildYardTuningSectionChip(
+                    label: 'Obstacles',
+                    section: _YardTuningSection.obstacles,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 6),
@@ -10591,6 +10606,8 @@ class _HomePageState extends State<HomePage>
                   _YardTuningSection.cloud => _buildYardTuningCloudSection(),
                   _YardTuningSection.hut => _buildYardTuningHutSection(),
                   _YardTuningSection.smoke => _buildYardTuningSmokeSection(),
+                  _YardTuningSection.obstacles =>
+                    _buildYardTuningObstaclesSection(),
                 },
               ),
             ),
@@ -10619,14 +10636,12 @@ class _HomePageState extends State<HomePage>
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     onPressed: _printCurrentYardTuningSectionConfig,
-                    child: Text(
-                      switch (_yardTuningSection) {
-                        _YardTuningSection.cloud => 'Print Config',
-                        _YardTuningSection.hut => 'Print Hut Config',
-                        _YardTuningSection.smoke => 'Print Smoke Config',
-                      },
-                      style: const TextStyle(fontSize: 11),
-                    ),
+                    child: Text(switch (_yardTuningSection) {
+                      _YardTuningSection.cloud => 'Print Config',
+                      _YardTuningSection.hut => 'Print Hut Config',
+                      _YardTuningSection.smoke => 'Print Smoke Config',
+                      _YardTuningSection.obstacles => 'Print Obstacles Config',
+                    }, style: const TextStyle(fontSize: 11)),
                   ),
                 ),
               ],
@@ -10645,6 +10660,8 @@ class _HomePageState extends State<HomePage>
         debugPrint(_yardGame.buildHutCollisionDebugText());
       case _YardTuningSection.smoke:
         debugPrint(_yardGame.buildSmokeTuningDebugText());
+      case _YardTuningSection.obstacles:
+        debugPrint(_yardGame.buildCustomObstaclesDebugText());
     }
   }
 
@@ -10933,6 +10950,180 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildYardTuningObstaclesSection() {
+    final obstacles = _yardGame.customObstacleTunings;
+    final hasSelection = obstacles.isNotEmpty;
+    final index = hasSelection
+        ? _selectedCustomObstacleIndex.clamp(0, obstacles.length - 1)
+        : 0;
+    final selected = hasSelection ? obstacles[index] : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildYardTuningCheckboxRow(
+          label: 'Show Blocked Area',
+          value: _walkableBlockedAreaDebugVisible,
+          onChanged: (v) {
+            _safeSetState(() => _walkableBlockedAreaDebugVisible = v);
+            _yardGame.setWalkableBlockedAreaDebugVisible(v);
+          },
+        ),
+        _buildYardTuningCheckboxRow(
+          label: 'Show Custom Obstacles',
+          value: _customObstacleDebugVisible,
+          onChanged: (v) {
+            _safeSetState(() => _customObstacleDebugVisible = v);
+            _yardGame.setCustomObstacleDebugVisible(v);
+          },
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.lightGreenAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () {
+                  _yardGame.addCustomObstacle();
+                  final lastIndex = _yardGame.customObstacleTunings.length - 1;
+                  _safeSetState(() => _selectedCustomObstacleIndex = lastIndex);
+                },
+                child: const Text('Add Hex', style: TextStyle(fontSize: 10)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: hasSelection
+                      ? Colors.orangeAccent
+                      : Colors.white38,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: hasSelection
+                    ? () {
+                        _yardGame.removeCustomObstacle(index);
+                        final lastIndex =
+                            _yardGame.customObstacleTunings.length - 1;
+                        _safeSetState(
+                          () => _selectedCustomObstacleIndex = lastIndex < 0
+                              ? 0
+                              : index.clamp(0, lastIndex),
+                        );
+                      }
+                    : null,
+                child: const Text(
+                  'Remove Selected',
+                  style: TextStyle(fontSize: 10),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (!hasSelection)
+          const Text(
+            'Add Hex로 runtime custom obstacle을 추가하세요.',
+            style: TextStyle(color: Colors.white54, fontSize: 9),
+          )
+        else ...[
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (var i = 0; i < obstacles.length; i++)
+                SizedBox(
+                  width: 46,
+                  child: _buildYardTuningCloudChip(
+                    label: 'O${i + 1}',
+                    selected: i == index,
+                    onTap: () =>
+                        _safeSetState(() => _selectedCustomObstacleIndex = i),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _buildYardTuningCheckboxRow(
+            label: 'enabled (${selected!.id})',
+            value: selected.enabled,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, enabled: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'x',
+            value: selected.x,
+            min: 0,
+            max: 844,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, x: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'y',
+            value: selected.y,
+            min: 0,
+            max: 390,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, y: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'w',
+            value: selected.width,
+            min: 20,
+            max: 300,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, width: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'h',
+            value: selected.height,
+            min: 20,
+            max: 240,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, height: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'top',
+            value: selected.topInset,
+            min: 0,
+            max: 120,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, topInset: v);
+              _safeSetState(() {});
+            },
+          ),
+          _buildYardTuningSliderRow(
+            label: 'bot',
+            value: selected.bottomInset,
+            min: 0,
+            max: 120,
+            onChanged: (v) {
+              _yardGame.updateCustomObstacleTuning(index, bottomInset: v);
+              _safeSetState(() {});
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildYardTuningSectionChip({
     required String label,
     required _YardTuningSection section,
@@ -11040,7 +11231,45 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildInYardPetMotionTestPanel() {
+  Widget _buildYardTuningCheckboxRow({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: value,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                side: const BorderSide(color: Colors.white70),
+                onChanged: (v) => onChanged(v ?? false),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// debug 전용: Pet Motion 패널을 844×390 캔버스 밖 전체 화면 overlay에 띄운다.
+  /// release 에서는 위젯 트리에 없으며, HUD 버튼보다 위 레이어에 배치된다.
+  Widget _buildFullScreenPetMotionTestOverlay() {
     if (!kDebugMode) {
       return const SizedBox.shrink();
     }
@@ -11051,9 +11280,9 @@ class _HomePageState extends State<HomePage>
           if (_isPetMotionTestPanelOpen)
             Positioned(
               right: 16,
-              bottom: 52,
+              top: 72,
+              bottom: 56,
               width: 292,
-              height: 360,
               child: _buildPetMotionTestPanelContent(),
             ),
           Positioned(
@@ -11124,6 +11353,18 @@ class _HomePageState extends State<HomePage>
               valueDecimals: 0,
               onChanged: (v) =>
                   _safeSetState(() => _petMotionRepeatCount = v.round()),
+            ),
+            _buildPetCollisionToggleRow(),
+            const SizedBox(height: 4),
+            _buildPetDirectionPad(),
+            const SizedBox(height: 6),
+            const Text(
+              'Motion',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 4),
             Expanded(
@@ -11230,6 +11471,126 @@ class _HomePageState extends State<HomePage>
           child: Text(
             label,
             style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// debug 전용: 이동 collision footprint overlay 표시/숨김 토글.
+  Widget _buildPetCollisionToggleRow() {
+    return InkWell(
+      onTap: () {
+        final next = !_petCollisionDebugVisible;
+        _safeSetState(() => _petCollisionDebugVisible = next);
+        _yardGame.setActivePetCollisionDebugVisible(next);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: _petCollisionDebugVisible,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                side: const BorderSide(color: Colors.white70),
+                onChanged: (v) {
+                  final next = v ?? false;
+                  _safeSetState(() => _petCollisionDebugVisible = next);
+                  _yardGame.setActivePetCollisionDebugVisible(next);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'Show Collision',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// debug 전용: 8방향 + Stop 으로 active Flame pet 을 수동 run 이동시키는 패드.
+  Widget _buildPetDirectionPad() {
+    const v = 0.7071;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Direction (hold to run)',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            _buildPetDirectionButton(label: '↖', direction: Vector2(-v, -v)),
+            _buildPetDirectionButton(label: '↑', direction: Vector2(0, -1)),
+            _buildPetDirectionButton(label: '↗', direction: Vector2(v, -v)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            _buildPetDirectionButton(label: '←', direction: Vector2(-1, 0)),
+            _buildPetDirectionButton(label: 'Stop'),
+            _buildPetDirectionButton(label: '→', direction: Vector2(1, 0)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            _buildPetDirectionButton(label: '↙', direction: Vector2(-v, v)),
+            _buildPetDirectionButton(label: '↓', direction: Vector2(0, 1)),
+            _buildPetDirectionButton(label: '↘', direction: Vector2(v, v)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// [direction] 이 null 이면 Stop 버튼. 누르고 있는 동안 해당 방향으로 run 이동.
+  Widget _buildPetDirectionButton({required String label, Vector2? direction}) {
+    final isStop = direction == null;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: isStop
+              ? null
+              : (_) => _yardGame.startPetManualRunDirection(
+                  direction,
+                  speedMultiplier: _petMotionSpeedMultiplier,
+                ),
+          onTapUp: isStop ? null : (_) => _yardGame.stopPetManualRunDirection(),
+          onTapCancel: isStop ? null : _yardGame.stopPetManualRunDirection,
+          onTap: isStop ? _yardGame.stopPetManualRunDirection : null,
+          child: Container(
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: isStop
+                  ? Colors.redAccent.withValues(alpha: 0.5)
+                  : Colors.white.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ),
       ),
@@ -11505,7 +11866,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _onPetInfoBannerAction(String action) async {
-    if (!await _guardAccountAliveBeforeUserAction('pet info action ($action)')) {
+    if (!await _guardAccountAliveBeforeUserAction(
+      'pet info action ($action)',
+    )) {
       return;
     }
     if (_handleMaturePetBlockedInteraction()) return;
@@ -11651,7 +12014,9 @@ class _HomePageState extends State<HomePage>
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: valueStyle.copyWith(fontSize: isEn && scaleDownForEn ? 10.5 : 12),
+        style: valueStyle.copyWith(
+          fontSize: isEn && scaleDownForEn ? 10.5 : 12,
+        ),
       );
       return Container(
         height: 24,
@@ -11814,7 +12179,9 @@ class _HomePageState extends State<HomePage>
                           style: labelStyle,
                         ),
                       ),
-                      Expanded(child: metaValueBox(typeDisplay, scaleDownForEn: true)),
+                      Expanded(
+                        child: metaValueBox(typeDisplay, scaleDownForEn: true),
+                      ),
                     ],
                   ),
                 ),
@@ -12022,7 +12389,9 @@ class _HomePageState extends State<HomePage>
     final speciesName = _speciesDisplayNameForCurrentLocale(species);
     final nickname = pet['nickname']?.toString();
     final displayName = (nickname == null || nickname.isEmpty)
-        ? (speciesName.isNotEmpty ? speciesName : (_isEnglishLocale ? 'VegePet' : '펫'))
+        ? (speciesName.isNotEmpty
+              ? speciesName
+              : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
 
     return Padding(
@@ -12222,7 +12591,12 @@ class _HomePageState extends State<HomePage>
       return FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
       );
     }
     return Text(text, style: style);
@@ -12513,11 +12887,20 @@ class _HomePageState extends State<HomePage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildMealPanelFootnote(l10n.mealPanelFootnote1, isEn),
+                            _buildMealPanelFootnote(
+                              l10n.mealPanelFootnote1,
+                              isEn,
+                            ),
                             const SizedBox(height: 4),
-                            _buildMealPanelFootnote(l10n.mealPanelFootnote2, isEn),
+                            _buildMealPanelFootnote(
+                              l10n.mealPanelFootnote2,
+                              isEn,
+                            ),
                             const SizedBox(height: 4),
-                            _buildMealPanelFootnote(l10n.mealPanelFootnote3, isEn),
+                            _buildMealPanelFootnote(
+                              l10n.mealPanelFootnote3,
+                              isEn,
+                            ),
                           ],
                         ),
                       ),
@@ -12729,8 +13112,7 @@ class _HomePageState extends State<HomePage>
         customBorder: const CircleBorder(),
         onTap: onTap,
         splashFactory: suppressInkSplash ? NoSplash.splashFactory : null,
-        highlightColor:
-            suppressInkSplash ? Colors.transparent : null,
+        highlightColor: suppressInkSplash ? Colors.transparent : null,
         hoverColor: suppressInkSplash ? Colors.transparent : null,
         child: Padding(
           padding: EdgeInsets.all(padding),
@@ -12939,7 +13321,9 @@ class _HomePageState extends State<HomePage>
     final speciesName = _speciesDisplayNameForCurrentLocale(species);
     final nickname = pet['nickname']?.toString();
     final displayName = (nickname == null || nickname.isEmpty)
-        ? (speciesName.isNotEmpty ? speciesName : (_isEnglishLocale ? 'VegePet' : '펫'))
+        ? (speciesName.isNotEmpty
+              ? speciesName
+              : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
     final stage = pet['stage']?.toString() ?? 'baby';
     final stageKo = _stageToKorean(stage);
@@ -13796,8 +14180,7 @@ class _HomePageState extends State<HomePage>
         final yardExit = _gameMenuYardExitFadeMultiplier;
         final slideMenuOpen = _gameMenuPanelOpen;
         final anySubPanel = _isAnyGameMenuSubPanelOpenOrSwapping();
-        final menuGridSlidingOut =
-            _gameMenuPanelRetracting && !anySubPanel;
+        final menuGridSlidingOut = _gameMenuPanelRetracting && !anySubPanel;
 
         final menuFade = _gameMenuGridCrossfadeOpacity();
         final showMenuGrid = slideMenuOpen || menuGridSlidingOut;
@@ -13947,8 +14330,7 @@ class _HomePageState extends State<HomePage>
       double? labelFontSize,
     }) {
       final useW = fieldW.clamp(100.0, _kGameMenuProfileFieldW);
-      final resolvedLabelSize =
-          labelFontSize ?? (isEn ? 10 : 11);
+      final resolvedLabelSize = labelFontSize ?? (isEn ? 10 : 11);
       return Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -13999,162 +14381,152 @@ class _HomePageState extends State<HomePage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: _buildGameMenuProfileAvatarDummy(
-                genderForAvatar,
-              ),
-            ),
-                        const SizedBox(height: 10),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final fieldW =
-                                  constraints.maxWidth -
-                                  _kGameMenuProfileLabelW -
-                                  _kGameMenuProfileRowGap;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  rowForWidth(
-                                    fieldW,
-                                    l10n.nickname,
-                                    fieldShell(
-                                      _buildKeyboardAccessoryTriggerField(
-                                        key: 'profile_nickname',
-                                        controller: _nicknameController,
-                                        sourceFocusNode: _nicknameFocusNode,
-                                        enabled: fieldsEnabled,
-                                        keyboardType: TextInputType.text,
-                                        inputFormatters: [
-                                          LengthLimitingTextInputFormatter(
-                                            _kProfileNicknameMaxLength,
-                                            maxLengthEnforcement:
-                                                MaxLengthEnforcement.enforced,
-                                          ),
-                                        ],
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF4A4A4A),
-                                          height: 1.1,
-                                        ),
-                                        maxLines: 1,
-                                        padding: EdgeInsets.zero,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.transparent,
-                                        ),
-                                      ),
-                                    ),
-                                    labelFontSize: isEn ? 9 : null,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  rowForWidth(
-                                    fieldW,
-                                    l10n.gender,
-                                    _buildCompactProfileSelect(
-                                      selectKey: 'gm_gender',
-                                      value: _selectedGender,
-                                      options: _genderOptions,
-                                      enabled: fieldsEnabled,
-                                      optionLabelBuilder: (v) =>
-                                          _localizedGenderValue(v, l10n),
-                                      fieldWidth: fieldW.clamp(
-                                        100.0,
-                                        _kGameMenuProfileFieldW,
-                                      ),
-                                      onChanged: (value) {
-                                        setState(() => _selectedGender = value);
-                                        unawaited(
-                                          _persistGameMenuProfilePatch({
-                                            'gender': value,
-                                          }),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  rowForWidth(
-                                    fieldW,
-                                    l10n.ageRange,
-                                    _buildCompactProfileSelect(
-                                      selectKey: 'gm_ageRange',
-                                      value: _selectedAgeRange,
-                                      options: _ageRangeOptions,
-                                      enabled: fieldsEnabled,
-                                      optionLabelBuilder: (v) =>
-                                          _localizedAgeRangeValue(v, l10n),
-                                      fieldWidth: fieldW.clamp(
-                                        100.0,
-                                        _kGameMenuProfileFieldW,
-                                      ),
-                                      onChanged: (value) {
-                                        setState(
-                                          () => _selectedAgeRange = value,
-                                        );
-                                        unawaited(
-                                          _persistGameMenuProfilePatch({
-                                            'age_range': value,
-                                          }),
-                                        );
-                                      },
-                                    ),
-                                    labelFontSize: isEn ? 8 : null,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  rowForWidth(
-                                    fieldW,
-                                    l10n.dietGoal,
-                                    _buildCompactProfileSelect(
-                                      selectKey: 'gm_dietGoal',
-                                      value: _selectedDietGoal,
-                                      options: _dietGoalOptions,
-                                      enabled: fieldsEnabled,
-                                      optionLabelBuilder: (v) =>
-                                          _localizedDietGoalValue(v, l10n),
-                                      fieldWidth: fieldW.clamp(
-                                        100.0,
-                                        _kGameMenuProfileFieldW,
-                                      ),
-                                      onChanged: (value) {
-                                        setState(
-                                          () => _selectedDietGoal = value,
-                                        );
-                                        unawaited(
-                                          _persistGameMenuProfilePatch({
-                                            'diet_goal': value,
-                                          }),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    l10n.profilePanelFootnoteAi,
-                                    softWrap: true,
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF4A4A4A),
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    l10n.profileAutoSaveHint,
-                                    softWrap: true,
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF4A4A4A),
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
+            Center(child: _buildGameMenuProfileAvatarDummy(genderForAvatar)),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final fieldW =
+                      constraints.maxWidth -
+                      _kGameMenuProfileLabelW -
+                      _kGameMenuProfileRowGap;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      rowForWidth(
+                        fieldW,
+                        l10n.nickname,
+                        fieldShell(
+                          _buildKeyboardAccessoryTriggerField(
+                            key: 'profile_nickname',
+                            controller: _nicknameController,
+                            sourceFocusNode: _nicknameFocusNode,
+                            enabled: fieldsEnabled,
+                            keyboardType: TextInputType.text,
+                            inputFormatters: [
+                              LengthLimitingTextInputFormatter(
+                                _kProfileNicknameMaxLength,
+                                maxLengthEnforcement:
+                                    MaxLengthEnforcement.enforced,
+                              ),
+                            ],
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF4A4A4A),
+                              height: 1.1,
+                            ),
+                            maxLines: 1,
+                            padding: EdgeInsets.zero,
+                            decoration: const BoxDecoration(
+                              color: Colors.transparent,
+                            ),
                           ),
                         ),
+                        labelFontSize: isEn ? 9 : null,
+                      ),
+                      const SizedBox(height: 8),
+                      rowForWidth(
+                        fieldW,
+                        l10n.gender,
+                        _buildCompactProfileSelect(
+                          selectKey: 'gm_gender',
+                          value: _selectedGender,
+                          options: _genderOptions,
+                          enabled: fieldsEnabled,
+                          optionLabelBuilder: (v) =>
+                              _localizedGenderValue(v, l10n),
+                          fieldWidth: fieldW.clamp(
+                            100.0,
+                            _kGameMenuProfileFieldW,
+                          ),
+                          onChanged: (value) {
+                            setState(() => _selectedGender = value);
+                            unawaited(
+                              _persistGameMenuProfilePatch({'gender': value}),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      rowForWidth(
+                        fieldW,
+                        l10n.ageRange,
+                        _buildCompactProfileSelect(
+                          selectKey: 'gm_ageRange',
+                          value: _selectedAgeRange,
+                          options: _ageRangeOptions,
+                          enabled: fieldsEnabled,
+                          optionLabelBuilder: (v) =>
+                              _localizedAgeRangeValue(v, l10n),
+                          fieldWidth: fieldW.clamp(
+                            100.0,
+                            _kGameMenuProfileFieldW,
+                          ),
+                          onChanged: (value) {
+                            setState(() => _selectedAgeRange = value);
+                            unawaited(
+                              _persistGameMenuProfilePatch({
+                                'age_range': value,
+                              }),
+                            );
+                          },
+                        ),
+                        labelFontSize: isEn ? 8 : null,
+                      ),
+                      const SizedBox(height: 8),
+                      rowForWidth(
+                        fieldW,
+                        l10n.dietGoal,
+                        _buildCompactProfileSelect(
+                          selectKey: 'gm_dietGoal',
+                          value: _selectedDietGoal,
+                          options: _dietGoalOptions,
+                          enabled: fieldsEnabled,
+                          optionLabelBuilder: (v) =>
+                              _localizedDietGoalValue(v, l10n),
+                          fieldWidth: fieldW.clamp(
+                            100.0,
+                            _kGameMenuProfileFieldW,
+                          ),
+                          onChanged: (value) {
+                            setState(() => _selectedDietGoal = value);
+                            unawaited(
+                              _persistGameMenuProfilePatch({
+                                'diet_goal': value,
+                              }),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        l10n.profilePanelFootnoteAi,
+                        softWrap: true,
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4A4A4A),
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.profileAutoSaveHint,
+                        softWrap: true,
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4A4A4A),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
@@ -14911,68 +15283,68 @@ class _HomePageState extends State<HomePage>
       blurSigma: 6,
       child: RepaintBoundary(
         child: _DietDiarySheetPanel(
-              key: _dietDiarySheetPanelKey,
-              embeddedInGameMenuPanel: true,
-              onEmbeddedBack: () => unawaited(_closeDietDiaryPanelToGameMenu()),
-              monthYearCaptionBuilder: _formatDietDiaryMonthYearCaption,
-              initialMonth: initialMonth,
-              clampMonth: _clampDiaryMonth,
-              isMonthInRange: _isDiaryMonthInRange,
-              fetchMonthLogs: _fetchDiaryMonthLogs,
-              logsByDateProvider: () => _diaryLogsByDate,
-              dateKey: _dateKey,
-              onMonthChanged: (m) {
-                _safeSetState(() => _diaryVisibleMonth = m);
+          key: _dietDiarySheetPanelKey,
+          embeddedInGameMenuPanel: true,
+          onEmbeddedBack: () => unawaited(_closeDietDiaryPanelToGameMenu()),
+          monthYearCaptionBuilder: _formatDietDiaryMonthYearCaption,
+          initialMonth: initialMonth,
+          clampMonth: _clampDiaryMonth,
+          isMonthInRange: _isDiaryMonthInRange,
+          fetchMonthLogs: _fetchDiaryMonthLogs,
+          logsByDateProvider: () => _diaryLogsByDate,
+          dateKey: _dateKey,
+          onMonthChanged: (m) {
+            _safeSetState(() => _diaryVisibleMonth = m);
+          },
+          onSavedSuccess: () {
+            _showSnack(AppLocalizations.of(context).dietDiarySavedSnackbar);
+          },
+          signedUrlBuilder: _signedMealPhotoUrl,
+          onPhotoTap: _showMealPhotoPreview,
+          fetchNote: _fetchMealDiaryNote,
+          saveNote: _saveMealDiaryNote,
+          bindKeyboardInput: _ensureKeyboardFocusBinding,
+          buildKeyboardTriggerField: _buildKeyboardAccessoryTriggerField,
+          calendarBuilder:
+              (
+                BuildContext sheetCtx,
+                DateTime visibleMonth,
+                Map<String, List<Map<String, dynamic>>> logsByDate,
+                Future<void> Function() onPrevMonth,
+                Future<void> Function() onNextMonth,
+                ValueChanged<DateTime> onTapDate,
+              ) {
+                return _buildDietDiaryCalendar(
+                  sheetContext: sheetCtx,
+                  diaryLogsByDate: logsByDate,
+                  visibleMonth: visibleMonth,
+                  onPrevMonth: onPrevMonth,
+                  onNextMonth: onNextMonth,
+                  onTapDate: onTapDate,
+                );
               },
-              onSavedSuccess: () {
-                _showSnack(AppLocalizations.of(context).dietDiarySavedSnackbar);
+          monthPickerBuilder:
+              (
+                BuildContext sheetCtx,
+                int visibleYear,
+                int highlightYear,
+                int highlightMonth,
+                Future<void> Function(int year, int month) onPickMonth,
+                ValueChanged<int> onChangeYear,
+                VoidCallback onBack,
+                bool compact,
+              ) {
+                return _buildDietDiaryMonthPicker(
+                  sheetContext: sheetCtx,
+                  visibleYear: visibleYear,
+                  highlightYear: highlightYear,
+                  highlightMonth: highlightMonth,
+                  onPickMonth: onPickMonth,
+                  onChangeYear: onChangeYear,
+                  onBack: onBack,
+                  compact: compact,
+                );
               },
-              signedUrlBuilder: _signedMealPhotoUrl,
-              onPhotoTap: _showMealPhotoPreview,
-              fetchNote: _fetchMealDiaryNote,
-              saveNote: _saveMealDiaryNote,
-              bindKeyboardInput: _ensureKeyboardFocusBinding,
-              buildKeyboardTriggerField: _buildKeyboardAccessoryTriggerField,
-              calendarBuilder:
-                  (
-                    BuildContext sheetCtx,
-                    DateTime visibleMonth,
-                    Map<String, List<Map<String, dynamic>>> logsByDate,
-                    Future<void> Function() onPrevMonth,
-                    Future<void> Function() onNextMonth,
-                    ValueChanged<DateTime> onTapDate,
-                  ) {
-                    return _buildDietDiaryCalendar(
-                      sheetContext: sheetCtx,
-                      diaryLogsByDate: logsByDate,
-                      visibleMonth: visibleMonth,
-                      onPrevMonth: onPrevMonth,
-                      onNextMonth: onNextMonth,
-                      onTapDate: onTapDate,
-                    );
-                  },
-              monthPickerBuilder:
-                  (
-                    BuildContext sheetCtx,
-                    int visibleYear,
-                    int highlightYear,
-                    int highlightMonth,
-                    Future<void> Function(int year, int month) onPickMonth,
-                    ValueChanged<int> onChangeYear,
-                    VoidCallback onBack,
-                    bool compact,
-                  ) {
-                    return _buildDietDiaryMonthPicker(
-                      sheetContext: sheetCtx,
-                      visibleYear: visibleYear,
-                      highlightYear: highlightYear,
-                      highlightMonth: highlightMonth,
-                      onPickMonth: onPickMonth,
-                      onChangeYear: onChangeYear,
-                      onBack: onBack,
-                      compact: compact,
-                    );
-                  },
         ),
       ),
     );
@@ -15017,8 +15389,7 @@ class _HomePageState extends State<HomePage>
     if (_settingsPanelSwapInProgress) return false;
     if (_settingsSupportDocSwapInProgress) return false;
     if (_gameSettingsSwapController.isAnimating) return false;
-    if (_gameMenuSubOutsideDismissKind !=
-        _GameMenuSubOutsideDismissKind.none) {
+    if (_gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none) {
       return false;
     }
     final docForRender =
@@ -15038,8 +15409,7 @@ class _HomePageState extends State<HomePage>
     if (_settingsSupportDocSwapInProgress) return false;
     if (_settingsPanelSwapInProgress) return false;
     if (_gameSettingsSwapController.isAnimating) return false;
-    if (_gameMenuSubOutsideDismissKind !=
-        _GameMenuSubOutsideDismissKind.none) {
+    if (_gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none) {
       return false;
     }
     if (!_settingsSupportDocScrollController.hasClients) return false;
@@ -15145,7 +15515,9 @@ class _HomePageState extends State<HomePage>
           top: 0,
           bottom: 0,
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: SingleChildScrollView(
               controller: controller,
               padding: padding,
@@ -15303,7 +15675,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _openSettingsFromGameMenu() async {
-    if (!await _guardAccountAliveBeforeUserAction('open settings panel')) return;
+    if (!await _guardAccountAliveBeforeUserAction('open settings panel')) {
+      return;
+    }
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
     _instantResetStoryPanelIfOpen();
@@ -15397,8 +15771,7 @@ class _HomePageState extends State<HomePage>
       Future<void>.delayed(const Duration(milliseconds: 80), () {
         if (!mounted) return;
         final stillSameDoc =
-            (_activeSettingsSupportDoc ?? _renderingSettingsSupportDoc) ==
-            type;
+            (_activeSettingsSupportDoc ?? _renderingSettingsSupportDoc) == type;
         if (!stillSameDoc) return;
         _safeSetState(() => _settingsSupportDocScrollbarReady = true);
       });
@@ -15492,33 +15865,29 @@ class _HomePageState extends State<HomePage>
           children: [
             Text(
               doc.title,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF000000),
-                  height: 1.2,
-                ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF000000),
+                height: 1.2,
               ),
-              const SizedBox(height: 8),
-              for (final section in doc.sections) ...[
-                Text(
-                  section.title,
-                  textAlign: TextAlign.left,
-                  style: sectionTitleStyle,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  section.body,
-                  textAlign: TextAlign.left,
-                  style: bodyStyle,
-                ),
-                const SizedBox(height: 10),
-              ],
+            ),
+            const SizedBox(height: 8),
+            for (final section in doc.sections) ...[
+              Text(
+                section.title,
+                textAlign: TextAlign.left,
+                style: sectionTitleStyle,
+              ),
+              const SizedBox(height: 4),
+              Text(section.body, textAlign: TextAlign.left, style: bodyStyle),
+              const SizedBox(height: 10),
             ],
+          ],
         ),
       ),
     );
@@ -15860,246 +16229,244 @@ class _HomePageState extends State<HomePage>
             top: 48,
             bottom: 8,
             child: Stack(
-                  fit: StackFit.expand,
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    Offstage(
-                      offstage: supportDocForRender != null,
-                      child: IgnorePointer(
-                        ignoring: supportDocForRender != null,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 240),
-                          curve: Curves.easeOutCubic,
-                          opacity: supportDocForRender == null ? 1 : 0,
-                          child: RepaintBoundary(
-                            key: const ValueKey('settings-panel-main'),
-                            child: _buildSettingsPanelScrollArea(
-                              controller: _settingsScrollController,
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.stretch,
-                                children: [
-                          const SizedBox(height: 4),
-                          sectionTitle(l10n.settingsSectionAccountBullet),
-                          const SizedBox(height: 6),
-                          _buildSettingsGrayRow(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                accountPrimary,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: rowLabelStyle,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          if (linked)
-                            _buildSettingsGrayRow(
-                              onTap: () {
-                                _showSnack(
-                                  AppLocalizations.of(
-                                    context,
-                                  ).snackEmailAlreadyLinked,
-                                );
-                              },
-                              child: Row(
-                                children: [
-                                  ShaderMask(
-                                    blendMode: BlendMode.srcIn,
-                                    shaderCallback: (bounds) =>
-                                        const LinearGradient(
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                          colors: [
-                                            Color(0xFFA9C9FF),
-                                            Color(0xFFBFD9FF),
-                                          ],
-                                        ).createShader(bounds),
-                                    child: const Icon(
-                                      Icons.check_circle_outline,
-                                      size: 14,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: _buildPastelBlueGradientButtonText(
-                                      l10n.emailLinkCompleted,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      textAlign: TextAlign.start,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            _buildSettingsGrayRow(
-                              onTap: () {
-                                if (_hasEffectiveEmailLink()) return;
-                                _dismissFocus();
-                                _safeSetState(() {
-                                  _prepareEmailLinkPanelForOpen();
-                                  _isCustomerCenterPanelOpen = false;
-                                  _isEmailLinkPanelOpen = true;
-                                });
-                              },
-                              child: Row(
-                                children: [
-                                  ShaderMask(
-                                    blendMode: BlendMode.srcIn,
-                                    shaderCallback: (bounds) =>
-                                        const LinearGradient(
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                          colors: [
-                                            Color(0xFFA9C9FF),
-                                            Color(0xFFBFD9FF),
-                                          ],
-                                        ).createShader(bounds),
-                                    child: const Icon(
-                                      Icons.link_rounded,
-                                      size: 14,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: _buildPastelBlueGradientButtonText(
-                                      l10n.emailAccountLink,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      textAlign: TextAlign.start,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 6),
-                          _buildSettingsGrayRow(
-                            onTap: _isDeletingAccount
-                                ? null
-                                : _openWithdrawConfirmPanel,
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.logout_rounded,
-                                  size: 14,
-                                  color: const Color(0xFFB92020),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
+              fit: StackFit.expand,
+              clipBehavior: Clip.hardEdge,
+              children: [
+                Offstage(
+                  offstage: supportDocForRender != null,
+                  child: IgnorePointer(
+                    ignoring: supportDocForRender != null,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 240),
+                      curve: Curves.easeOutCubic,
+                      opacity: supportDocForRender == null ? 1 : 0,
+                      child: RepaintBoundary(
+                        key: const ValueKey('settings-panel-main'),
+                        child: _buildSettingsPanelScrollArea(
+                          controller: _settingsScrollController,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SizedBox(height: 4),
+                              sectionTitle(l10n.settingsSectionAccountBullet),
+                              const SizedBox(height: 6),
+                              _buildSettingsGrayRow(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
                                   child: Text(
-                                    l10n.withdrawAccount,
+                                    accountPrimary,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: rowLabelStyle.copyWith(
-                                      color: const Color(0xFFB92020),
-                                    ),
+                                    style: rowLabelStyle,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          sectionTitle(l10n.settingsSectionLanguageBullet),
-                          const SizedBox(height: 6),
-                          _buildSettingsLanguageSelectRow(),
-                          const SizedBox(height: 10),
-                          sectionTitle(l10n.settingsSectionPushBullet),
-                          const SizedBox(height: 6),
-                          pushSwitchRow(
-                            l10n.pushNoticeEvent,
-                            _noticeEventPushEnabled,
-                            _settingsNoticePushBusy,
-                            (v) => unawaited(_onSettingsNoticeToggle(v)),
-                          ),
-                          const SizedBox(height: 6),
-                          pushSwitchRow(
-                            l10n.pushMealReminder,
-                            _mealReminderPushEnabled,
-                            _settingsMealPushBusy,
-                            (v) => unawaited(_onSettingsMealToggle(v)),
-                          ),
-                          const SizedBox(height: 10),
-                          sectionTitle(l10n.settingsSectionSoundBullet),
-                          const SizedBox(height: 6),
-                          pushSwitchRow(
-                            l10n.backgroundMusic,
-                            _backgroundMusicEnabled,
-                            _settingsBgmBusy,
-                            (v) => unawaited(_onSettingsBgmToggle(v)),
-                          ),
-                          const SizedBox(height: 6),
-                          pushSwitchRow(
-                            l10n.soundEffects,
-                            _soundEffectsEnabled,
-                            _settingsSfxBusy,
-                            (v) => unawaited(_onSettingsSfxToggle(v)),
-                          ),
-                          const SizedBox(height: 10),
-                          sectionTitle(l10n.settingsSectionSupportBullet),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.supportCenter,
-                            () {
-                              _safeSetState(
-                                () => _isCustomerCenterPanelOpen = true,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.termsOfService,
-                            () => _openSettingsSupportDocPanel(
-                              SupportDocType.terms,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.privacyPolicy,
-                            () => _openSettingsSupportDocPanel(
-                              SupportDocType.privacy,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.operationPolicy,
-                            () => _openSettingsSupportDocPanel(
-                              SupportDocType.operation,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.guardianGuide,
-                            () => _openSettingsSupportDocPanel(
-                              SupportDocType.guardian,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          supportNavRow(
-                            l10n.accountDataDeletionGuide,
-                            () => _openSettingsSupportDocPanel(
-                              SupportDocType.dataDeletion,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                                ],
                               ),
-                            ),
+                              const SizedBox(height: 6),
+                              if (linked)
+                                _buildSettingsGrayRow(
+                                  onTap: () {
+                                    _showSnack(
+                                      AppLocalizations.of(
+                                        context,
+                                      ).snackEmailAlreadyLinked,
+                                    );
+                                  },
+                                  child: Row(
+                                    children: [
+                                      ShaderMask(
+                                        blendMode: BlendMode.srcIn,
+                                        shaderCallback: (bounds) =>
+                                            const LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [
+                                                Color(0xFFA9C9FF),
+                                                Color(0xFFBFD9FF),
+                                              ],
+                                            ).createShader(bounds),
+                                        child: const Icon(
+                                          Icons.check_circle_outline,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child:
+                                            _buildPastelBlueGradientButtonText(
+                                              l10n.emailLinkCompleted,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              textAlign: TextAlign.start,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                _buildSettingsGrayRow(
+                                  onTap: () {
+                                    if (_hasEffectiveEmailLink()) return;
+                                    _dismissFocus();
+                                    _safeSetState(() {
+                                      _prepareEmailLinkPanelForOpen();
+                                      _isCustomerCenterPanelOpen = false;
+                                      _isEmailLinkPanelOpen = true;
+                                    });
+                                  },
+                                  child: Row(
+                                    children: [
+                                      ShaderMask(
+                                        blendMode: BlendMode.srcIn,
+                                        shaderCallback: (bounds) =>
+                                            const LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [
+                                                Color(0xFFA9C9FF),
+                                                Color(0xFFBFD9FF),
+                                              ],
+                                            ).createShader(bounds),
+                                        child: const Icon(
+                                          Icons.link_rounded,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child:
+                                            _buildPastelBlueGradientButtonText(
+                                              l10n.emailAccountLink,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              textAlign: TextAlign.start,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              const SizedBox(height: 6),
+                              _buildSettingsGrayRow(
+                                onTap: _isDeletingAccount
+                                    ? null
+                                    : _openWithdrawConfirmPanel,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.logout_rounded,
+                                      size: 14,
+                                      color: const Color(0xFFB92020),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        l10n.withdrawAccount,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: rowLabelStyle.copyWith(
+                                          color: const Color(0xFFB92020),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              sectionTitle(l10n.settingsSectionLanguageBullet),
+                              const SizedBox(height: 6),
+                              _buildSettingsLanguageSelectRow(),
+                              const SizedBox(height: 10),
+                              sectionTitle(l10n.settingsSectionPushBullet),
+                              const SizedBox(height: 6),
+                              pushSwitchRow(
+                                l10n.pushNoticeEvent,
+                                _noticeEventPushEnabled,
+                                _settingsNoticePushBusy,
+                                (v) => unawaited(_onSettingsNoticeToggle(v)),
+                              ),
+                              const SizedBox(height: 6),
+                              pushSwitchRow(
+                                l10n.pushMealReminder,
+                                _mealReminderPushEnabled,
+                                _settingsMealPushBusy,
+                                (v) => unawaited(_onSettingsMealToggle(v)),
+                              ),
+                              const SizedBox(height: 10),
+                              sectionTitle(l10n.settingsSectionSoundBullet),
+                              const SizedBox(height: 6),
+                              pushSwitchRow(
+                                l10n.backgroundMusic,
+                                _backgroundMusicEnabled,
+                                _settingsBgmBusy,
+                                (v) => unawaited(_onSettingsBgmToggle(v)),
+                              ),
+                              const SizedBox(height: 6),
+                              pushSwitchRow(
+                                l10n.soundEffects,
+                                _soundEffectsEnabled,
+                                _settingsSfxBusy,
+                                (v) => unawaited(_onSettingsSfxToggle(v)),
+                              ),
+                              const SizedBox(height: 10),
+                              sectionTitle(l10n.settingsSectionSupportBullet),
+                              const SizedBox(height: 6),
+                              supportNavRow(l10n.supportCenter, () {
+                                _safeSetState(
+                                  () => _isCustomerCenterPanelOpen = true,
+                                );
+                              }),
+                              const SizedBox(height: 6),
+                              supportNavRow(
+                                l10n.termsOfService,
+                                () => _openSettingsSupportDocPanel(
+                                  SupportDocType.terms,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              supportNavRow(
+                                l10n.privacyPolicy,
+                                () => _openSettingsSupportDocPanel(
+                                  SupportDocType.privacy,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              supportNavRow(
+                                l10n.operationPolicy,
+                                () => _openSettingsSupportDocPanel(
+                                  SupportDocType.operation,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              supportNavRow(
+                                l10n.guardianGuide,
+                                () => _openSettingsSupportDocPanel(
+                                  SupportDocType.guardian,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              supportNavRow(
+                                l10n.accountDataDeletionGuide,
+                                () => _openSettingsSupportDocPanel(
+                                  SupportDocType.dataDeletion,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                            ],
                           ),
                         ),
                       ),
                     ),
-                    ?supportDocLayer,
-                  ],
+                  ),
                 ),
-              ),
+                ?supportDocLayer,
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -17611,10 +17978,7 @@ class _HomePageState extends State<HomePage>
       }(),
       () {
         final code = _speciesInternalCode(species);
-        return _kv(
-          'species.internal_code',
-          code.isNotEmpty ? code : '-',
-        );
+        return _kv('species.internal_code', code.isNotEmpty ? code : '-');
       }(),
       _kv('species.family', species['family']?.toString() ?? '-'),
       _kv('nickname', pet['nickname']?.toString() ?? '(없음)'),
@@ -18047,8 +18411,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
 
     if (widget.embeddedInGameMenuPanel) {
       final l10n = AppLocalizations.of(context);
-      final isEnglish =
-          Localizations.localeOf(context).languageCode == 'en';
+      final isEnglish = Localizations.localeOf(context).languageCode == 'en';
       final embeddedTitleTop =
           kVegePetGameMenuSubPanelTitleTop +
           (isEnglish ? kVegePetGameMenuSubPanelTitleTopEnOffset : 0.0);
@@ -18551,91 +18914,91 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
               children: [
                 _photoSlot(
                   label: AppLocalizations.of(context).diaryPhotoBrunchLabel,
-                url: _brunchUrl,
-              ),
-              _photoSlot(
-                label: AppLocalizations.of(context).diaryPhotoDinnerLabel,
-                url: _dinnerUrl,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: isEnglish ? 76 : 62,
-                child: Text(
-                  AppLocalizations.of(context).diaryWeightLabel,
-                  style: labelStyle,
-                  maxLines: 1,
-                  overflow: TextOverflow.visible,
+                  url: _brunchUrl,
                 ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _diaryFieldShell(
-                  child:
-                      widget.buildKeyboardTriggerField?.call(
-                        key: 'diet_weight',
-                        controller: _weightController,
-                        sourceFocusNode: _weightFocusNode,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [_weightFormatter],
-                        enabled: !_isSaving && !_isLoadingNote,
-                        style: fieldStyle,
-                        maxLines: 1,
-                        hintText: '',
-                        padding: EdgeInsets.zero,
-                        alignment: Alignment.centerLeft,
-                        decoration: const BoxDecoration(
-                          color: Colors.transparent,
-                        ),
-                      ) ??
-                      const SizedBox.shrink(),
+                _photoSlot(
+                  label: AppLocalizations.of(context).diaryPhotoDinnerLabel,
+                  url: _dinnerUrl,
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          Text(
-            AppLocalizations.of(context).diaryNoteLabel,
-            style: labelStyle,
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: _diaryFieldShell(
-              height: double.infinity,
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              alignment: Alignment.topLeft,
-              child:
-                  widget.buildKeyboardTriggerField?.call(
-                    key: 'diet_note',
-                    controller: _noteController,
-                    sourceFocusNode: _noteFocusNode,
-                    keyboardType: TextInputType.multiline,
-                    inputFormatters: [
-                      LengthLimitingTextInputFormatter(
-                        64,
-                        maxLengthEnforcement: MaxLengthEnforcement.enforced,
-                      ),
-                    ],
-                    enabled: !_isSaving && !_isLoadingNote,
-                    style: fieldStyle,
-                    maxLines: 4,
-                    hintText: '',
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.topLeft,
-                    decoration: const BoxDecoration(
-                      color: Colors.transparent,
-                    ),
-                  ) ??
-                  const SizedBox.shrink(),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: isEnglish ? 76 : 62,
+                  child: Text(
+                    AppLocalizations.of(context).diaryWeightLabel,
+                    style: labelStyle,
+                    maxLines: 1,
+                    overflow: TextOverflow.visible,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _diaryFieldShell(
+                    child:
+                        widget.buildKeyboardTriggerField?.call(
+                          key: 'diet_weight',
+                          controller: _weightController,
+                          sourceFocusNode: _weightFocusNode,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [_weightFormatter],
+                          enabled: !_isSaving && !_isLoadingNote,
+                          style: fieldStyle,
+                          maxLines: 1,
+                          hintText: '',
+                          padding: EdgeInsets.zero,
+                          alignment: Alignment.centerLeft,
+                          decoration: const BoxDecoration(
+                            color: Colors.transparent,
+                          ),
+                        ) ??
+                        const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              AppLocalizations.of(context).diaryNoteLabel,
+              style: labelStyle,
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: _diaryFieldShell(
+                height: double.infinity,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                alignment: Alignment.topLeft,
+                child:
+                    widget.buildKeyboardTriggerField?.call(
+                      key: 'diet_note',
+                      controller: _noteController,
+                      sourceFocusNode: _noteFocusNode,
+                      keyboardType: TextInputType.multiline,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(
+                          64,
+                          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                        ),
+                      ],
+                      enabled: !_isSaving && !_isLoadingNote,
+                      style: fieldStyle,
+                      maxLines: 4,
+                      hintText: '',
+                      padding: EdgeInsets.zero,
+                      alignment: Alignment.topLeft,
+                      decoration: const BoxDecoration(
+                        color: Colors.transparent,
+                      ),
+                    ) ??
+                    const SizedBox.shrink(),
+              ),
+            ),
+          ],
         ),
       ),
     );
