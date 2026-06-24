@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui' show Offset, Rect;
+import 'dart:ui' show BlurStyle, Canvas, MaskFilter, Offset, Paint, Rect;
 
 import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
 import 'package:vegepet/game/cat_sco_baby_assets.dart';
 import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/yard_game.dart';
 
 /// cat_sco baby Flame 표시 크기 (튜닝 가능).
@@ -23,7 +24,7 @@ const double kCatScoBabyCollisionFootprintH = 18;
 const double kCatScoBabyCollisionFootprintYOffset = -6;
 
 /// cat_sco baby 오두막 문 앞 초기 스폰 위치 (844×390, 추후 튜닝).
-final Vector2 kCatScoBabySpawnPosition = Vector2(380, 286);
+final Vector2 kCatScoBabySpawnPosition = Vector2(380, 250);
 
 /// walk / run 이동 속도 (논리 px/sec).
 const double kVegePetWalkSpeed = 38;
@@ -31,14 +32,13 @@ const double kVegePetRunSpeed = 72;
 
 /// 베지펫 이동 가능 여부 판정 콜백 (단일 점 기준, 기존 호환용).
 ///
-/// [current] 에서 [next] 로 이동해도 되는지(마당 walkable + 오두막 충돌 회피)를
+/// [current] 에서 [next] 로 이동해도 되는지(collision mask)를
 /// 반환한다. YardGame 을 직접 import/cast 하지 않고 콜백으로 주입해 결합을 낮춘다.
 typedef PetMoveValidator = bool Function(Vector2 current, Vector2 next);
 
 /// 베지펫 footprint(발밑 영역) 기준 이동 가능 여부 판정 콜백.
 ///
-/// 발밑 한 점이 아니라 footprint sample point 목록 전체를 검사해, 오두막에
-/// 시각적으로 살짝 겹치는 문제를 줄인다.
+/// 발밑 한 점이 아니라 footprint sample point 목록 전체를 검사한다.
 typedef PetFootprintMoveValidator =
     bool Function(List<Vector2> currentPoints, List<Vector2> nextPoints);
 
@@ -143,6 +143,34 @@ class VegePetComponent extends PositionComponent
   }
 
   @override
+  void render(Canvas canvas) {
+    final tune = game.petShadowTune;
+    if (tune.enabled) {
+      _renderPetShadow(canvas, tune);
+    }
+    super.render(canvas);
+  }
+
+  /// 펫 발밑 타원형 그림자 (시각 전용, 충돌/터치 무관).
+  void _renderPetShadow(Canvas canvas, PetShadowTuneConfig tune) {
+    final shadowWidth = size.x * tune.widthScale;
+    final shadowHeight = size.y * tune.heightScale;
+    final centerX = size.x / 2 + tune.offsetX;
+    final centerY = size.y + tune.offsetY;
+    final rect = Rect.fromCenter(
+      center: Offset(centerX, centerY),
+      width: shadowWidth,
+      height: shadowHeight,
+    );
+    final paint = Paint()
+      ..color = tune.paintColor
+      ..maskFilter = tune.blurSigma > 0
+          ? MaskFilter.blur(BlurStyle.normal, tune.blurSigma)
+          : null;
+    canvas.drawOval(rect, paint);
+  }
+
+  @override
   Future<void> onLoad() async {
     await super.onLoad();
     debugPrint(
@@ -153,6 +181,8 @@ class VegePetComponent extends PositionComponent
     debugPrint(
       'VegePetComponent onLoad: assets ready for userPetId=$userPetId',
     );
+    // 분양 직후 첫 idle 표시만 좌측 향함. 이후 이동 방향에 따라 좌우 전환.
+    _facingLeft = true;
     await _enterIdle(resetAuto: false);
     _scheduleAutoBehavior(delay: _randomIdleDelay());
   }
@@ -431,6 +461,7 @@ class VegePetComponent extends PositionComponent
         kVegePetEightDirections[_random.nextInt(
           kVegePetEightDirections.length,
         )];
+    _updateFacingFromDirection(_moveDirection);
     _isMoving = true;
     _moveTimeLeft = 1.0 + _random.nextDouble() * 2.0;
 

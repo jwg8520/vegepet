@@ -23,7 +23,9 @@ import 'package:vegepet/features/pet/vegepet_species_identity.dart';
 import 'package:vegepet/features/profile/profile_label_helpers.dart';
 import 'package:vegepet/features/profile/profile_select_helpers.dart';
 import 'package:vegepet/features/settings/support_documents.dart';
+import 'package:vegepet/game/petting_heart_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/yard_game.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
 import 'package:vegepet/ui/vegepet_gradient_text.dart';
@@ -370,9 +372,8 @@ class _MealNotificationTexts {
 
 enum _ViewStatus { loading, error, ready }
 
-/// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/오두막/연기/추가 충돌영역).
-/// release 빌드에서는 패널 자체가 노출되지 않으므로 사용되지 않는다.
-enum _YardTuningSection { cloud, hut, smoke, obstacles }
+/// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/연기/마스크).
+enum _YardTuningSection { cloud, smoke, mask }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -470,15 +471,21 @@ class _HomePageState extends State<HomePage>
   /// debug 전용 마당 구름 튜닝 패널 (release 에서는 UI 미노출).
   bool _isYardTuningPanelOpen = false;
   int _selectedTuningCloudIndex = 0;
-  int _selectedCustomObstacleIndex = 0;
 
-  /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기/추가 충돌영역). debug 전용.
+  /// 현재 Yard Tuning Panel 섹션(구름/오두막/연기/마스크). debug 전용.
   _YardTuningSection _yardTuningSection = _YardTuningSection.cloud;
-  bool _customObstacleDebugVisible = true;
-  bool _walkableBlockedAreaDebugVisible = true;
+  bool _collisionMaskDebugVisible = true;
 
   /// debug 전용 cat_sco baby 모션 테스트 패널 (release 미노출).
   bool _isPetMotionTestPanelOpen = false;
+  /// debug 전용 펫 그림자 튜닝 패널 (release 미노출).
+  bool _isShadowTunePanelOpen = false;
+  String _petShadowColorHexInput = '527A7B';
+  late final TextEditingController _petShadowColorHexController;
+  /// debug 전용 쓰다듬기 하트 튜닝 패널 (release 미노출).
+  bool _isHeartTunePanelOpen = false;
+  String _pettingHeartColorHexInput = 'EF5592';
+  late final TextEditingController _pettingHeartColorHexController;
   double _petMotionSpeedMultiplier = 1.0;
   int _petMotionRepeatCount = 1;
 
@@ -1010,7 +1017,15 @@ class _HomePageState extends State<HomePage>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+    _petShadowColorHexController = TextEditingController(
+      text: _petShadowColorHexInput,
+    );
+    _pettingHeartColorHexController = TextEditingController(
+      text: _pettingHeartColorHexInput,
+    );
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadPetShadowTuneFromPrefs());
+    unawaited(_loadPettingHeartTuneFromPrefs());
     _bootstrap();
     _startAccountHealthCheckTimer();
   }
@@ -1050,6 +1065,8 @@ class _HomePageState extends State<HomePage>
     _gameMenuSubOutsideDismissController.dispose();
     _yardConfirmOverlayFadeController.dispose();
     _petNamingPanelEnterController.dispose();
+    _petShadowColorHexController.dispose();
+    _pettingHeartColorHexController.dispose();
     _petNamingController.dispose();
     _petNamingFocusNode.dispose();
     if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
@@ -3900,6 +3917,12 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  void _triggerPettingHeartEffect() {
+    if (!_shouldUseFlamePetForActivePet()) return;
+    if (!_yardGame.hasActiveVegePet) return;
+    _yardGame.spawnPettingHeart();
+  }
+
   // 도감 entry 에서 종 이름을 안전하게 꺼낸다 (새 표시명 override 적용).
   String _pokedexSpeciesNameOf(Map<String, dynamic> entry) {
     final species = entry['pet_species'];
@@ -4416,6 +4439,7 @@ class _HomePageState extends State<HomePage>
       if (isPlay) {
         _triggerPetPlayMotion();
       }
+      _triggerPettingHeartEffect();
     } catch (e) {
       if (_isAuthUserMissingForeignKeyError(e)) {
         if (mounted) {
@@ -7734,6 +7758,8 @@ class _HomePageState extends State<HomePage>
           _buildKeyboardAccessoryOverlay(context),
           if (kDebugMode) _buildFullScreenYardTuningOverlay(),
           if (kDebugMode) _buildFullScreenPetMotionTestOverlay(),
+          if (kDebugMode) _buildFullScreenShadowTuneOverlay(),
+          if (kDebugMode) _buildFullScreenHeartTuneOverlay(),
         ],
       ),
     );
@@ -10579,13 +10605,6 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _buildYardTuningSectionChip(
-                    label: 'Hut',
-                    section: _YardTuningSection.hut,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: _buildYardTuningSectionChip(
                     label: 'Smoke',
                     section: _YardTuningSection.smoke,
                   ),
@@ -10593,8 +10612,8 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _buildYardTuningSectionChip(
-                    label: 'Obstacles',
-                    section: _YardTuningSection.obstacles,
+                    label: 'Mask',
+                    section: _YardTuningSection.mask,
                   ),
                 ),
               ],
@@ -10604,10 +10623,8 @@ class _HomePageState extends State<HomePage>
               child: SingleChildScrollView(
                 child: switch (_yardTuningSection) {
                   _YardTuningSection.cloud => _buildYardTuningCloudSection(),
-                  _YardTuningSection.hut => _buildYardTuningHutSection(),
                   _YardTuningSection.smoke => _buildYardTuningSmokeSection(),
-                  _YardTuningSection.obstacles =>
-                    _buildYardTuningObstaclesSection(),
+                  _YardTuningSection.mask => _buildYardTuningMaskSection(),
                 },
               ),
             ),
@@ -10638,9 +10655,8 @@ class _HomePageState extends State<HomePage>
                     onPressed: _printCurrentYardTuningSectionConfig,
                     child: Text(switch (_yardTuningSection) {
                       _YardTuningSection.cloud => 'Print Config',
-                      _YardTuningSection.hut => 'Print Hut Config',
                       _YardTuningSection.smoke => 'Print Smoke Config',
-                      _YardTuningSection.obstacles => 'Print Obstacles Config',
+                      _YardTuningSection.mask => 'Mask Info',
                     }, style: const TextStyle(fontSize: 11)),
                   ),
                 ),
@@ -10656,12 +10672,14 @@ class _HomePageState extends State<HomePage>
     switch (_yardTuningSection) {
       case _YardTuningSection.cloud:
         debugPrint(_yardGame.buildCloudTuningDebugText());
-      case _YardTuningSection.hut:
-        debugPrint(_yardGame.buildHutCollisionDebugText());
       case _YardTuningSection.smoke:
         debugPrint(_yardGame.buildSmokeTuningDebugText());
-      case _YardTuningSection.obstacles:
-        debugPrint(_yardGame.buildCustomObstaclesDebugText());
+      case _YardTuningSection.mask:
+        debugPrint(
+          'collision_mask.png: $kCollisionMaskAssetPath\n'
+          'loaded=${_yardGame.collisionMaskLoaded}\n'
+          '마스크 수정 후 Reload를 누르거나 hot restart 하세요.',
+        );
     }
   }
 
@@ -10732,80 +10750,6 @@ class _HomePageState extends State<HomePage>
           max: 30,
           onChanged: (v) {
             _yardGame.updateCloudTuning(index, speed: v);
-            _safeSetState(() {});
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildYardTuningHutSection() {
-    final hut = _yardGame.hutCollisionTuning;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text(
-          'top/bottom inset 값이 클수록 육각형 위·아래 모서리가 안쪽으로 들어갑니다.',
-          style: TextStyle(color: Colors.white54, fontSize: 9),
-        ),
-        const SizedBox(height: 4),
-        _buildYardTuningSliderRow(
-          label: 'x',
-          value: hut.x,
-          min: 0,
-          max: 844,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(x: v);
-            _safeSetState(() {});
-          },
-        ),
-        _buildYardTuningSliderRow(
-          label: 'y',
-          value: hut.y,
-          min: 0,
-          max: 390,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(y: v);
-            _safeSetState(() {});
-          },
-        ),
-        _buildYardTuningSliderRow(
-          label: 'w',
-          value: hut.width,
-          min: 20,
-          max: 300,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(width: v);
-            _safeSetState(() {});
-          },
-        ),
-        _buildYardTuningSliderRow(
-          label: 'h',
-          value: hut.height,
-          min: 20,
-          max: 240,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(height: v);
-            _safeSetState(() {});
-          },
-        ),
-        _buildYardTuningSliderRow(
-          label: 'top',
-          value: hut.topInset,
-          min: 0,
-          max: 120,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(topInset: v);
-            _safeSetState(() {});
-          },
-        ),
-        _buildYardTuningSliderRow(
-          label: 'bot',
-          value: hut.bottomInset,
-          min: 0,
-          max: 120,
-          onChanged: (v) {
-            _yardGame.updateHutCollisionTuning(bottomInset: v);
             _safeSetState(() {});
           },
         ),
@@ -10950,176 +10894,61 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildYardTuningObstaclesSection() {
-    final obstacles = _yardGame.customObstacleTunings;
-    final hasSelection = obstacles.isNotEmpty;
-    final index = hasSelection
-        ? _selectedCustomObstacleIndex.clamp(0, obstacles.length - 1)
-        : 0;
-    final selected = hasSelection ? obstacles[index] : null;
-
+  Widget _buildYardTuningMaskSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildYardTuningCheckboxRow(
-          label: 'Show Blocked Area',
-          value: _walkableBlockedAreaDebugVisible,
-          onChanged: (v) {
-            _safeSetState(() => _walkableBlockedAreaDebugVisible = v);
-            _yardGame.setWalkableBlockedAreaDebugVisible(v);
-          },
+        const Text(
+          'collision_mask.png의 빨간/불투명 영역은 베지펫 접근 불가 영역입니다.\n'
+          '파일 위치: assets/images/yard/collision_mask.png\n'
+          '마스크 수정 후 Reload를 누르거나 hot restart 하세요.',
+          style: TextStyle(color: Colors.white54, fontSize: 9),
         ),
+        const SizedBox(height: 6),
         _buildYardTuningCheckboxRow(
-          label: 'Show Custom Obstacles',
-          value: _customObstacleDebugVisible,
+          label: 'Show Collision Mask',
+          value: _collisionMaskDebugVisible,
           onChanged: (v) {
-            _safeSetState(() => _customObstacleDebugVisible = v);
-            _yardGame.setCustomObstacleDebugVisible(v);
+            _safeSetState(() => _collisionMaskDebugVisible = v);
+            _yardGame.setCollisionMaskDebugVisible(v);
           },
         ),
         const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.lightGreenAccent,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: () {
-                  _yardGame.addCustomObstacle();
-                  final lastIndex = _yardGame.customObstacleTunings.length - 1;
-                  _safeSetState(() => _selectedCustomObstacleIndex = lastIndex);
-                },
-                child: const Text('Add Hex', style: TextStyle(fontSize: 10)),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: hasSelection
-                      ? Colors.orangeAccent
-                      : Colors.white38,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: hasSelection
-                    ? () {
-                        _yardGame.removeCustomObstacle(index);
-                        final lastIndex =
-                            _yardGame.customObstacleTunings.length - 1;
-                        _safeSetState(
-                          () => _selectedCustomObstacleIndex = lastIndex < 0
-                              ? 0
-                              : index.clamp(0, lastIndex),
-                        );
-                      }
-                    : null,
-                child: const Text(
-                  'Remove Selected',
-                  style: TextStyle(fontSize: 10),
-                ),
-              ),
-            ),
-          ],
+        TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.lightGreenAccent,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: () async {
+            await _yardGame.reloadCollisionMask();
+            if (mounted) _safeSetState(() {});
+            debugPrint(
+              'collision mask reloaded: loaded=${_yardGame.collisionMaskLoaded}',
+            );
+          },
+          child: const Text(
+            'Reload Collision Mask',
+            style: TextStyle(fontSize: 10),
+          ),
         ),
-        const SizedBox(height: 6),
-        if (!hasSelection)
-          const Text(
-            'Add Hex로 runtime custom obstacle을 추가하세요.',
-            style: TextStyle(color: Colors.white54, fontSize: 9),
+        if (_yardGame.collisionMaskLoaded)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              '마스크 로드됨',
+              style: TextStyle(color: Colors.lightGreenAccent, fontSize: 9),
+            ),
           )
-        else ...[
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: [
-              for (var i = 0; i < obstacles.length; i++)
-                SizedBox(
-                  width: 46,
-                  child: _buildYardTuningCloudChip(
-                    label: 'O${i + 1}',
-                    selected: i == index,
-                    onTap: () =>
-                        _safeSetState(() => _selectedCustomObstacleIndex = i),
-                  ),
-                ),
-            ],
+        else
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              '마스크 미로드 (파일 없음 또는 로드 실패)',
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 9),
+            ),
           ),
-          const SizedBox(height: 6),
-          _buildYardTuningCheckboxRow(
-            label: 'enabled (${selected!.id})',
-            value: selected.enabled,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, enabled: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'x',
-            value: selected.x,
-            min: 0,
-            max: 844,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, x: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'y',
-            value: selected.y,
-            min: 0,
-            max: 390,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, y: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'w',
-            value: selected.width,
-            min: 20,
-            max: 300,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, width: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'h',
-            value: selected.height,
-            min: 20,
-            max: 240,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, height: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'top',
-            value: selected.topInset,
-            min: 0,
-            max: 120,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, topInset: v);
-              _safeSetState(() {});
-            },
-          ),
-          _buildYardTuningSliderRow(
-            label: 'bot',
-            value: selected.bottomInset,
-            min: 0,
-            max: 120,
-            onChanged: (v) {
-              _yardGame.updateCustomObstacleTuning(index, bottomInset: v);
-              _safeSetState(() {});
-            },
-          ),
-        ],
       ],
     );
   }
@@ -11260,6 +11089,644 @@ class _HomePageState extends State<HomePage>
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 10),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadPetShadowTuneFromPrefs() async {
+    final config = await PetShadowTunePreferences.load();
+    _yardGame.applyPetShadowTune(config);
+    if (!mounted) return;
+    _safeSetState(() {
+      _petShadowColorHexInput = PetShadowTunePreferences.colorToHex(
+        _yardGame.petShadowTune.color,
+      );
+      _petShadowColorHexController.text = _petShadowColorHexInput;
+    });
+  }
+
+  Future<void> _persistPetShadowTune() async {
+    await PetShadowTunePreferences.save(_yardGame.petShadowTune);
+  }
+
+  void _applyPetShadowColorHex(String raw) {
+    var hex = raw.trim();
+    if (hex.startsWith('#')) hex = hex.substring(1);
+    if (hex.length != 6) return;
+    final value = int.tryParse(hex, radix: 16);
+    if (value == null) return;
+    _yardGame.updatePetShadowTune(color: Color(0xFF000000 | value));
+    _safeSetState(() {
+      _petShadowColorHexInput = hex.toUpperCase();
+      _petShadowColorHexController.text = _petShadowColorHexInput;
+    });
+    unawaited(_persistPetShadowTune());
+  }
+
+  Future<void> _loadPettingHeartTuneFromPrefs() async {
+    final config = await PettingHeartTunePreferences.load();
+    _yardGame.applyPettingHeartTune(config);
+    if (!mounted) return;
+    _safeSetState(() {
+      _pettingHeartColorHexInput = PettingHeartTunePreferences.colorToHex(
+        _yardGame.pettingHeartTune.color,
+      );
+      _pettingHeartColorHexController.text = _pettingHeartColorHexInput;
+    });
+  }
+
+  Future<void> _persistPettingHeartTune() async {
+    await PettingHeartTunePreferences.save(_yardGame.pettingHeartTune);
+  }
+
+  void _applyPettingHeartColorHex(String raw) {
+    var hex = raw.trim();
+    if (hex.startsWith('#')) hex = hex.substring(1);
+    if (hex.length != 6) return;
+    final value = int.tryParse(hex, radix: 16);
+    if (value == null) return;
+    _yardGame.updatePettingHeartTune(color: Color(0xFF000000 | value));
+    _safeSetState(() {
+      _pettingHeartColorHexInput = hex.toUpperCase();
+      _pettingHeartColorHexController.text = _pettingHeartColorHexInput;
+    });
+    unawaited(_persistPettingHeartTune());
+  }
+
+  /// debug 전용: Shadow Tune 패널을 844×390 캔버스 밖 전체 화면 overlay에 띄운다.
+  Widget _buildFullScreenShadowTuneOverlay() {
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isShadowTunePanelOpen)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 72,
+              bottom: 56,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  width: 320,
+                  height: double.infinity,
+                  child: _buildShadowTunePanelContent(),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 16,
+            child: Center(child: _buildShadowTuneToggleButton()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShadowTuneToggleButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _safeSetState(
+          () => _isShadowTunePanelOpen = !_isShadowTunePanelOpen,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Shadow Tune',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShadowTunePanelContent() {
+    final shadow = _yardGame.petShadowTune;
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Pet Shadow Tune',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '시각 효과 전용. 충돌/터치/클릭 판정에는 영향 없음.',
+              style: TextStyle(color: Colors.white54, fontSize: 9),
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildYardTuningCheckboxRow(
+                      label: 'Show Shadow',
+                      value: shadow.enabled,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(enabled: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: shadow.paintColor,
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'HEX',
+                          style: TextStyle(color: Colors.white70, fontSize: 10),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: TextField(
+                            controller: _petShadowColorHexController,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              prefixText: '#',
+                              prefixStyle: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
+                              ),
+                              filled: true,
+                              fillColor: Colors.white10,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                            onSubmitted: _applyPetShadowColorHex,
+                          ),
+                        ),
+                      ],
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'opac',
+                      value: shadow.opacity,
+                      min: 0,
+                      max: 1,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(opacity: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oX',
+                      value: shadow.offsetX,
+                      min: -40,
+                      max: 40,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(offsetX: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oY',
+                      value: shadow.offsetY,
+                      min: -20,
+                      max: 40,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(offsetY: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'wSc',
+                      value: shadow.widthScale,
+                      min: 0.2,
+                      max: 1.2,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(widthScale: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'hSc',
+                      value: shadow.heightScale,
+                      min: 0.05,
+                      max: 0.5,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(heightScale: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'blur',
+                      value: shadow.blurSigma,
+                      min: 0,
+                      max: 12,
+                      valueDecimals: 1,
+                      onChanged: (v) {
+                        _yardGame.updatePetShadowTune(blurSigma: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPetShadowTune());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isShadowTunePanelOpen = false),
+                    child: const Text('Close', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orangeAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () {
+                      _yardGame.resetPetShadowTune();
+                      _safeSetState(() {
+                        _petShadowColorHexInput = PetShadowTunePreferences
+                            .colorToHex(_yardGame.petShadowTune.color);
+                        _petShadowColorHexController.text =
+                            _petShadowColorHexInput;
+                      });
+                      unawaited(_persistPetShadowTune());
+                    },
+                    child: const Text('Reset', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// debug 전용: Heart Tune 패널을 844×390 캔버스 밖 전체 화면 overlay에 띄운다.
+  Widget _buildFullScreenHeartTuneOverlay() {
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isHeartTunePanelOpen)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 72,
+              bottom: 56,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  width: 320,
+                  height: double.infinity,
+                  child: _buildHeartTunePanelContent(),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 44,
+            child: Center(child: _buildHeartTuneToggleButton()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeartTuneToggleButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _safeSetState(
+          () => _isHeartTunePanelOpen = !_isHeartTunePanelOpen,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Heart Tune',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeartTunePanelContent() {
+    final heart = _yardGame.pettingHeartTune;
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Petting Heart Tune',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '시각 효과 전용. 충돌/터치/클릭 판정에는 영향 없음.',
+              style: TextStyle(color: Colors.white54, fontSize: 9),
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildYardTuningCheckboxRow(
+                      label: 'Heart Effect',
+                      value: heart.enabled,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(enabled: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.pinkAccent,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () {
+                          if (!_shouldUseFlamePetForActivePet()) return;
+                          if (!_yardGame.hasActiveVegePet) return;
+                          _yardGame.spawnPettingHeart(force: true);
+                        },
+                        child: const Text(
+                          'Spawn Heart',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: heart.color.withValues(alpha: heart.opacity),
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'HEX',
+                          style: TextStyle(color: Colors.white70, fontSize: 10),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: TextField(
+                            controller: _pettingHeartColorHexController,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              prefixText: '#',
+                              prefixStyle: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
+                              ),
+                              filled: true,
+                              fillColor: Colors.white10,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                            onSubmitted: _applyPettingHeartColorHex,
+                          ),
+                        ),
+                      ],
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'size',
+                      value: heart.size,
+                      min: 6,
+                      max: 40,
+                      valueDecimals: 1,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(size: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oX',
+                      value: heart.offsetX,
+                      min: -80,
+                      max: 80,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(offsetX: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oY',
+                      value: heart.offsetY,
+                      min: -120,
+                      max: 20,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(offsetY: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'opac',
+                      value: heart.opacity,
+                      min: 0.1,
+                      max: 1,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(opacity: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'rise',
+                      value: heart.riseDistance,
+                      min: 10,
+                      max: 80,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(riseDistance: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'dur',
+                      value: heart.durationMs.toDouble(),
+                      min: 300,
+                      max: 2500,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(
+                          durationMs: v.round(),
+                        );
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 's0',
+                      value: heart.scaleStart,
+                      min: 0.3,
+                      max: 1.5,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(scaleStart: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 's1',
+                      value: heart.scaleEnd,
+                      min: 0.3,
+                      max: 2,
+                      valueDecimals: 2,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(scaleEnd: v);
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isHeartTunePanelOpen = false),
+                    child: const Text('Close', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orangeAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () {
+                      _yardGame.resetPettingHeartTune();
+                      _safeSetState(() {
+                        _pettingHeartColorHexInput =
+                            PettingHeartTunePreferences.colorToHex(
+                          _yardGame.pettingHeartTune.color,
+                        );
+                        _pettingHeartColorHexController.text =
+                            _pettingHeartColorHexInput;
+                      });
+                      unawaited(_persistPettingHeartTune());
+                    },
+                    child: const Text('Reset', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
