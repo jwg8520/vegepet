@@ -66,12 +66,12 @@ class PetShadowTuneConfig {
 }
 
 const bool kPetShadowDefaultEnabled = true;
-const double kPetShadowDefaultOpacity = 0.47;
-const double kPetShadowDefaultOffsetX = 2.9;
-const double kPetShadowDefaultOffsetY = -9.5;
-const double kPetShadowDefaultWidthScale = 0.70;
-const double kPetShadowDefaultHeightScale = 0.19;
-const double kPetShadowDefaultBlurSigma = 0.6;
+const double kPetShadowDefaultOpacity = 0.68;
+const double kPetShadowDefaultOffsetX = 4.0;
+const double kPetShadowDefaultOffsetY = -10.1;
+const double kPetShadowDefaultWidthScale = 0.74;
+const double kPetShadowDefaultHeightScale = 0.16;
+const double kPetShadowDefaultBlurSigma = 0.5;
 
 /// debug 펫 그림자 튜닝 값 SharedPreferences 저장/복원.
 class PetShadowTunePreferences {

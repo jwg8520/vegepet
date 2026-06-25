@@ -25,6 +25,7 @@ import 'package:vegepet/features/profile/profile_select_helpers.dart';
 import 'package:vegepet/features/settings/support_documents.dart';
 import 'package:vegepet/game/petting_heart_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/yard_game.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
@@ -375,6 +376,27 @@ enum _ViewStatus { loading, error, ready }
 /// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/연기/마스크).
 enum _YardTuningSection { cloud, smoke, mask }
 
+/// debug 전용 Pet Motion Test 패널의 모션별 spd/rep 설정.
+class _PetMotionDebugTuning {
+  const _PetMotionDebugTuning({
+    required this.speedMultiplier,
+    required this.repeatCount,
+  });
+
+  final double speedMultiplier;
+  final int repeatCount;
+
+  _PetMotionDebugTuning copyWith({
+    double? speedMultiplier,
+    int? repeatCount,
+  }) {
+    return _PetMotionDebugTuning(
+      speedMultiplier: speedMultiplier ?? this.speedMultiplier,
+      repeatCount: repeatCount ?? this.repeatCount,
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -486,8 +508,14 @@ class _HomePageState extends State<HomePage>
   bool _isHeartTunePanelOpen = false;
   String _pettingHeartColorHexInput = 'EF5592';
   late final TextEditingController _pettingHeartColorHexController;
-  double _petMotionSpeedMultiplier = 1.0;
-  int _petMotionRepeatCount = 1;
+  PetMotion _selectedPetMotionTuning = PetMotion.idle;
+  final Map<PetMotion, _PetMotionDebugTuning> _petMotionDebugTunings = {
+    for (final motion in PetMotion.values)
+      motion: _PetMotionDebugTuning(
+        speedMultiplier: kPetMotionDefaultTuningFor(motion).speedMultiplier,
+        repeatCount: kPetMotionDefaultTuningFor(motion).repeatCount,
+      ),
+  };
 
   /// debug 전용: 이동 collision footprint overlay 표시 여부(YardGame 과 동기화).
   bool _petCollisionDebugVisible = true;
@@ -3900,20 +3928,22 @@ class _HomePageState extends State<HomePage>
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
     if (affectionGain != 3 && affectionGain != 5) return;
+    final tuning = _debugTuningForMotion(PetMotion.kneading);
     _yardGame.playPetMotion(
       PetMotion.kneading,
-      speedMultiplier: _petMotionSpeedMultiplier,
-      repeatCount: _petMotionRepeatCount,
+      speedMultiplier: tuning.speedMultiplier,
+      repeatCount: tuning.repeatCount,
     );
   }
 
   void _triggerPetPlayMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
+    final tuning = _debugTuningForMotion(PetMotion.play);
     _yardGame.playPetMotion(
       PetMotion.play,
-      speedMultiplier: _petMotionSpeedMultiplier,
-      repeatCount: _petMotionRepeatCount,
+      speedMultiplier: tuning.speedMultiplier,
+      repeatCount: tuning.repeatCount,
     );
   }
 
@@ -9754,11 +9784,9 @@ class _HomePageState extends State<HomePage>
                 child: SizedBox(
                   width: 64,
                   height: 64,
-                  child: _cornerIconButton(
-                    icon: Icons.pets,
+                  child: _buildGlassIconButton(
+                    assetPath: 'assets/images/ui/icons/pet_info.png',
                     tooltip: l10n.petInfoTooltip,
-                    iconSize: 28,
-                    padding: 18,
                     onTap: () => unawaited(_togglePetInfoBanner()),
                   ),
                 ),
@@ -9779,11 +9807,9 @@ class _HomePageState extends State<HomePage>
                 child: SizedBox(
                   width: 64,
                   height: 64,
-                  child: _cornerIconButton(
-                    icon: Icons.apps_rounded,
+                  child: _buildGlassIconButton(
+                    assetPath: 'assets/images/ui/icons/game_menu.png',
                     tooltip: l10n.gameMenuTooltip,
-                    iconSize: 28,
-                    padding: 18,
                     onTap: _onGameMenuHudIconTap,
                     suppressInkSplash: _isPetInfoBannerOpen,
                   ),
@@ -11020,11 +11046,12 @@ class _HomePageState extends State<HomePage>
     required double max,
     required ValueChanged<double> onChanged,
     int valueDecimals = 1,
+    double labelWidth = 26,
   }) {
     return Row(
       children: [
         SizedBox(
-          width: 26,
+          width: labelWidth,
           child: Text(
             label,
             style: const TextStyle(color: Colors.white70, fontSize: 10),
@@ -11734,6 +11761,69 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  _PetMotionDebugTuning _debugTuningForMotion(PetMotion motion) {
+    final defaults = kPetMotionDefaultTuningFor(motion);
+    return _petMotionDebugTunings[motion] ??
+        _PetMotionDebugTuning(
+          speedMultiplier: defaults.speedMultiplier,
+          repeatCount: defaults.repeatCount,
+        );
+  }
+
+  void _updateDebugTuningForMotion(
+    PetMotion motion, {
+    double? speedMultiplier,
+    int? repeatCount,
+  }) {
+    final current = _debugTuningForMotion(motion);
+    _safeSetState(() {
+      _petMotionDebugTunings[motion] = current.copyWith(
+        speedMultiplier: speedMultiplier,
+        repeatCount: repeatCount,
+      );
+    });
+  }
+
+  void _playDebugPetMotion(PetMotion motion) {
+    final tuning = _debugTuningForMotion(motion);
+    _yardGame.playPetMotion(
+      motion,
+      speedMultiplier: tuning.speedMultiplier,
+      repeatCount: tuning.repeatCount,
+    );
+  }
+
+  String _petMotionDebugLabel(PetMotion motion) {
+    return switch (motion) {
+      PetMotion.idle => 'Idle',
+      PetMotion.walk => 'Walk',
+      PetMotion.run => 'Run',
+      PetMotion.lieDown => 'Lie Down',
+      PetMotion.lyingIdle => 'Lying Idle',
+      PetMotion.standUp => 'Stand Up',
+      PetMotion.kneading => 'Kneading',
+      PetMotion.play => 'Play',
+    };
+  }
+
+  void _printPetMotionDebugConfig() {
+    final buffer = StringBuffer(
+      'const Map<PetMotion, PetMotionDebugConfig> kPetMotionDebugDefaults = {',
+    );
+    for (final motion in PetMotion.values) {
+      final tuning = _debugTuningForMotion(motion);
+      buffer.writeln();
+      buffer.write(
+        '  PetMotion.${motion.name}: PetMotionDebugConfig('
+        'speedMultiplier: ${tuning.speedMultiplier}, '
+        'repeatCount: ${tuning.repeatCount}),',
+      );
+    }
+    buffer.writeln();
+    buffer.write('};');
+    debugPrint(buffer.toString());
+  }
+
   /// debug 전용: Pet Motion 패널을 844×390 캔버스 밖 전체 화면 overlay에 띄운다.
   /// release 에서는 위젯 트리에 없으며, HUD 버튼보다 위 레이어에 배치된다.
   Widget _buildFullScreenPetMotionTestOverlay() {
@@ -11804,22 +11894,81 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             const SizedBox(height: 6),
-            _buildYardTuningSliderRow(
-              label: 'spd',
-              value: _petMotionSpeedMultiplier,
-              min: 0.25,
-              max: 3.0,
-              onChanged: (v) =>
-                  _safeSetState(() => _petMotionSpeedMultiplier = v),
+            const Text(
+              'Tune Target',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            _buildYardTuningSliderRow(
-              label: 'rep',
-              value: _petMotionRepeatCount.toDouble(),
-              min: 1,
-              max: 10,
-              valueDecimals: 0,
-              onChanged: (v) =>
-                  _safeSetState(() => _petMotionRepeatCount = v.round()),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final motion in PetMotion.values)
+                  _buildPetMotionTuneTargetChip(
+                    label: _petMotionDebugLabel(motion),
+                    selected: _selectedPetMotionTuning == motion,
+                    onTap: () => _safeSetState(
+                      () => _selectedPetMotionTuning = motion,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Builder(
+              builder: (context) {
+                final tuning = _debugTuningForMotion(_selectedPetMotionTuning);
+                final motionLabel =
+                    _petMotionDebugLabel(_selectedPetMotionTuning);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildYardTuningSliderRow(
+                      label: '$motionLabel spd',
+                      labelWidth: 72,
+                      value: tuning.speedMultiplier,
+                      min: 0.25,
+                      max: 3.0,
+                      onChanged: (v) => _updateDebugTuningForMotion(
+                        _selectedPetMotionTuning,
+                        speedMultiplier: v,
+                      ),
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: '$motionLabel rep',
+                      labelWidth: 72,
+                      value: tuning.repeatCount.toDouble(),
+                      min: 1,
+                      max: 10,
+                      valueDecimals: 0,
+                      onChanged: (v) => _updateDebugTuningForMotion(
+                        _selectedPetMotionTuning,
+                        repeatCount: v.round(),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 2),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white54,
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _printPetMotionDebugConfig,
+                child: const Text(
+                  'Print Motion Config',
+                  style: TextStyle(fontSize: 9),
+                ),
+              ),
             ),
             _buildPetCollisionToggleRow(),
             const SizedBox(height: 4),
@@ -11852,11 +12001,7 @@ class _HomePageState extends State<HomePage>
                     ])
                       _buildPetMotionTestChip(
                         label: entry.$2,
-                        onTap: () => _yardGame.playPetMotion(
-                          entry.$1,
-                          speedMultiplier: _petMotionSpeedMultiplier,
-                          repeatCount: _petMotionRepeatCount,
-                        ),
+                        onTap: () => _playDebugPetMotion(entry.$1),
                       ),
                   ],
                 ),
@@ -11938,6 +12083,34 @@ class _HomePageState extends State<HomePage>
           child: Text(
             label,
             style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPetMotionTuneTargetChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected
+          ? Colors.lightGreenAccent.withValues(alpha: 0.35)
+          : Colors.white.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.white70,
+              fontSize: 9,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            ),
           ),
         ),
       ),
@@ -12034,10 +12207,13 @@ class _HomePageState extends State<HomePage>
           behavior: HitTestBehavior.opaque,
           onTapDown: isStop
               ? null
-              : (_) => _yardGame.startPetManualRunDirection(
-                  direction,
-                  speedMultiplier: _petMotionSpeedMultiplier,
-                ),
+              : (_) {
+                  final runTuning = _debugTuningForMotion(PetMotion.run);
+                  _yardGame.startPetManualRunDirection(
+                    direction,
+                    speedMultiplier: runTuning.speedMultiplier,
+                  );
+                },
           onTapUp: isStop ? null : (_) => _yardGame.stopPetManualRunDirection(),
           onTapCancel: isStop ? null : _yardGame.stopPetManualRunDirection,
           onTap: isStop ? _yardGame.stopPetManualRunDirection : null,
@@ -13562,30 +13738,53 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _cornerIconButton({
-    required IconData icon,
+  /// 마당 HUD 좌·우 코너 버튼 (64×64 글래스모피즘, 프로필 패널과 동일 white 60%).
+  Widget _buildGlassIconButton({
+    required String assetPath,
     required String tooltip,
     required VoidCallback onTap,
-    double iconSize = 22,
-    double padding = 10,
     bool suppressInkSplash = false,
   }) {
-    final theme = Theme.of(context);
-    return Material(
-      color: Colors.white.withValues(alpha: 0.95),
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        splashFactory: suppressInkSplash ? NoSplash.splashFactory : null,
-        highlightColor: suppressInkSplash ? Colors.transparent : null,
-        hoverColor: suppressInkSplash ? Colors.transparent : null,
-        child: Padding(
-          padding: EdgeInsets.all(padding),
-          child: Tooltip(
-            message: tooltip,
-            child: Icon(icon, size: iconSize, color: theme.colorScheme.primary),
+    const borderRadius = BorderRadius.all(Radius.circular(20));
+    return SizedBox(
+      width: 64,
+      height: 64,
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: borderRadius,
+              splashFactory: suppressInkSplash ? NoSplash.splashFactory : null,
+              highlightColor: suppressInkSplash ? Colors.transparent : null,
+              hoverColor: suppressInkSplash ? Colors.transparent : null,
+              child: Tooltip(
+                message: tooltip,
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.60),
+                    borderRadius: borderRadius,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.70),
+                      width: 1,
+                    ),
+                  ),
+                  child: Center(
+                    child: Image.asset(
+                      assetPath,
+                      width: 46,
+                      height: 46,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),

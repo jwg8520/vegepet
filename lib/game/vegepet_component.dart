@@ -6,6 +6,7 @@ import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
 import 'package:vegepet/game/cat_sco_baby_assets.dart';
 import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/yard_game.dart';
 
@@ -348,8 +349,8 @@ class VegePetComponent extends PositionComponent
 
   Future<void> playMotion(
     PetMotion motion, {
-    double speedMultiplier = 1.0,
-    int repeatCount = 1,
+    double? speedMultiplier,
+    int? repeatCount,
     bool fromAuto = false,
   }) async {
     if (_assets == null) return;
@@ -358,8 +359,12 @@ class VegePetComponent extends PositionComponent
       _manualRunActive = false;
     }
 
-    _speedMultiplier = speedMultiplier.clamp(0.25, 3.0);
-    _repeatRemaining = repeatCount.clamp(1, 10);
+    final defaults = kPetMotionDefaultTuningFor(motion);
+    _speedMultiplier = (speedMultiplier ?? defaults.speedMultiplier).clamp(
+      0.25,
+      3.0,
+    );
+    _repeatRemaining = (repeatCount ?? defaults.repeatCount).clamp(1, 10);
     _autoTimer?.stop();
 
     switch (motion) {
@@ -445,6 +450,9 @@ class VegePetComponent extends PositionComponent
     _motion = PetMotion.idle;
     _lyingDown = false;
     _stopMovement();
+    _speedMultiplier = kPetMotionDefaultTuningFor(
+      PetMotion.idle,
+    ).speedMultiplier.clamp(0.25, 3.0);
     final anim = _cloneAnimation(_assets!.idleAnimation, loop: true);
     await _showAnimation(anim);
     if (resetAuto) {
@@ -484,6 +492,9 @@ class VegePetComponent extends PositionComponent
     _motion = PetMotion.lyingIdle;
     _lyingDown = true;
     _stopMovement();
+    _speedMultiplier = kPetMotionDefaultTuningFor(
+      PetMotion.lyingIdle,
+    ).speedMultiplier.clamp(0.25, 3.0);
     final anim = _cloneAnimation(_assets!.lyingIdleAnimation, loop: true);
     await _showAnimation(anim);
     _scheduleAutoBehavior(delay: 3 + _random.nextDouble() * 5);

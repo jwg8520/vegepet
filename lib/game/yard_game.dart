@@ -706,8 +706,8 @@ class YardGame extends FlameGame {
   /// 활성 펫에 모션을 발동한다. 펫이 없으면 no-op.
   void playPetMotion(
     PetMotion motion, {
-    double speedMultiplier = 1.0,
-    int repeatCount = 1,
+    double? speedMultiplier,
+    int? repeatCount,
   }) {
     final pet = _vegePetComponent;
     if (pet == null || !_isVegePetAlive(pet)) return;

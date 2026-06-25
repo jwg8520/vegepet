@@ -72,6 +72,7 @@ flutter:
     - assets/images/yard/
     - assets/images/pets/
     - assets/images/pets/cat_sco/baby/
+    - assets/images/ui/icons/
 
   generate: true
 
