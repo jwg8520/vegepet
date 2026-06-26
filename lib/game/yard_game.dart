@@ -269,6 +269,10 @@ class YardGame extends FlameGame {
 
   final Completer<void> _onLoadCompleter = Completer<void>();
 
+  /// [onLoad] 완료를 외부에서 await 할 수 있는 Future.
+  /// (FlameGame.ready() 메서드와 구분하기 위해 yardReady 로 명명)
+  Future<void> get yardReady => _onLoadCompleter.future;
+
   /// 마지막 Flame 펫 spawn 실패 메시지 (debug 추적용).
   String? get lastPetSpawnError => _lastPetSpawnError;
 

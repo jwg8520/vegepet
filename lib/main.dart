@@ -422,6 +422,12 @@ class _HomePageState extends State<HomePage>
   /// 매 build 마다 재생성되지 않도록 필드로 보관한다.
   final YardGame _yardGame = YardGame();
 
+  bool _showStartupLoadingOverlay = true;
+  double _startupLoadingProgress = 0.0;
+  double _startupLoadingOpacity = 1.0;
+  Timer? _startupLoadingTimer;
+  bool _startupLoadingCompleting = false;
+
   _ViewStatus _status = _ViewStatus.loading;
   String? _errorMessage;
 
@@ -1054,6 +1060,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.addObserver(this);
     unawaited(_loadPetShadowTuneFromPrefs());
     unawaited(_loadPettingHeartTuneFromPrefs());
+    _startStartupFakeProgress();
     _bootstrap();
     _startAccountHealthCheckTimer();
   }
@@ -1061,6 +1068,7 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupLoadingTimer?.cancel();
     _accountHealthCheckTimer?.cancel();
     _unsubscribeProfileDeletionWatch();
     _nicknameController.removeListener(_enforceProfileNicknameMaxLength);
@@ -1957,6 +1965,8 @@ class _HomePageState extends State<HomePage>
       _randomTicketCount = 0;
     });
 
+    var completeStartupLoadingWhenYardReady = false;
+
     try {
       if (supabase.auth.currentSession == null) {
         await supabase.auth.signInAnonymously();
@@ -1971,6 +1981,7 @@ class _HomePageState extends State<HomePage>
         if (!_isResettingDeletedAccountSession) {
           await _resetToFreshGuestAfterDeletedAccount();
         }
+        completeStartupLoadingWhenYardReady = true;
         return;
       }
       await _syncAuthEmailToProfileIfNeeded();
@@ -1982,6 +1993,7 @@ class _HomePageState extends State<HomePage>
         if (!mounted) return;
         unawaited(_bootstrapOptionalServices());
       });
+      completeStartupLoadingWhenYardReady = true;
     } catch (e) {
       // 다른 기기에서 회원탈퇴/Auth user 삭제가 일어난 직후 부트스트랩에서
       // 23503 / profiles_id_fkey / JWT invalid 같은 stale session 오류가
@@ -1991,6 +2003,7 @@ class _HomePageState extends State<HomePage>
           !_isResettingDeletedAccountSession) {
         debugPrint('bootstrap detected deleted account / stale session: $e');
         await _resetToFreshGuestAfterDeletedAccount();
+        completeStartupLoadingWhenYardReady = true;
         return;
       }
 
@@ -1999,6 +2012,11 @@ class _HomePageState extends State<HomePage>
         _status = _ViewStatus.error;
         _errorMessage = e.toString();
       });
+      unawaited(_hideStartupLoadingOverlayOnError());
+    } finally {
+      if (completeStartupLoadingWhenYardReady) {
+        unawaited(_completeStartupLoadingWhenYardReady());
+      }
     }
   }
 
@@ -7852,7 +7870,8 @@ class _HomePageState extends State<HomePage>
         _buildYardPetLayer(),
         _buildInYardDebugPanel(),
         _buildTopHudLayer(),
-        if (_status == _ViewStatus.loading) _buildInYardLoadingOverlay(),
+        if (_status == _ViewStatus.loading && !_showStartupLoadingOverlay)
+          _buildInYardLoadingOverlay(),
         if (_status == _ViewStatus.error)
           _buildInYardErrorOverlay(message: _errorMessage, onRetry: _bootstrap),
         if (shouldMountProfileSetup)
@@ -7879,7 +7898,155 @@ class _HomePageState extends State<HomePage>
         _buildMaturityCompleteNoticeGlobalOverlay(),
         _buildPokedexCompleteTicketNoticeGlobalOverlay(),
         _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay(),
+        if (_showStartupLoadingOverlay) _buildStartupLoadingOverlay(),
       ],
+    );
+  }
+
+  void _startStartupFakeProgress() {
+    _startupLoadingTimer?.cancel();
+    _startupLoadingProgress = 0.0;
+    _startupLoadingOpacity = 1.0;
+    _showStartupLoadingOverlay = true;
+    _startupLoadingCompleting = false;
+
+    _startupLoadingTimer = Timer.periodic(
+      const Duration(milliseconds: 70),
+      (_) {
+        if (!mounted) return;
+        if (!_showStartupLoadingOverlay) return;
+        if (_startupLoadingProgress >= 0.85) return;
+
+        setState(() {
+          final next = _startupLoadingProgress + 0.018;
+          _startupLoadingProgress = next > 0.85 ? 0.85 : next;
+        });
+      },
+    );
+  }
+
+  Future<void> _completeStartupLoadingWhenYardReady() async {
+    if (_startupLoadingCompleting || !_showStartupLoadingOverlay) return;
+    _startupLoadingCompleting = true;
+
+    await _yardGame.yardReady;
+
+    if (!mounted) return;
+
+    if (_shouldUseFlamePetForActivePet()) {
+      final petId = _activePet?['id']?.toString();
+      if (petId != null && petId.isNotEmpty) {
+        await _yardGame.showCatScoBabyPet(userPetId: petId);
+      }
+    }
+
+    if (!mounted) return;
+
+    _startupLoadingTimer?.cancel();
+
+    setState(() {
+      _startupLoadingProgress = 1.0;
+    });
+
+    await Future.delayed(const Duration(milliseconds: 260));
+    if (!mounted) return;
+
+    setState(() {
+      _startupLoadingOpacity = 0.0;
+    });
+
+    await Future.delayed(const Duration(milliseconds: 520));
+    if (!mounted) return;
+
+    setState(() {
+      _showStartupLoadingOverlay = false;
+    });
+  }
+
+  Future<void> _hideStartupLoadingOverlayOnError() async {
+    if (!_showStartupLoadingOverlay) return;
+
+    _startupLoadingTimer?.cancel();
+
+    if (!mounted) return;
+    setState(() {
+      _startupLoadingOpacity = 0.0;
+    });
+
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+
+    setState(() {
+      _showStartupLoadingOverlay = false;
+    });
+  }
+
+  Widget _buildStartupLoadingOverlay() {
+    const logoSize = 150.0;
+    const barWidth = 128.0;
+    const barHeight = 6.0;
+    const logoBarGap = 16.0;
+
+    final logoLeft = (_kGameCanvasWidth - logoSize) / 2;
+    final logoTop = (_kGameCanvasHeight - logoSize) / 2;
+    final barLeft = (_kGameCanvasWidth - barWidth) / 2;
+    final barTop = (_kGameCanvasHeight / 2) + (logoSize / 2) + logoBarGap;
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: AnimatedOpacity(
+          opacity: _startupLoadingOpacity,
+          duration: const Duration(milliseconds: 520),
+          curve: Curves.easeOutCubic,
+          child: ColoredBox(
+            color: const Color(0xFFC9E9DD),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: logoLeft,
+                  top: logoTop,
+                  width: logoSize,
+                  height: logoSize,
+                  child: Image.asset(
+                    'assets/images/ui/loading/loading_logo.png',
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+                Positioned(
+                  left: barLeft,
+                  top: barTop,
+                  width: barWidth,
+                  height: barHeight,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: Stack(
+                      children: [
+                        Container(
+                          color: Colors.white.withValues(alpha: 0.40),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FractionallySizedBox(
+                            widthFactor: _startupLoadingProgress.clamp(
+                              0.0,
+                              1.0,
+                            ),
+                            child: Container(
+                              color: Colors.white.withValues(alpha: 0.95),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

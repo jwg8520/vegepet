@@ -73,6 +73,7 @@ flutter:
     - assets/images/pets/
     - assets/images/pets/cat_sco/baby/
     - assets/images/ui/icons/
+    - assets/images/ui/loading/
 
   generate: true
 
