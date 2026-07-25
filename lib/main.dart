@@ -720,6 +720,18 @@ class _HomePageState extends State<HomePage>
   /// session 확보가 아직 진행 중일 수 있음을 표시한다.
   bool _freshGuestAuthResetInProgress = false;
 
+  /// 계정 전환 시 증가. 이전 user 의 늦은 fetch 결과가 새 상태를 덮지 못하게 한다.
+  int _userDataGeneration = 0;
+
+  /// 마당 Flame 펫 sync 세대. 오래된 spawn/remove 가 최신 상태를 덮지 못하게 한다.
+  int _yardPetSyncGeneration = 0;
+
+  /// 같은 frame 에 Yard sync schedule 이 중복되지 않도록 하는 가드.
+  bool _yardPetSyncScheduled = false;
+
+  /// 디버그 성장 단계 조작(성숙기 직전/도달 등) 중복 실행 방지.
+  bool _isDebugStageMutationInFlight = false;
+
   Timer? _accountHealthCheckTimer;
   RealtimeChannel? _accountProfileWatchChannel;
   String? _accountProfileWatchUserId;
@@ -1200,7 +1212,7 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  /// user-scoped 인메모리 캐시를 비운다. petSpecies 는 [_fetchCoreUserData] 로 갱신한다.
+  /// user-scoped 인메모리 캐시를 비운다. petSpecies 는 계정 전환 후 재조회로 확정한다.
   void _clearUserScopedCaches() {
     _profile = null;
     _activePet = null;
@@ -1214,15 +1226,40 @@ class _HomePageState extends State<HomePage>
     _selectedSpeciesId = null;
   }
 
+  /// 계정 전환 시 호출. 이전 user fetch/sync 결과를 무효화한다.
+  void _invalidateUserScopedAsyncWork({String reason = ''}) {
+    _userDataGeneration++;
+    _yardPetSyncGeneration++;
+    if (reason.isNotEmpty) {
+      debugPrint(
+        'invalidate user-scoped async work: gen=$_userDataGeneration '
+        'yardGen=$_yardPetSyncGeneration reason=$reason',
+      );
+    }
+  }
+
   Future<void> _fetchCoreUserData() async {
+    final generation = _userDataGeneration;
+    final requestedUserId = supabase.auth.currentUser?.id;
     await Future.wait([
       _fetchProfile(),
       _fetchPetSpecies(),
-      _fetchActivePet(),
+      _fetchActivePet(syncYard: false),
       _fetchResidentPets(),
       _fetchTodayMealLogs(),
       _fetchRandomTicketCount(),
     ]);
+    if (generation != _userDataGeneration) {
+      debugPrint('stale _fetchCoreUserData ignored (generation changed)');
+      return;
+    }
+    if (requestedUserId != supabase.auth.currentUser?.id) {
+      debugPrint('stale _fetchCoreUserData ignored (user changed)');
+      return;
+    }
+    // Flame spawn 은 UI/부트스트랩을 막지 않도록 schedule 만 한다.
+    // 시작 로딩 완료는 `_completeStartupLoadingWhenYardReady` 에서 별도 처리.
+    _scheduleSyncActivePetToYardGame();
   }
 
   /// [_fetchCoreUserData] 직후 UI·프로필 form 상태를 마당 ready 기준으로 맞춘다.
@@ -1267,6 +1304,7 @@ class _HomePageState extends State<HomePage>
   /// (이메일 복구·기존 계정 reload 흐름에서는 사용하지 않는다.)
   void _forceFreshGuestProfileSetupState() {
     _instantCloseYardConfirmOverlays();
+    _invalidateUserScopedAsyncWork(reason: 'forceFreshGuestProfileSetup');
     _clearProfileFormState();
     _clearUserScopedCaches();
 
@@ -1284,6 +1322,7 @@ class _HomePageState extends State<HomePage>
       _diaryLogsCachedMonthKey = null;
       _randomTicketCount = 0;
       _selectedSpeciesId = null;
+      _isDebugStageMutationInFlight = false;
 
       _isProfileSetupPanelVisible = true;
       _isProfileSetupClosing = false;
@@ -1350,11 +1389,32 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  /// fresh guest reset 후 분양창용 pet_species만 백그라운드 갱신한다.
-  /// 실패해도 프로필 입력창 표시를 막지 않는다.
+  /// fresh guest reset 후 분양창용 pet_species를 확정 재조회한다.
+  /// 실패해도 기존 정상 `_petSpecies` 를 비우지 않으며, 프로필 입력창 표시를 막지 않는다.
   Future<void> _refreshPetSpeciesAfterFreshGuestReset() async {
+    final generation = _userDataGeneration;
+    final requestedUserId = supabase.auth.currentUser?.id;
     try {
       await _fetchPetSpecies();
+      if (generation != _userDataGeneration) {
+        debugPrint('stale pet_species refresh ignored (generation)');
+        return;
+      }
+      if (requestedUserId != supabase.auth.currentUser?.id) {
+        debugPrint('stale pet_species refresh ignored (user changed)');
+        return;
+      }
+      final mvp = _initialAdoptionSpecies;
+      debugPrint(
+        'fresh guest pet_species ready: user=${supabase.auth.currentUser?.id}, '
+        'dbCount=${_petSpecies.length}, mvpCount=${mvp.length}, '
+        'codes=${mvp.map((e) => e['code']).toList()}',
+      );
+      if (mvp.length < 4) {
+        debugPrint(
+          'warning: initial adoption species count < 4 after fresh guest reset',
+        );
+      }
       if (!mounted) return;
       _safeSetState(() {});
     } catch (e, st) {
@@ -1566,21 +1626,29 @@ class _HomePageState extends State<HomePage>
       await Future<void>.delayed(const Duration(milliseconds: 230));
       if (!mounted) return;
 
-      await _fetchActivePet();
+      await _fetchActivePet(syncYard: false);
       if (!mounted) return;
+
+      // 최초 분양창 직전 MVP 4종 마스터를 확정한다.
+      if (_initialAdoptionSpecies.length < 4) {
+        await _refreshPetSpeciesAfterFreshGuestReset();
+        if (!mounted) return;
+      }
 
       // 보안: 로그에 email 등 PII 전체(_profile)를 덤프하지 않는다. 진단에 필요한
       //       비민감 플래그만 남긴다.
       debugPrint(
         'profile upsert success: '
         'savedProfileComplete=$savedProfileComplete, '
-        'hasActivePet=${_activePet != null}',
+        'hasActivePet=${_activePet != null}, '
+        'adoptionSpecies=${_initialAdoptionSpecies.length}',
       );
 
       _safeSetState(() {
         _isSavingProfile = false;
         _isProfileSetupClosing = false;
         _isProfileSetupPanelVisible = false;
+        _selectedSpeciesId = null;
 
         if (savedProfileComplete && _activePet == null) {
           _isInitialAdoptionPanelVisible = true;
@@ -1964,6 +2032,7 @@ class _HomePageState extends State<HomePage>
       _residentPets = [];
       _randomTicketCount = 0;
     });
+    _invalidateUserScopedAsyncWork(reason: 'bootstrap');
 
     var completeStartupLoadingWhenYardReady = false;
 
@@ -2510,6 +2579,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _refreshAllUserDataAfterAuthChange({
     bool forceProfileFormSync = false,
   }) async {
+    _invalidateUserScopedAsyncWork(reason: 'authChangeRefresh');
     _clearUserScopedCaches();
     await _fetchCoreUserData();
     _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
@@ -2750,6 +2820,7 @@ class _HomePageState extends State<HomePage>
     if (_isResettingDeletedAccountSession) return;
     _isResettingDeletedAccountSession = true;
     _freshGuestAuthResetInProgress = true;
+    final oldUserId = supabase.auth.currentUser?.id;
 
     try {
       _dismissFocus();
@@ -2766,6 +2837,7 @@ class _HomePageState extends State<HomePage>
         _forceFreshGuestProfileSetupState();
       } else {
         _dismissAllUiForDeletedAccountReset();
+        _invalidateUserScopedAsyncWork(reason: 'deletedAccountReset');
       }
 
       _clearEmailLinkOtpSession();
@@ -2777,8 +2849,18 @@ class _HomePageState extends State<HomePage>
 
       if (mounted) {
         _forceFreshGuestProfileSetupState();
-        unawaited(_refreshPetSpeciesAfterFreshGuestReset());
+        // 분양창이 열리기 전에 MVP 4종 마스터를 확정한다.
+        await _refreshPetSpeciesAfterFreshGuestReset();
       }
+
+      debugPrint(
+        'fresh guest reset completed: '
+        'oldUser=$oldUserId, '
+        'newUser=${supabase.auth.currentUser?.id}, '
+        'speciesCount=${_petSpecies.length}, '
+        'activePet=${_activePet?['id']}, '
+        'residentCount=${_residentPets.length}',
+      );
     } catch (e, st) {
       debugPrint('reset to fresh guest failed: $e\n$st');
 
@@ -3468,33 +3550,71 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _fetchPetSpecies() async {
+    final generation = _userDataGeneration;
+    final requestedUserId = supabase.auth.currentUser?.id;
     final data = await supabase
         .from('pet_species')
-        .select('id, code, name_ko, family, sort_order')
+        .select('id, code, name_ko, name_en, family, sort_order')
         .order('sort_order');
 
+    if (generation != _userDataGeneration) {
+      debugPrint('stale _fetchPetSpecies ignored (generation)');
+      return;
+    }
+    if (requestedUserId != supabase.auth.currentUser?.id) {
+      debugPrint('stale _fetchPetSpecies ignored (user changed)');
+      return;
+    }
+
     _petSpecies = List<Map<String, dynamic>>.from(data);
+    final mvp = _initialAdoptionSpecies;
+    if (mvp.length < 4) {
+      debugPrint(
+        'warning: MVP adoption species count=${mvp.length} '
+        'codes=${mvp.map((e) => e['code']).toList()} '
+        'dbCount=${_petSpecies.length}',
+      );
+    }
   }
 
-  Future<void> _fetchActivePet() async {
+  /// active user_pet DB 조회와 [_activePet] 반영만 담당한다.
+  ///
+  /// Flame spawn 은 절대 await 하지 않는다. [syncYard] 가 true 여도
+  /// post-frame schedule 만 걸어 UI(분양/이름짓기/HUD)를 막지 않는다.
+  Future<void> _fetchActivePet({bool syncYard = true}) async {
+    final generation = _userDataGeneration;
+    final requestedUserId = supabase.auth.currentUser?.id;
     final user = supabase.auth.currentUser;
     if (user == null) {
       _activePet = null;
-      _scheduleSyncActivePetToYardGame();
+      if (syncYard) {
+        _scheduleSyncActivePetToYardGame();
+      }
       return;
     }
 
     final data = await supabase
         .from('user_pets')
         .select(
-          'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, created_at, last_played_on, last_petted_on, pet_species:pet_species_id(id, code, name_ko, family, sort_order)',
+          'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, created_at, last_played_on, last_petted_on, pet_species:pet_species_id(id, code, name_ko, name_en, family, sort_order)',
         )
         .eq('user_id', user.id)
         .eq('is_active', true)
         .maybeSingle();
 
+    if (generation != _userDataGeneration) {
+      debugPrint('stale _fetchActivePet ignored (generation)');
+      return;
+    }
+    if (requestedUserId != supabase.auth.currentUser?.id) {
+      debugPrint('stale _fetchActivePet ignored (user changed)');
+      return;
+    }
+
     _activePet = data == null ? null : Map<String, dynamic>.from(data);
-    _scheduleSyncActivePetToYardGame();
+    if (syncYard) {
+      _scheduleSyncActivePetToYardGame();
+    }
   }
 
   // 성숙기 졸업 후 마당에 거주 중인 펫 목록 조회.
@@ -3505,6 +3625,8 @@ class _HomePageState extends State<HomePage>
   //
   // 조회 자체가 실패해도 앱이 죽지 않도록 catch 해서 _residentPets 만 비운다.
   Future<void> _fetchResidentPets() async {
+    final generation = _userDataGeneration;
+    final requestedUserId = supabase.auth.currentUser?.id;
     final user = supabase.auth.currentUser;
     if (user == null) {
       _residentPets = [];
@@ -3514,12 +3636,18 @@ class _HomePageState extends State<HomePage>
       final data = await supabase
           .from('user_pets')
           .select(
-            'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, pet_species:pet_species_id(id, code, name_ko, family, sort_order)',
+            'id, user_id, pet_species_id, nickname, stage, affection, is_active, is_resident, graduated_at, pet_species:pet_species_id(id, code, name_ko, name_en, family, sort_order)',
           )
           .eq('user_id', user.id)
           .eq('is_resident', true)
           .not('graduated_at', 'is', null)
           .order('graduated_at');
+
+      if (generation != _userDataGeneration ||
+          requestedUserId != supabase.auth.currentUser?.id) {
+        debugPrint('stale _fetchResidentPets ignored');
+        return;
+      }
 
       _residentPets = (data as List)
           .whereType<Map>()
@@ -3527,7 +3655,10 @@ class _HomePageState extends State<HomePage>
           .toList();
     } catch (e) {
       debugPrint('fetch resident pets failed: $e');
-      _residentPets = [];
+      if (generation == _userDataGeneration &&
+          requestedUserId == supabase.auth.currentUser?.id) {
+        _residentPets = [];
+      }
     }
   }
 
@@ -3676,7 +3807,7 @@ class _HomePageState extends State<HomePage>
         try {
           final speciesRows = await supabase
               .from('pet_species')
-              .select('id, code, name_ko, family, sort_order')
+              .select('id, code, name_ko, name_en, family, sort_order')
               .filter('id', 'in', '(${speciesIds.join(',')})');
           for (final s in (speciesRows as List).whereType<Map>()) {
             final raw = s['id'];
@@ -3878,33 +4009,46 @@ class _HomePageState extends State<HomePage>
     return int.tryParse(raw?.toString() ?? '');
   }
 
-  /// cat_sco baby 가 Flame 펫으로 표시되어야 하는지 여부.
+  /// cat_sco Flame 표시 여부.
+  ///
+  /// 현재 baby sprite 만 있으므로 grown 단계에서도 임시로 baby 컴포넌트를 유지한다.
+  /// DB stage 값은 속이지 않는다. grown 전용 asset 추가 시 stage별 컴포넌트로 교체.
+  /// adult 졸업 UI 는 기존 더미/resident 흐름을 유지한다.
   bool _shouldUseFlamePetForActivePet() {
     final pet = _activePet;
     if (pet == null) return false;
-    final stage = pet['stage']?.toString();
-    if (stage != 'baby') return false;
 
     final species = _speciesForPet(pet);
     final code = _speciesInternalCode(species);
-    if (code == 'cat_sco') return true;
-
     final speciesId = _speciesIdFromPet(pet);
-    return speciesId == 1;
+    final isSco = code == 'cat_sco' || speciesId == 1;
+    if (!isSco) return false;
+
+    final stage = pet['stage']?.toString();
+    // baby / grown: Flame baby sprite 임시 유지. adult 는 졸업 UI·더미 경로.
+    return stage == 'baby' || stage == 'grown';
   }
 
   void _scheduleSyncActivePetToYardGame() {
+    if (_yardPetSyncScheduled) return;
+    _yardPetSyncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _yardPetSyncScheduled = false;
       if (!mounted) return;
       unawaited(_syncActivePetToYardGame());
     });
   }
 
   Future<void> _syncActivePetToYardGame() async {
+    final generation = ++_yardPetSyncGeneration;
     final pet = _activePet;
     if (pet == null) {
       debugPrint('YardGame sync: no activePet, removing Flame pet');
       await _yardGame.removeActivePetComponent();
+      if (generation != _yardPetSyncGeneration) {
+        debugPrint('stale yard pet sync ignored after remove(null)');
+        return;
+      }
       if (mounted) _safeSetState(() {});
       return;
     }
@@ -3917,7 +4061,7 @@ class _HomePageState extends State<HomePage>
     final shouldUseFlame = _shouldUseFlamePetForActivePet();
 
     debugPrint(
-      'YardGame sync check: petId=${pet['id']}, speciesId=$speciesId, embeddedCode=$embeddedCode, code=$code, stage=$stage, shouldUseFlame=$shouldUseFlame',
+      'YardGame sync check: petId=${pet['id']}, speciesId=$speciesId, embeddedCode=$embeddedCode, code=$code, stage=$stage, shouldUseFlame=$shouldUseFlame, gen=$generation',
     );
 
     if (!shouldUseFlame) {
@@ -3925,6 +4069,10 @@ class _HomePageState extends State<HomePage>
         'YardGame sync: unsupported pet for Flame, removing Flame pet',
       );
       await _yardGame.removeActivePetComponent();
+      if (generation != _yardPetSyncGeneration) {
+        debugPrint('stale yard pet sync ignored after remove(unsupported)');
+        return;
+      }
       if (mounted) _safeSetState(() {});
       return;
     }
@@ -3935,7 +4083,37 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final shown = await _yardGame.showCatScoBabyPet(userPetId: petId);
+    // Flame spawn 은 UI 핵심 흐름과 분리. timeout/실패는 로그만 남긴다.
+    bool shown = false;
+    try {
+      shown = await _yardGame
+          .showCatScoBabyPet(userPetId: petId)
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              debugPrint('YardGame spawn timeout: petId=$petId');
+              return false;
+            },
+          );
+    } catch (e, st) {
+      debugPrint('YardGame sync spawn failed (isolated): $e\n$st');
+      shown = false;
+    }
+
+    if (generation != _yardPetSyncGeneration) {
+      debugPrint('stale yard pet sync ignored after spawn');
+      return;
+    }
+    // sync 도중 activePet 이 바뀌었으면 재귀 await 대신 다음 frame 에 재스케줄.
+    final latestId = _activePet?['id']?.toString();
+    if (latestId != petId) {
+      debugPrint(
+        'YardGame sync: activePet changed during spawn '
+        '(spawned=$petId, latest=$latestId) → reschedule',
+      );
+      _scheduleSyncActivePetToYardGame();
+      return;
+    }
     debugPrint(
       'YardGame sync result: shown=$shown, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
     );
@@ -4063,9 +4241,42 @@ class _HomePageState extends State<HomePage>
     return int.tryParse(v?.toString() ?? '') ?? 9999;
   }
 
+  /// MVP 분양·도감에 노출하는 종만 (푸리/코리 제외, 내부 6종 구조는 유지).
+  List<Map<String, dynamic>> _mvpPetSpecies() {
+    return _petSpecies.where(isMvpSpeciesRow).toList();
+  }
+
+  /// 최초 선택 분양창 전용 목록.
+  /// 도감/졸업/이전 user_pets 와 무관하게 MVP 4종(code 기준)만 반환한다.
+  List<Map<String, dynamic>> get _initialAdoptionSpecies {
+    const allowedCodes = <String>{
+      'cat_sco',
+      'cat_rag',
+      'dog_pom',
+      'dog_bic',
+    };
+
+    final result = _petSpecies.where((species) {
+      final code = _speciesInternalCode(species);
+      return allowedCodes.contains(code);
+    }).toList()
+      ..sort((a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)));
+
+    if (result.length != 4 && _petSpecies.isNotEmpty) {
+      debugPrint(
+        'initial adoption species warning: count=${result.length}, '
+        'codes=${result.map((e) => e['code']).toList()}, '
+        'user=${supabase.auth.currentUser?.id}',
+      );
+    }
+
+    return result;
+  }
+
   /// `family` 는 [_normalizePetFamily] 결과인 `dog` / `cat` 기준.
+  /// MVP 4종만 반환한다 (강아지 2 / 고양이 2).
   List<Map<String, dynamic>> _petSpeciesSortedForFamilyNorm(String familyNorm) {
-    final out = _petSpecies
+    final out = _mvpPetSpecies()
         .where(
           (s) =>
               _normalizePetFamily(s['family']?.toString() ?? '') == familyNorm,
@@ -4240,7 +4451,7 @@ class _HomePageState extends State<HomePage>
             .from('user_pets')
             .update({'stage': targetStage})
             .eq('id', _activePet!['id']);
-        await _fetchActivePet();
+        await _fetchActivePet(syncYard: false);
         if (mounted) setState(() {});
       } catch (e) {
         debugPrint('stage sync failed: $e');
@@ -4374,14 +4585,16 @@ class _HomePageState extends State<HomePage>
         await _fetchPetSpecies();
       }
 
-      final allSpeciesIds = _petSpecies
+      // 도감 완성 = MVP 4종(code 기준) 전부 등록. id 재배치에도 안전.
+      final allSpeciesIds = _initialAdoptionSpecies
           .map((s) => s['id'])
           .where((id) => id != null)
           .map((id) => int.tryParse(id.toString()))
           .whereType<int>()
           .toSet();
-
-      if (allSpeciesIds.isEmpty) return false;
+      if (allSpeciesIds.isEmpty) {
+        allSpeciesIds.addAll(kMvpSpeciesIds);
+      }
 
       final rows = await supabase
           .from('pokedex_entries')
@@ -4391,7 +4604,9 @@ class _HomePageState extends State<HomePage>
       final registeredSpeciesIds = <int>{};
       for (final row in rows as List) {
         final id = int.tryParse(row['pet_species_id']?.toString() ?? '');
-        if (id != null) registeredSpeciesIds.add(id);
+        if (id != null && allSpeciesIds.contains(id)) {
+          registeredSpeciesIds.add(id);
+        }
       }
 
       return allSpeciesIds.difference(registeredSpeciesIds).isEmpty;
@@ -4681,9 +4896,21 @@ class _HomePageState extends State<HomePage>
       _showSnack(l10n.snackAlreadyRaising);
       return;
     }
+    if (_isAdopting || _isInitialAdoptionInFlight) return;
 
     final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
     if (selectedSpeciesId == null) {
+      _showSnack(l10n.snackPetSelectInvalid);
+      return;
+    }
+    Map<String, dynamic>? selectedSpeciesRow;
+    for (final s in _petSpecies) {
+      if (s['id']?.toString() == _selectedSpeciesId) {
+        selectedSpeciesRow = s;
+        break;
+      }
+    }
+    if (selectedSpeciesRow == null || !isMvpSpeciesRow(selectedSpeciesRow)) {
       _showSnack(l10n.snackPetSelectInvalid);
       return;
     }
@@ -4708,31 +4935,59 @@ class _HomePageState extends State<HomePage>
         'graduated_at': null,
       });
 
-      await _fetchActivePet();
-
+      // DB 상태만 재조회. Flame spawn 은 await 하지 않는다.
+      await _fetchActivePet(syncYard: false);
       if (!mounted) return;
+
+      try {
+        await Future.wait([
+          _fetchResidentPets(),
+          _fetchTodayMealLogs(),
+        ]);
+      } catch (e) {
+        debugPrint('post-adopt secondary fetch failed: $e');
+      }
+      if (!mounted) return;
+
       _safeSetState(() {
         _selectedSpeciesId = null;
-        _isAdopting = false;
-        _isInitialAdoptionInFlight = false;
       });
 
-      // 분양 직후 Flame pet 생성 동기화 (이름짓기 패널 전에 스폰).
+      // Flame 시각 동기화는 UI 흐름과 분리 (이름짓기/HUD를 막지 않음).
       _scheduleSyncActivePetToYardGame();
+
+      // 이름짓기 전에 busy flag 해제 — Flame spawn 과 무관하게 UX 진행.
+      if (mounted) {
+        _safeSetState(() {
+          _isInitialAdoptionInFlight = false;
+          _isAdopting = false;
+        });
+      } else {
+        _isInitialAdoptionInFlight = false;
+        _isAdopting = false;
+      }
 
       if (!mounted) return;
       await _showNicknameDialog();
     } catch (e) {
       if (!mounted) return;
       _safeSetState(() {
-        _isAdopting = false;
-        _isInitialAdoptionInFlight = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionPanelVisible = true;
       });
       _showSnack(
         AppLocalizations.of(context).snackAdoptSaveFailed(e.toString()),
       );
+    } finally {
+      if (mounted) {
+        _safeSetState(() {
+          _isInitialAdoptionInFlight = false;
+          _isAdopting = false;
+        });
+      } else {
+        _isInitialAdoptionInFlight = false;
+        _isAdopting = false;
+      }
     }
   }
 
@@ -4777,12 +5032,12 @@ class _HomePageState extends State<HomePage>
           .update({'nickname': nickname})
           .eq('id', petId);
 
-      await _fetchActivePet();
+      await _fetchActivePet(syncYard: false);
 
       if (!mounted) return;
       _safeSetState(() {});
 
-      // 이름 저장 후 activePet 재조회 → Flame pet 상태 재동기화.
+      // 이름 저장 후 Flame pet 재동기화는 UI 와 분리.
       _scheduleSyncActivePetToYardGame();
 
       await _waitForUiSettle();
@@ -5040,6 +5295,7 @@ class _HomePageState extends State<HomePage>
       await supabase.auth.signInAnonymously();
 
       if (!mounted) return;
+      _invalidateUserScopedAsyncWork(reason: 'developerReset');
       _safeSetState(() {
         _resetEmailLinkPanelOtpFlow();
         _emailLinkRestoreMode = false;
@@ -5115,8 +5371,17 @@ class _HomePageState extends State<HomePage>
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
+      await _refreshPetSpeciesAfterFreshGuestReset();
 
       if (!mounted) return;
+      debugPrint(
+        'developer reset completed: '
+        'newUser=${supabase.auth.currentUser?.id}, '
+        'speciesCount=${_petSpecies.length}, '
+        'mvpCount=${_initialAdoptionSpecies.length}, '
+        'activePet=${_activePet?['id']}, '
+        'residentCount=${_residentPets.length}',
+      );
       _showSnack('개발용 초기화가 완료되었어요.');
     } catch (e) {
       if (!mounted) return;
@@ -5133,10 +5398,13 @@ class _HomePageState extends State<HomePage>
   // --------------------------------------------------------------------------
 
   Future<void> _debugAdjustAffection(int delta) async {
+    if (_isDebugStageMutationInFlight) return;
     if (_activePet == null) {
       _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
       return;
     }
+
+    _safeSetState(() => _isDebugStageMutationInFlight = true);
     final petId = _activePet!['id'];
     final current = (_activePet!['affection'] as num?)?.toInt() ?? 0;
     final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
@@ -5149,15 +5417,22 @@ class _HomePageState extends State<HomePage>
           .update({'affection': next, 'stage': nextStage})
           .eq('id', petId);
 
-      await _fetchActivePet();
+      await _fetchActivePet(syncYard: false);
       if (!mounted) return;
-      setState(() {});
+      _safeSetState(() {});
       _showSnack('[디버그] 애정도 $current → $next');
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('debug adjust affection failed: $e\n$st');
       if (!mounted) return;
       _showSnack('[디버그] 애정도 조작 실패: $e');
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isDebugStageMutationInFlight = false);
+      } else {
+        _isDebugStageMutationInFlight = false;
+      }
     }
   }
 
@@ -5168,11 +5443,15 @@ class _HomePageState extends State<HomePage>
     // _handleAdultGraduationIfNeeded 의 중복 방지 가드에 걸려
     // finalize_pet_graduation 재테스트가 불가능하다.
     // 따라서 졸업 플래그도 함께 초기화한다.
-    if (_activePet == null) {
+    if (_isDebugStageMutationInFlight) return;
+    final pet = _activePet;
+    if (pet == null) {
       _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
       return;
     }
-    final petId = _activePet!['id'];
+
+    _safeSetState(() => _isDebugStageMutationInFlight = true);
+    final petId = pet['id'];
     try {
       await supabase
           .from('user_pets')
@@ -5184,13 +5463,25 @@ class _HomePageState extends State<HomePage>
           })
           .eq('id', petId);
 
-      await _fetchActivePet();
+      // DB update → activePet 재조회. Flame sync 는 schedule 로 분리.
+      await _fetchActivePet(syncYard: false);
       if (!mounted) return;
-      setState(() {});
-      _showSnack('[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)');
-    } catch (e) {
-      if (!mounted) return;
-      _showSnack('[디버그] 세팅 실패: $e');
+      _scheduleSyncActivePetToYardGame();
+      _safeSetState(() {});
+      _showSnack(
+        '[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)',
+      );
+    } catch (e, st) {
+      debugPrint('debug set just before adult failed: $e\n$st');
+      if (mounted) {
+        _showSnack('[디버그] 세팅 실패: $e');
+      }
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isDebugStageMutationInFlight = false);
+      } else {
+        _isDebugStageMutationInFlight = false;
+      }
     }
   }
 
@@ -5948,11 +6239,11 @@ class _HomePageState extends State<HomePage>
           children: [
             Text(l10n.pokedexSectionDogs, style: sectionTitleStyle),
             const SizedBox(height: 8),
-            _buildPokedexGameMenuThreeSpeciesRow(dogs, 'dog'),
+            _buildPokedexGameMenuMvpSpeciesRow(dogs, 'dog'),
             const SizedBox(height: 12),
             Text(l10n.pokedexSectionCats, style: sectionTitleStyle),
             const SizedBox(height: 8),
-            _buildPokedexGameMenuThreeSpeciesRow(cats, 'cat'),
+            _buildPokedexGameMenuMvpSpeciesRow(cats, 'cat'),
           ],
         ),
       ),
@@ -6046,15 +6337,16 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 강아지/고양이 각 3슬롯 — 해당 family 의 pet_species 가 3개 미만이면 잠금 슬롯으로 채움.
-  Widget _buildPokedexGameMenuThreeSpeciesRow(
+  /// 강아지/고양이 각 2슬롯(MVP 4종) — 해당 family 종이 2개 미만이면 잠금 슬롯으로 채움.
+  Widget _buildPokedexGameMenuMvpSpeciesRow(
     List<Map<String, dynamic>> sorted,
     String familyNorm,
   ) {
+    const slotCount = 2;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < 3; i++) ...[
+        for (var i = 0; i < slotCount; i++) ...[
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             child: i < sorted.length
@@ -6696,6 +6988,44 @@ class _HomePageState extends State<HomePage>
     unawaited(_resolveRandomTicketUseConfirm(false));
   }
 
+  /// 도감에 아직 없는 MVP 종 중 하나를 무작위로 고른다. 없으면 null.
+  Future<int?> _pickRandomMvpSpeciesIdNotInPokedex(String userId) async {
+    if (_petSpecies.isEmpty) {
+      try {
+        await _fetchPetSpecies();
+      } catch (e) {
+        debugPrint('pick MVP species: fetch failed: $e');
+      }
+    }
+
+    final candidates = _mvpPetSpecies()
+        .map((s) => s['id'])
+        .map((id) => id is int ? id : int.tryParse(id?.toString() ?? ''))
+        .whereType<int>()
+        .where(isMvpSpeciesId)
+        .toSet();
+    if (candidates.isEmpty) {
+      candidates.addAll(kMvpSpeciesIds);
+    }
+
+    try {
+      final rows = await supabase
+          .from('pokedex_entries')
+          .select('pet_species_id')
+          .eq('user_id', userId);
+      for (final row in rows as List) {
+        final id = int.tryParse(row['pet_species_id']?.toString() ?? '');
+        if (id != null) candidates.remove(id);
+      }
+    } catch (e) {
+      debugPrint('pick MVP species: pokedex fetch failed: $e');
+    }
+
+    if (candidates.isEmpty) return null;
+    final list = candidates.toList()..shuffle();
+    return list.first;
+  }
+
   /// 가방에서 랜덤 분양권을 실제로 사용해 새 베지펫을 분양받는다.
   ///
   /// 흐름:
@@ -6767,13 +7097,29 @@ class _HomePageState extends State<HomePage>
       }
 
       final speciesIdRaw = payload?['pet_species_id'];
-      final speciesId = speciesIdRaw is int
+      var speciesId = speciesIdRaw is int
           ? speciesIdRaw
           : int.tryParse(speciesIdRaw?.toString() ?? '');
       if (speciesId == null) {
         if (!mounted) return;
         _showSnack(l10n.snackAdoptError);
         return;
+      }
+
+      // MVP: 푸리/코리 등 비활성 종이 RPC에서 나와도 분양하지 않고 MVP 4종으로 대체.
+      if (!isMvpSpeciesId(speciesId)) {
+        final fallbackId = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
+        if (fallbackId == null) {
+          if (!mounted) return;
+          await _fetchRandomTicketCount();
+          if (mounted) setState(() {});
+          await _showPokedexCompleteTicketNotice();
+          return;
+        }
+        debugPrint(
+          'random adopt: non-MVP speciesId=$speciesId → MVP fallback=$fallbackId',
+        );
+        speciesId = fallbackId;
       }
 
       // 2) Flutter 측 방어 체크 — 도감 중복 분양 차단
@@ -7936,7 +8282,21 @@ class _HomePageState extends State<HomePage>
     if (_shouldUseFlamePetForActivePet()) {
       final petId = _activePet?['id']?.toString();
       if (petId != null && petId.isNotEmpty) {
-        await _yardGame.showCatScoBabyPet(userPetId: petId);
+        try {
+          await _yardGame
+              .showCatScoBabyPet(userPetId: petId)
+              .timeout(
+                const Duration(seconds: 5),
+                onTimeout: () {
+                  debugPrint(
+                    'startup YardGame spawn timeout: petId=$petId',
+                  );
+                  return false;
+                },
+              );
+        } catch (e, st) {
+          debugPrint('startup YardGame spawn failed (isolated): $e\n$st');
+        }
       }
     }
 
@@ -10514,12 +10874,23 @@ class _HomePageState extends State<HomePage>
     List<String> familyHints,
   ) {
     final hints = familyHints.map((e) => e.toLowerCase()).toList();
-    final filtered = _petSpecies.where((species) {
+    // 최초 분양창은 도감/졸업 기록과 무관한 MVP 4종 소스만 사용한다.
+    final filtered = _initialAdoptionSpecies.where((species) {
       final family = species['family']?.toString().toLowerCase().trim() ?? '';
-      if (family.isEmpty) return false;
+      if (family.isEmpty) {
+        // family 컬럼이 비어도 code 기반 identity family 로 보정.
+        final identity = speciesIdentityFromSpeciesRow(species);
+        final fallback = identity?.family ?? '';
+        if (fallback.isEmpty) return false;
+        return hints.any(fallback.contains);
+      }
       return hints.any(family.contains);
     }).toList();
-    return filtered.take(3).toList();
+    filtered.sort(
+      (a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)),
+    );
+    // MVP: family 당 최대 2종 (전체 4종).
+    return filtered.take(2).toList();
   }
 
   Widget _buildInitialAdoptionSpeciesCell({
@@ -10609,18 +10980,19 @@ class _HomePageState extends State<HomePage>
     required List<Map<String, dynamic>> species,
     required bool isDogFamily,
   }) {
+    // MVP 4종(행당 2마리) — 창/버튼/폰트 크기는 유지하고 가로 간격만 균등 배치.
+    // 이름은 1줄+ellipsis로 행 높이 70을 유지해 하단 버튼 overflow를 막는다.
+    final items = species.take(2).toList();
     return SizedBox(
       height: 70,
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          ...List<Widget>.generate(3, (index) {
-            final item = index < species.length ? species[index] : null;
-            return _buildInitialAdoptionSpeciesCell(
+          for (final item in items)
+            _buildInitialAdoptionSpeciesCell(
               species: item,
               isDogFamily: isDogFamily,
-            );
-          }),
+            ),
         ],
       ),
     );
@@ -10693,6 +11065,24 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildInitialAdoptionPanelContent() {
     final l10n = AppLocalizations.of(context);
+    final adoptionSpecies = _initialAdoptionSpecies;
+    debugPrint(
+      'initial adoption species: '
+      'user=${supabase.auth.currentUser?.id}, '
+      'count=${adoptionSpecies.length}, '
+      'codes=${adoptionSpecies.map((e) => e['code']).toList()}',
+    );
+    // 이전 계정 선택값이 남아 있거나 현재 4종 밖이면 해제.
+    final selected = _selectedSpeciesId;
+    if (selected != null) {
+      final stillValid = adoptionSpecies.any(
+        (s) => s['id']?.toString() == selected,
+      );
+      if (!stillValid) {
+        _selectedSpeciesId = null;
+      }
+    }
+
     final dogSpecies = _initialAdoptionSpeciesByFamily(['dog', '강아지', '댕']);
     final catSpecies = _initialAdoptionSpeciesByFamily(['cat', '고양이', '냥']);
     final titleText = _isEnglishLocale
@@ -10710,13 +11100,23 @@ class _HomePageState extends State<HomePage>
       children: [
         Text(titleText, textAlign: TextAlign.left, style: titleStyle),
         const SizedBox(height: 12),
-        _buildInitialAdoptionSpeciesRow(species: dogSpecies, isDogFamily: true),
-        const SizedBox(height: 10),
-        _buildInitialAdoptionSpeciesRow(
-          species: catSpecies,
-          isDogFamily: false,
+        // 고정 높이 패널(256) 안에서 종 선택 영역이 남는 공간만 쓰도록 해
+        // 하단 「분양받기」 버튼 BOTTOM OVERFLOW를 방지한다.
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildInitialAdoptionSpeciesRow(
+                species: dogSpecies,
+                isDogFamily: true,
+              ),
+              _buildInitialAdoptionSpeciesRow(
+                species: catSpecies,
+                isDogFamily: false,
+              ),
+            ],
+          ),
         ),
-        const Spacer(),
         _buildInitialAdoptionReceiveButton(),
       ],
     );
@@ -18582,7 +18982,7 @@ class _HomePageState extends State<HomePage>
       _debugBlock(
         title: 'pet_species',
         children: [
-          _kv('count', '${_petSpecies.length}종'),
+          _kv('count', '${_mvpPetSpecies().length}종 (MVP) / ${_petSpecies.length}종 (DB)'),
           _kv(
             'cat',
             '${_petSpecies.where((s) => s['family'] == 'cat').length}종',
@@ -18666,26 +19066,30 @@ class _HomePageState extends State<HomePage>
         runSpacing: 8,
         children: [
           OutlinedButton.icon(
-            onPressed: _activePet == null
+            onPressed: (_activePet == null || _isDebugStageMutationInFlight)
                 ? null
                 : () => _debugAdjustAffection(10),
             icon: const Icon(Icons.add, size: 18),
             label: const Text('애정도 +10'),
           ),
           OutlinedButton.icon(
-            onPressed: _activePet == null
+            onPressed: (_activePet == null || _isDebugStageMutationInFlight)
                 ? null
                 : () => _debugAdjustAffection(50),
             icon: const Icon(Icons.add_circle_outline, size: 18),
             label: const Text('애정도 +50'),
           ),
           OutlinedButton.icon(
-            onPressed: _activePet == null ? null : _debugSetJustBeforeAdult,
+            onPressed: (_activePet == null || _isDebugStageMutationInFlight)
+                ? null
+                : _debugSetJustBeforeAdult,
             icon: const Icon(Icons.hourglass_bottom, size: 18),
             label: const Text('성숙기 직전 세팅(aff 109 / grown)'),
           ),
           OutlinedButton.icon(
-            onPressed: _activePet == null ? null : _debugTriggerAdult,
+            onPressed: (_activePet == null || _isDebugStageMutationInFlight)
+                ? null
+                : _debugTriggerAdult,
             icon: const Icon(Icons.emoji_events_outlined, size: 18),
             label: const Text('성숙기 테스트 실행 (+1)'),
           ),

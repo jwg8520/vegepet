@@ -67,6 +67,7 @@ String localizedDietGoalValue(String? raw, {required bool isEnglishLocale}) {
 /// pet_species row 기반 종류명 표시. 정보창 Type·도감 종 이름에 사용.
 String localizedPetSpeciesNameFromRaw({
   required String? nameKo,
+  String? nameEn,
   String? family,
   String? code,
   int? id,
@@ -76,6 +77,7 @@ String localizedPetSpeciesNameFromRaw({
     {
       'id': ?id,
       'name_ko': nameKo,
+      'name_en': nameEn,
       'family': family,
       'code': code,
     },

@@ -341,7 +341,7 @@ SELECT id, name, public FROM storage.buckets WHERE name = 'meal-photos';
 | 분양권 1장 연타 (동시 2회) | 1마리만 분양, 도감 중복 없음 |
 | meal-evaluate 1일 3회 시도 | 3회째 거부 |
 | 클라이언트 affection 직접 update 시도 | 거부 |
-| pet_species select (anon/authenticated) | 6종 전체 조회 가능 |
+| pet_species select (anon/authenticated) | 전체 조회 가능 (앱은 MVP 4종만 사용) |
 | pet_species insert/update/delete | 거부 |
 
 ### 6.5 롤백 플랜

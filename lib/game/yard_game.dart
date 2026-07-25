@@ -258,6 +258,9 @@ class YardGame extends FlameGame {
   VegePetComponent? _vegePetComponent;
   String? _activePetUserId;
   String? _lastPetSpawnError;
+
+  /// spawn/remove 경쟁 방지. remove 또는 새 spawn 요청 시 증가한다.
+  int _petMutationEpoch = 0;
   Future<bool>? _petSpawnInFlight;
   String? _petSpawnInFlightUserId;
 
@@ -571,7 +574,13 @@ class YardGame extends FlameGame {
     required String userPetId,
     bool isDebugOnly = false,
   }) async {
-    await removeActivePetComponent();
+    final epoch = ++_petMutationEpoch;
+    await removeActivePetComponent(bumpEpoch: false);
+
+    if (epoch != _petMutationEpoch) {
+      debugPrint('YardGame: spawn aborted before add (stale epoch)');
+      return false;
+    }
 
     final component = VegePetComponent(
       userPetId: userPetId,
@@ -583,6 +592,16 @@ class YardGame extends FlameGame {
 
     await world.add(component);
     await Future<void>.delayed(Duration.zero);
+
+    if (epoch != _petMutationEpoch) {
+      debugPrint('YardGame: spawn stale after add — removing orphan component');
+      component.removeFromParent();
+      if (identical(_vegePetComponent, component)) {
+        _vegePetComponent = null;
+        _activePetUserId = null;
+      }
+      return false;
+    }
 
     final alive = _isVegePetAlive(component);
     if (!alive) {
@@ -701,10 +720,15 @@ class YardGame extends FlameGame {
   }
 
   /// 활성 Flame 펫 컴포넌트를 제거한다.
-  Future<void> removeActivePetComponent() async {
+  Future<void> removeActivePetComponent({bool bumpEpoch = true}) async {
+    if (bumpEpoch) {
+      _petMutationEpoch++;
+    }
+    // in-flight spawn 은 epoch 불일치로 결과가 버려진다.
     _vegePetComponent?.removeFromParent();
     _vegePetComponent = null;
     _activePetUserId = null;
+    _lastPetSpawnError = null;
   }
 
   /// 활성 펫에 모션을 발동한다. 펫이 없으면 no-op.

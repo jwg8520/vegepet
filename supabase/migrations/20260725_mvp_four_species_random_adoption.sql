@@ -1,0 +1,33 @@
+-- MVP 4종 랜덤 분양 제한 (코리/푸리 제외)
+--
+-- 앱 클라이언트는 비-MVP 종이 RPC에서 반환되면 MVP 4종으로 대체합니다.
+-- DB에서도 동일하게 제한하려면 use_random_adoption_ticket 함수의
+-- pet_species 선정 구간에 아래 조건을 추가하세요.
+--
+-- 허용 MVP 종:
+--   1 cat_sco  스코티쉬 폴드
+--   2 cat_rag  랙돌
+--   4 dog_pom  포메라니안
+--   5 dog_bic  비숑
+--
+-- 제외 (구조만 유지):
+--   3 cat_kor  코리
+--   6 dog_pud  푸리
+--
+-- 예시 (함수 본문의 종 선정 SELECT 에 적용):
+--
+--   SELECT id
+--   FROM public.pet_species
+--   WHERE id IN (1, 2, 4, 5)
+--     -- 또는: WHERE code NOT IN ('cat_kor', 'dog_pud')
+--     AND id NOT IN (
+--       SELECT pet_species_id
+--       FROM public.pokedex_entries
+--       WHERE user_id = p_user_id
+--     )
+--   ORDER BY random()
+--   LIMIT 1;
+--
+-- 참고: 실제 함수 본문은 Supabase 대시보드의 현재 정의를 확인한 뒤 패치하세요.
+
+SELECT 1;
