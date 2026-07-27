@@ -638,6 +638,24 @@ abstract class AppLocalizations {
   /// **'식단 목적'**
   String get dietGoal;
 
+  /// No description provided for @profileTargetWeightKg.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표 체중(kg)'**
+  String get profileTargetWeightKg;
+
+  /// No description provided for @profileTargetWeightKgInvalid.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표 체중을 올바르게 입력해주세요.'**
+  String get profileTargetWeightKgInvalid;
+
+  /// No description provided for @profileTargetWeightOptional.
+  ///
+  /// In ko, this message translates to:
+  /// **'(선택 사항)'**
+  String get profileTargetWeightOptional;
+
   /// No description provided for @start.
   ///
   /// In ko, this message translates to:
@@ -1451,8 +1469,26 @@ abstract class AppLocalizations {
   /// No description provided for @diaryWeightLabel.
   ///
   /// In ko, this message translates to:
-  /// **'• 체중(kg)'**
+  /// **'• 현재 체중(Kg)'**
   String get diaryWeightLabel;
+
+  /// No description provided for @diaryTargetWeightKg.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 목표 체중(Kg)'**
+  String get diaryTargetWeightKg;
+
+  /// No description provided for @diaryWeightRemaining.
+  ///
+  /// In ko, this message translates to:
+  /// **'남았어요!'**
+  String get diaryWeightRemaining;
+
+  /// No description provided for @diaryWeightGoalAchieved.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 목표 달성🎉'**
+  String get diaryWeightGoalAchieved;
 
   /// No description provided for @diaryNoteLabel.
   ///

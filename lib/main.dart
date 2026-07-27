@@ -12,7 +12,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -261,8 +261,40 @@ void main() async {
   ]);
 
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+  // 시작 로딩 첫 프레임부터 로고가 보이도록 asset 을 미리 decode 한다.
+  await _precacheStartupLoadingLogo();
 
   runApp(const VegePetApp());
+}
+
+Future<void> _precacheStartupLoadingLogo() async {
+  const assetPath = 'assets/images/ui/loading/loading_logo.png';
+  try {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    final dpr = views.isEmpty ? 1.0 : views.first.devicePixelRatio;
+    final provider = const AssetImage(assetPath);
+    final config = ImageConfiguration(devicePixelRatio: dpr);
+    final stream = provider.resolve(config);
+    final completer = Completer<void>();
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (ImageInfo image, bool synchronousCall) {
+        if (!completer.isCompleted) completer.complete();
+        stream.removeListener(listener);
+      },
+      onError: (Object error, StackTrace? stackTrace) {
+        if (!completer.isCompleted) completer.complete();
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+    await completer.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {},
+    );
+  } catch (e) {
+    debugPrint('startup logo precache skipped: $e');
+  }
 }
 
 final supabase = Supabase.instance.client;
@@ -386,10 +418,7 @@ class _PetMotionDebugTuning {
   final double speedMultiplier;
   final int repeatCount;
 
-  _PetMotionDebugTuning copyWith({
-    double? speedMultiplier,
-    int? repeatCount,
-  }) {
+  _PetMotionDebugTuning copyWith({double? speedMultiplier, int? repeatCount}) {
     return _PetMotionDebugTuning(
       speedMultiplier: speedMultiplier ?? this.speedMultiplier,
       repeatCount: repeatCount ?? this.repeatCount,
@@ -414,6 +443,12 @@ class _HomePageState extends State<HomePage>
   static const double _kPetNicknameDialogTop = 83;
   static const double _kPetNicknameDialogW = 272;
   static const double _kPetNicknameDialogH = 208;
+
+  /// 최초 프로필 입력 글래스 패널 (844×390 마당 기준).
+  static const double _kProfileSetupPanelLeft = 286;
+  static const double _kProfileSetupPanelTop = 62;
+  static const double _kProfileSetupPanelWidth = 272;
+  static const double _kProfileSetupPanelHeight = 266;
 
   static const int _kProfileNicknameMaxLength = 8;
   static final RegExp _nameAllowedRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,8}$');
@@ -458,6 +493,8 @@ class _HomePageState extends State<HomePage>
 
   final TextEditingController _nicknameController = TextEditingController();
   final FocusNode _nicknameFocusNode = FocusNode();
+  final TextEditingController _targetWeightController = TextEditingController();
+  final FocusNode _targetWeightFocusNode = FocusNode();
   String? _selectedGender;
   String? _selectedAgeRange;
   String? _selectedDietGoal;
@@ -506,10 +543,12 @@ class _HomePageState extends State<HomePage>
 
   /// debug 전용 cat_sco baby 모션 테스트 패널 (release 미노출).
   bool _isPetMotionTestPanelOpen = false;
+
   /// debug 전용 펫 그림자 튜닝 패널 (release 미노출).
   bool _isShadowTunePanelOpen = false;
   String _petShadowColorHexInput = '527A7B';
   late final TextEditingController _petShadowColorHexController;
+
   /// debug 전용 쓰다듬기 하트 튜닝 패널 (release 미노출).
   bool _isHeartTunePanelOpen = false;
   String _pettingHeartColorHexInput = 'EF5592';
@@ -573,6 +612,9 @@ class _HomePageState extends State<HomePage>
   // key: yyyy-MM-dd, value: 그 날짜의 meal_logs row 들.
   Map<String, List<Map<String, dynamic>>> _diaryLogsByDate = {};
 
+  /// 월별 meal_diary_notes.current_weight_kg 캐시. key: yyyy-MM-dd.
+  Map<String, double?> _diaryCurrentWeightByDate = {};
+
   /// [_fetchDiaryMonthLogs] 가 마지막으로 성공 반영한 월(yyyy-MM). 프리로드 중복 방지용.
   String? _diaryLogsCachedMonthKey;
   bool _isPreloadingDiaryMonth = false;
@@ -611,6 +653,7 @@ class _HomePageState extends State<HomePage>
   String? _profilePanelInitialGender;
   String? _profilePanelInitialAgeRange;
   String? _profilePanelInitialDietGoal;
+  String _profilePanelInitialTargetWeightKg = '';
   late AnimationController _gameMenuPanelController;
   late AnimationController _gameProfileSwapController;
   late Animation<double> _gameProfileSwapCurve;
@@ -909,6 +952,19 @@ class _HomePageState extends State<HomePage>
       ],
     );
     _ensureKeyboardFocusBinding(
+      key: 'profile_target_weight_kg',
+      controller: _targetWeightController,
+      focusNode: _targetWeightFocusNode,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [
+        WeightKgInputFormatter(),
+        LengthLimitingTextInputFormatter(
+          6,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
+    );
+    _ensureKeyboardFocusBinding(
       key: 'pet_naming',
       controller: _petNamingController,
       focusNode: _petNamingFocusNode,
@@ -1092,6 +1148,8 @@ class _HomePageState extends State<HomePage>
     _sfxPlayer.dispose();
     _nicknameController.dispose();
     _nicknameFocusNode.dispose();
+    _targetWeightController.dispose();
+    _targetWeightFocusNode.dispose();
     _emailLinkController.dispose();
     _emailLinkOtpController.dispose();
     _emailLinkFocusNode.dispose();
@@ -1165,6 +1223,7 @@ class _HomePageState extends State<HomePage>
   /// (DB row 수정/삭제는 하지 않는다)
   void _clearProfileFormState() {
     _nicknameController.clear();
+    _targetWeightController.clear();
     _selectedGender = null;
     _selectedAgeRange = null;
     _selectedDietGoal = null;
@@ -1173,6 +1232,7 @@ class _HomePageState extends State<HomePage>
     _profilePanelInitialGender = null;
     _profilePanelInitialAgeRange = null;
     _profilePanelInitialDietGoal = null;
+    _profilePanelInitialTargetWeightKg = '';
   }
 
   /// 프로필 form controller/select 값을 [_profile] 기준으로 동기화한다.
@@ -1190,9 +1250,21 @@ class _HomePageState extends State<HomePage>
     final gender = p['gender']?.toString();
     final ageRange = p['age_range']?.toString();
     final dietGoal = p['diet_goal']?.toString();
+    final targetWeightKg = p['target_weight_kg'];
 
     if (force || _nicknameController.text.isEmpty) {
       _nicknameController.text = nickname;
+    }
+
+    if (force || _targetWeightController.text.isEmpty) {
+      // 입력 중(키보드 액세서리 활성)에는 빈 값을 DB 값으로 다시 채우지 않는다.
+      // 그렇지 않으면 마지막 1글자 삭제 직후 sync/rebuild 로 값이 되살아날 수 있다.
+      final editingTargetWeight =
+          _activeKeyboardInputKey == 'profile_target_weight_kg' ||
+          _targetWeightFocusNode.hasFocus;
+      if (force || !editingTargetWeight) {
+        _targetWeightController.text = formatWeightKgForInput(targetWeightKg);
+      }
     }
 
     if (force || _selectedGender == null || _selectedGender!.trim().isEmpty) {
@@ -1221,6 +1293,7 @@ class _HomePageState extends State<HomePage>
     _pokedexEntries = [];
     _pokedexPanelSelectedEntry = null;
     _diaryLogsByDate = {};
+    _diaryCurrentWeightByDate = {};
     _diaryLogsCachedMonthKey = null;
     _randomTicketCount = 0;
     _selectedSpeciesId = null;
@@ -1319,6 +1392,7 @@ class _HomePageState extends State<HomePage>
       _pokedexEntries = [];
       _pokedexPanelSelectedEntry = null;
       _diaryLogsByDate = {};
+      _diaryCurrentWeightByDate = {};
       _diaryLogsCachedMonthKey = null;
       _randomTicketCount = 0;
       _selectedSpeciesId = null;
@@ -1558,6 +1632,17 @@ class _HomePageState extends State<HomePage>
 
     _enforceProfileNicknameMaxLength();
     final nickname = _nicknameController.text.trim();
+    final rawTargetWeight = _targetWeightController.text.trim();
+    final double? targetWeightKg = rawTargetWeight.isEmpty
+        ? null
+        : double.tryParse(rawTargetWeight);
+    final hasTargetWeightInput = rawTargetWeight.isNotEmpty;
+    final isValidTargetWeight =
+        !hasTargetWeightInput ||
+        (targetWeightKg != null &&
+            targetWeightKg.isFinite &&
+            targetWeightKg >= 1 &&
+            targetWeightKg <= 500);
 
     if (!_isValidNicknameOrPetName(nickname)) {
       await _showNameInterlockNotice();
@@ -1572,6 +1657,11 @@ class _HomePageState extends State<HomePage>
         _selectedDietGoal!.trim().isEmpty;
     if (hasMissingProfileSelect) {
       await _showProfileSelectMissingNotice();
+      return;
+    }
+    if (!isValidTargetWeight) {
+      _showSnack(AppLocalizations.of(context).profileTargetWeightKgInvalid);
+      _targetWeightFocusNode.requestFocus();
       return;
     }
 
@@ -1589,7 +1679,8 @@ class _HomePageState extends State<HomePage>
       'nicknameLen=${nickname.length}, '
       'gender=$_selectedGender, '
       'age_range=$_selectedAgeRange, '
-      'diet_goal=$_selectedDietGoal',
+      'diet_goal=$_selectedDietGoal, '
+      'hasTargetWeight=${targetWeightKg != null}',
     );
     try {
       final nowIso = DateTime.now().toIso8601String();
@@ -1599,6 +1690,7 @@ class _HomePageState extends State<HomePage>
         'gender': _selectedGender,
         'age_range': _selectedAgeRange,
         'diet_goal': _selectedDietGoal,
+        'target_weight_kg': targetWeightKg,
         'updated_at': nowIso,
       };
 
@@ -2332,6 +2424,8 @@ class _HomePageState extends State<HomePage>
         _profile = null;
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
+        _diaryCurrentWeightByDate = {};
+        _diaryLogsCachedMonthKey = null;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -2365,10 +2459,7 @@ class _HomePageState extends State<HomePage>
         _isRemoteEmailLinkedLogoutNoticeOpen = false;
 
         _selectedSpeciesId = null;
-        _nicknameController.clear();
-        _selectedGender = null;
-        _selectedAgeRange = null;
-        _selectedDietGoal = null;
+        _clearProfileFormState();
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
         _status = _ViewStatus.loading;
@@ -4249,18 +4340,15 @@ class _HomePageState extends State<HomePage>
   /// 최초 선택 분양창 전용 목록.
   /// 도감/졸업/이전 user_pets 와 무관하게 MVP 4종(code 기준)만 반환한다.
   List<Map<String, dynamic>> get _initialAdoptionSpecies {
-    const allowedCodes = <String>{
-      'cat_sco',
-      'cat_rag',
-      'dog_pom',
-      'dog_bic',
-    };
+    const allowedCodes = <String>{'cat_sco', 'cat_rag', 'dog_pom', 'dog_bic'};
 
-    final result = _petSpecies.where((species) {
-      final code = _speciesInternalCode(species);
-      return allowedCodes.contains(code);
-    }).toList()
-      ..sort((a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)));
+    final result =
+        _petSpecies.where((species) {
+          final code = _speciesInternalCode(species);
+          return allowedCodes.contains(code);
+        }).toList()..sort(
+          (a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)),
+        );
 
     if (result.length != 4 && _petSpecies.isNotEmpty) {
       debugPrint(
@@ -4940,10 +5028,7 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
 
       try {
-        await Future.wait([
-          _fetchResidentPets(),
-          _fetchTodayMealLogs(),
-        ]);
+        await Future.wait([_fetchResidentPets(), _fetchTodayMealLogs()]);
       } catch (e) {
         debugPrint('post-adopt secondary fetch failed: $e');
       }
@@ -5113,6 +5198,8 @@ class _HomePageState extends State<HomePage>
         _pokedexEntries = [];
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
+        _diaryCurrentWeightByDate = {};
+        _diaryLogsCachedMonthKey = null;
 
         _isUploadingMeal = false;
         _uploadingSlot = null;
@@ -5158,10 +5245,7 @@ class _HomePageState extends State<HomePage>
         _isHelpPanelOpen = false;
         _helpPanelSwapInProgress = false;
 
-        _nicknameController.clear();
-        _selectedGender = null;
-        _selectedAgeRange = null;
-        _selectedDietGoal = null;
+        _clearProfileFormState();
         _isProfileSetupPanelVisible = true;
         _isProfileSetupClosing = false;
       });
@@ -5283,6 +5367,7 @@ class _HomePageState extends State<HomePage>
             'gender': null,
             'age_range': null,
             'diet_goal': null,
+            'target_weight_kg': null,
             'email': null,
             'account_type': 'guest',
             'linked_at': null,
@@ -5468,9 +5553,7 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       _scheduleSyncActivePetToYardGame();
       _safeSetState(() {});
-      _showSnack(
-        '[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)',
-      );
+      _showSnack('[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)');
     } catch (e, st) {
       debugPrint('debug set just before adult failed: $e\n$st');
       if (mounted) {
@@ -7321,6 +7404,12 @@ class _HomePageState extends State<HomePage>
           unawaited(_submitGameMenuProfileNickname());
         }
         break;
+      case 'profile_target_weight_kg':
+        if (_isProfilePanelOpen) {
+          unawaited(_submitGameMenuProfileTargetWeight());
+          return;
+        }
+        break;
       case 'pet_naming':
         unawaited(_submitPetNaming());
         return;
@@ -7363,6 +7452,7 @@ class _HomePageState extends State<HomePage>
     String hintText = '',
     EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10),
     Alignment alignment = Alignment.centerLeft,
+    Alignment? hintAlignment,
     BoxDecoration? decoration,
     double? height,
   }) {
@@ -7405,13 +7495,13 @@ class _HomePageState extends State<HomePage>
           listenable: controller,
           builder: (context, _) {
             final displayText = controller.text;
-            final isEmpty = displayText.trim().isEmpty;
+            final isEmpty = displayText.isEmpty;
             return Ink(
               height: height,
               padding: padding,
               decoration: shellDecoration,
               child: Align(
-                alignment: alignment,
+                alignment: isEmpty ? (hintAlignment ?? alignment) : alignment,
                 child: Text(
                   isEmpty ? hintText : displayText,
                   maxLines: maxLines,
@@ -7460,7 +7550,7 @@ class _HomePageState extends State<HomePage>
     }
     final keyboardVisible = bottomInset > 0;
     final isDietNote = inputKey == 'diet_note';
-    final maxLines = isDietNote ? 2 : 1;
+    final maxLines = isDietNote ? 4 : 1;
     final formatters = _keyboardAccessoryFormattersByKey[inputKey] ?? const [];
     const fieldStyle = TextStyle(
       fontFamily: 'Pretendard',
@@ -7484,7 +7574,7 @@ class _HomePageState extends State<HomePage>
               child: Material(
                 color: Colors.transparent,
                 child: Container(
-                  height: 40,
+                  height: isDietNote ? 88 : 40,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 4,
@@ -8256,19 +8346,18 @@ class _HomePageState extends State<HomePage>
     _showStartupLoadingOverlay = true;
     _startupLoadingCompleting = false;
 
-    _startupLoadingTimer = Timer.periodic(
-      const Duration(milliseconds: 70),
-      (_) {
-        if (!mounted) return;
-        if (!_showStartupLoadingOverlay) return;
-        if (_startupLoadingProgress >= 0.85) return;
+    _startupLoadingTimer = Timer.periodic(const Duration(milliseconds: 70), (
+      _,
+    ) {
+      if (!mounted) return;
+      if (!_showStartupLoadingOverlay) return;
+      if (_startupLoadingProgress >= 0.85) return;
 
-        setState(() {
-          final next = _startupLoadingProgress + 0.018;
-          _startupLoadingProgress = next > 0.85 ? 0.85 : next;
-        });
-      },
-    );
+      setState(() {
+        final next = _startupLoadingProgress + 0.018;
+        _startupLoadingProgress = next > 0.85 ? 0.85 : next;
+      });
+    });
   }
 
   Future<void> _completeStartupLoadingWhenYardReady() async {
@@ -8288,9 +8377,7 @@ class _HomePageState extends State<HomePage>
               .timeout(
                 const Duration(seconds: 5),
                 onTimeout: () {
-                  debugPrint(
-                    'startup YardGame spawn timeout: petId=$petId',
-                  );
+                  debugPrint('startup YardGame spawn timeout: petId=$petId');
                   return false;
                 },
               );
@@ -8372,6 +8459,7 @@ class _HomePageState extends State<HomePage>
                     'assets/images/ui/loading/loading_logo.png',
                     fit: BoxFit.contain,
                     filterQuality: FilterQuality.high,
+                    gaplessPlayback: true,
                   ),
                 ),
                 Positioned(
@@ -8383,9 +8471,7 @@ class _HomePageState extends State<HomePage>
                     borderRadius: BorderRadius.circular(999),
                     child: Stack(
                       children: [
-                        Container(
-                          color: Colors.white.withValues(alpha: 0.40),
-                        ),
+                        Container(color: Colors.white.withValues(alpha: 0.40)),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
@@ -10471,10 +10557,10 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildInYardProfileSetupPanel({required bool visible}) {
     return Positioned(
-      left: 286,
-      top: 83,
-      width: 272,
-      height: 224,
+      left: _kProfileSetupPanelLeft,
+      top: _kProfileSetupPanelTop,
+      width: _kProfileSetupPanelWidth,
+      height: _kProfileSetupPanelHeight,
       child: IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
@@ -11996,8 +12082,10 @@ class _HomePageState extends State<HomePage>
                     onPressed: () {
                       _yardGame.resetPetShadowTune();
                       _safeSetState(() {
-                        _petShadowColorHexInput = PetShadowTunePreferences
-                            .colorToHex(_yardGame.petShadowTune.color);
+                        _petShadowColorHexInput =
+                            PetShadowTunePreferences.colorToHex(
+                              _yardGame.petShadowTune.color,
+                            );
                         _petShadowColorHexController.text =
                             _petShadowColorHexInput;
                       });
@@ -12055,9 +12143,8 @@ class _HomePageState extends State<HomePage>
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
         borderRadius: BorderRadius.circular(6),
-        onTap: () => _safeSetState(
-          () => _isHeartTunePanelOpen = !_isHeartTunePanelOpen,
-        ),
+        onTap: () =>
+            _safeSetState(() => _isHeartTunePanelOpen = !_isHeartTunePanelOpen),
         child: const Padding(
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
@@ -12246,9 +12333,7 @@ class _HomePageState extends State<HomePage>
                       min: 300,
                       max: 2500,
                       onChanged: (v) {
-                        _yardGame.updatePettingHeartTune(
-                          durationMs: v.round(),
-                        );
+                        _yardGame.updatePettingHeartTune(durationMs: v.round());
                         _safeSetState(() {});
                         unawaited(_persistPettingHeartTune());
                       },
@@ -12310,8 +12395,8 @@ class _HomePageState extends State<HomePage>
                       _safeSetState(() {
                         _pettingHeartColorHexInput =
                             PettingHeartTunePreferences.colorToHex(
-                          _yardGame.pettingHeartTune.color,
-                        );
+                              _yardGame.pettingHeartTune.color,
+                            );
                         _pettingHeartColorHexController.text =
                             _pettingHeartColorHexInput;
                       });
@@ -12478,9 +12563,8 @@ class _HomePageState extends State<HomePage>
                   _buildPetMotionTuneTargetChip(
                     label: _petMotionDebugLabel(motion),
                     selected: _selectedPetMotionTuning == motion,
-                    onTap: () => _safeSetState(
-                      () => _selectedPetMotionTuning = motion,
-                    ),
+                    onTap: () =>
+                        _safeSetState(() => _selectedPetMotionTuning = motion),
                   ),
               ],
             ),
@@ -12488,8 +12572,9 @@ class _HomePageState extends State<HomePage>
             Builder(
               builder: (context) {
                 final tuning = _debugTuningForMotion(_selectedPetMotionTuning);
-                final motionLabel =
-                    _petMotionDebugLabel(_selectedPetMotionTuning);
+                final motionLabel = _petMotionDebugLabel(
+                  _selectedPetMotionTuning,
+                );
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -15561,9 +15646,33 @@ class _HomePageState extends State<HomePage>
       String label,
       Widget field, {
       double? labelFontSize,
+      bool fitLabel = false,
+      Widget? labelOverride,
     }) {
       final useW = fieldW.clamp(100.0, _kGameMenuProfileFieldW);
       final resolvedLabelSize = labelFontSize ?? (isEn ? 10 : 11);
+      final labelStyle = TextStyle(
+        fontSize: resolvedLabelSize,
+        fontWeight: FontWeight.w600,
+        color: const Color(0xFF000000),
+        height: 1.15,
+      );
+      Widget labelChild =
+          labelOverride ??
+          Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: fitLabel ? TextOverflow.visible : TextOverflow.ellipsis,
+            style: labelStyle,
+          );
+      if (fitLabel && labelOverride == null) {
+        labelChild = FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: labelChild,
+        );
+      }
       return Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -15571,17 +15680,8 @@ class _HomePageState extends State<HomePage>
             width: _kGameMenuProfileLabelW,
             // 영어 "Age Range" / "Diet Goal" 등은 길어서 ellipsis 가 발생.
             // 50px 라벨 폭은 유지하고 fontSize 만 영어에서 10 으로 줄여 1줄 표시.
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: resolvedLabelSize,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF000000),
-                height: 1.15,
-              ),
-            ),
+            // 목표 체중 등 fitLabel 행은 FittedBox 로 잘림 없이 최대 크기로 축소.
+            child: labelChild,
           ),
           const SizedBox(width: _kGameMenuProfileRowGap),
           SizedBox(width: useW, child: field),
@@ -15733,20 +15833,105 @@ class _HomePageState extends State<HomePage>
                           },
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
+                      rowForWidth(
+                        fieldW,
+                        l10n.profileTargetWeightKg,
+                        fieldShell(
+                          _buildKeyboardAccessoryTriggerField(
+                            key: 'profile_target_weight_kg',
+                            controller: _targetWeightController,
+                            sourceFocusNode: _targetWeightFocusNode,
+                            enabled: fieldsEnabled,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              WeightKgInputFormatter(),
+                              LengthLimitingTextInputFormatter(
+                                6,
+                                maxLengthEnforcement:
+                                    MaxLengthEnforcement.enforced,
+                              ),
+                            ],
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF4A4A4A),
+                              height: 1.1,
+                            ),
+                            hintText: l10n.profileTargetWeightOptional,
+                            hintStyle: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF7C7C7C),
+                              height: 1.1,
+                            ),
+                            alignment: Alignment.centerLeft,
+                            hintAlignment: Alignment.center,
+                            maxLines: 1,
+                            padding: EdgeInsets.zero,
+                            decoration: const BoxDecoration(
+                              color: Colors.transparent,
+                            ),
+                          ),
+                        ),
+                        // 한국어: 1줄 FittedBox. 영어: Target weight / (kg) 2줄.
+                        labelFontSize: 11,
+                        fitLabel: !isEn,
+                        labelOverride: isEn
+                            ? Builder(
+                                builder: (_) {
+                                  final full = l10n.profileTargetWeightKg;
+                                  final kgIdx = full.lastIndexOf('(');
+                                  final line1 = kgIdx > 0
+                                      ? full.substring(0, kgIdx).trim()
+                                      : full;
+                                  final line2 = kgIdx > 0
+                                      ? full.substring(kgIdx).trim()
+                                      : '';
+                                  const twoLineStyle = TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF000000),
+                                    height: 1.05,
+                                  );
+                                  return SizedBox(
+                                    height: 26,
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.center,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            line1,
+                                            textAlign: TextAlign.center,
+                                            maxLines: 1,
+                                            softWrap: false,
+                                            style: twoLineStyle,
+                                          ),
+                                          if (line2.isNotEmpty)
+                                            Text(
+                                              line2,
+                                              textAlign: TextAlign.center,
+                                              maxLines: 1,
+                                              softWrap: false,
+                                              style: twoLineStyle,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              )
+                            : null,
+                      ),
+                      SizedBox(height: isEn ? 8 : 12),
                       Text(
                         l10n.profilePanelFootnoteAi,
-                        softWrap: true,
-                        style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4A4A4A),
-                          height: 1.35,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        l10n.profileAutoSaveHint,
                         softWrap: true,
                         style: const TextStyle(
                           fontSize: 9,
@@ -16010,7 +16195,13 @@ class _HomePageState extends State<HomePage>
           .eq('id', user.id);
       await _fetchProfile();
       if (!mounted) return;
-      _syncProfileFormFromFetched();
+      _syncProfileFormFromFetched(force: patch.containsKey('target_weight_kg'));
+      if (patch.containsKey('target_weight_kg')) {
+        _targetWeightController.text = formatWeightKgForInput(
+          _profile?['target_weight_kg'],
+        );
+        _profilePanelInitialTargetWeightKg = _targetWeightController.text;
+      }
       _safeSetState(() {});
     } catch (e) {
       if (!mounted) return;
@@ -16019,7 +16210,13 @@ class _HomePageState extends State<HomePage>
         await _fetchProfile();
       } catch (_) {}
       if (mounted) {
-        _syncProfileFormFromFetched();
+        _syncProfileFormFromFetched(force: true);
+        if (patch.containsKey('target_weight_kg')) {
+          _targetWeightController.text = formatWeightKgForInput(
+            _profile?['target_weight_kg'],
+          );
+          _profilePanelInitialTargetWeightKg = _targetWeightController.text;
+        }
         _safeSetState(() {});
       }
     } finally {
@@ -16040,11 +16237,64 @@ class _HomePageState extends State<HomePage>
     await _persistGameMenuProfilePatch({'nickname': nickname});
   }
 
+  /// 목표체중 입력 파싱. 빈 값 → (valid, null). 범위 밖/비숫자 → invalid.
+  ({bool isValid, double? value}) _evaluateTargetWeightInput() {
+    final raw = _targetWeightController.text.trim();
+    if (raw.isEmpty) return (isValid: true, value: null);
+    final parsed = double.tryParse(raw);
+    if (parsed == null || !parsed.isFinite || parsed < 1 || parsed > 500) {
+      return (isValid: false, value: null);
+    }
+    return (isValid: true, value: parsed);
+  }
+
+  double? _targetWeightKgFromDisplayText(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return null;
+    return double.tryParse(text);
+  }
+
+  bool _isSameTargetWeightDisplay(String a, String b) {
+    final pa = _targetWeightKgFromDisplayText(a);
+    final pb = _targetWeightKgFromDisplayText(b);
+    final aEmpty = a.trim().isEmpty;
+    final bEmpty = b.trim().isEmpty;
+    if (aEmpty && bEmpty) return true;
+    if (pa == null && pb == null) return a.trim() == b.trim();
+    if (pa == null || pb == null) return false;
+    return pa == pb;
+  }
+
+  bool _isTargetWeightPanelDirty() {
+    return !_isSameTargetWeightDisplay(
+      _targetWeightController.text,
+      _profilePanelInitialTargetWeightKg,
+    );
+  }
+
+  Future<void> _submitGameMenuProfileTargetWeight() async {
+    if (_isSavingProfilePanel) return;
+    final evaluated = _evaluateTargetWeightInput();
+    if (!evaluated.isValid) {
+      if (!mounted) return;
+      _showSnack(AppLocalizations.of(context).profileTargetWeightKgInvalid);
+      return;
+    }
+    if (!_isTargetWeightPanelDirty()) {
+      _dismissKeyboardSessionOnly();
+      return;
+    }
+    await _persistGameMenuProfilePatch({'target_weight_kg': evaluated.value});
+    if (!mounted) return;
+    _dismissKeyboardSessionOnly();
+  }
+
   void _captureProfilePanelInitialValues() {
     _profilePanelInitialNickname = _nicknameController.text.trim();
     _profilePanelInitialGender = _selectedGender;
     _profilePanelInitialAgeRange = _selectedAgeRange;
     _profilePanelInitialDietGoal = _selectedDietGoal;
+    _profilePanelInitialTargetWeightKg = _targetWeightController.text;
   }
 
   bool _isProfilePanelDirty() {
@@ -16052,7 +16302,8 @@ class _HomePageState extends State<HomePage>
     return nickname != _profilePanelInitialNickname ||
         _selectedGender != _profilePanelInitialGender ||
         _selectedAgeRange != _profilePanelInitialAgeRange ||
-        _selectedDietGoal != _profilePanelInitialDietGoal;
+        _selectedDietGoal != _profilePanelInitialDietGoal ||
+        _isTargetWeightPanelDirty();
   }
 
   Future<bool> _saveProfilePanelIfDirtyBeforeClose() async {
@@ -16090,6 +16341,25 @@ class _HomePageState extends State<HomePage>
       return false;
     }
 
+    final evaluatedTarget = _evaluateTargetWeightInput();
+    if (!evaluatedTarget.isValid) {
+      _showSnack(l10n.profileTargetWeightKgInvalid);
+      _openKeyboardAccessoryEditor(
+        key: 'profile_target_weight_kg',
+        controller: _targetWeightController,
+        sourceFocusNode: _targetWeightFocusNode,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          WeightKgInputFormatter(),
+          LengthLimitingTextInputFormatter(
+            6,
+            maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          ),
+        ],
+      );
+      return false;
+    }
+
     _safeSetState(() => _isSavingProfilePanel = true);
 
     try {
@@ -16100,6 +16370,7 @@ class _HomePageState extends State<HomePage>
         'gender': _selectedGender,
         'age_range': _selectedAgeRange,
         'diet_goal': _selectedDietGoal,
+        'target_weight_kg': evaluatedTarget.value,
         'updated_at': nowIso,
       };
 
@@ -16196,6 +16467,10 @@ class _HomePageState extends State<HomePage>
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     _syncProfileFormFromFetched();
+    // 게임 메뉴 프로필 오픈 시 DB 목표체중으로 controller를 강제 동기화한다.
+    _targetWeightController.text = formatWeightKgForInput(
+      _profile?['target_weight_kg'],
+    );
     _captureProfilePanelInitialValues();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
@@ -16499,12 +16774,50 @@ class _HomePageState extends State<HomePage>
     await _closeActiveGameMenuFromOutsideBackdropTap();
   }
 
-  /// 식단일지 상단 우측 "May. 26" 형식 (MVP 와이어 기준, 월 약어 + 연도 2자리).
-  String _formatDietDiaryMonthYearCaption(DateTime m) {
+  /// 식단일지 달력 헤더 우측 연·월.
+  /// 한국어: `26년 7월` / 영어: 기존 `Jul. 26` 유지.
+  String _formatDietDiaryMonthYearCaption(BuildContext context, DateTime m) {
+    final isKorean = Localizations.localeOf(context).languageCode == 'ko';
+    if (isKorean) {
+      final shortYear = (m.year % 100).toString().padLeft(2, '0');
+      return '$shortYear년 ${m.month}월';
+    }
     final raw = DateFormat('MMM', 'en_US').format(m);
     final mon = raw.endsWith('.') ? raw : '$raw.';
     final yy = (m.year % 100).toString().padLeft(2, '0');
     return '$mon $yy';
+  }
+
+  /// 월 선택창 월 이름. 한국어: `7월` / 영어: 기존 `Jul.` 유지.
+  String _formatDiaryMonthPickerLabel(BuildContext context, int month) {
+    const enLabels = <String>[
+      'Jan.',
+      'Feb.',
+      'Mar.',
+      'Apr.',
+      'May.',
+      'Jun.',
+      'Jul.',
+      'Aug.',
+      'Sep.',
+      'Oct.',
+      'Nov.',
+      'Dec.',
+    ];
+    final isKorean = Localizations.localeOf(context).languageCode == 'ko';
+    if (isKorean) return '$month월';
+    return enLabels[month - 1];
+  }
+
+  double? _parseDiaryWeightKg(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is num) {
+      final v = raw.toDouble();
+      return v.isFinite ? v : null;
+    }
+    final parsed = double.tryParse(raw.toString().trim().replaceAll(',', '.'));
+    if (parsed == null || !parsed.isFinite) return null;
+    return parsed;
   }
 
   Widget _buildDietDiaryGameMenuGlassPanel() {
@@ -16536,6 +16849,7 @@ class _HomePageState extends State<HomePage>
           onPhotoTap: _showMealPhotoPreview,
           fetchNote: _fetchMealDiaryNote,
           saveNote: _saveMealDiaryNote,
+          targetWeightKg: _profile?['target_weight_kg'],
           bindKeyboardInput: _ensureKeyboardFocusBinding,
           buildKeyboardTriggerField: _buildKeyboardAccessoryTriggerField,
           calendarBuilder:
@@ -17795,6 +18109,7 @@ class _HomePageState extends State<HomePage>
             'gender': null,
             'age_range': null,
             'diet_goal': null,
+            'target_weight_kg': null,
             // profiles 만 guest 로 초기화해도 auth.users 이메일은 남을 수 있다.
             // 같은 이메일 재사용까지 보장하려면 Edge Function 삭제가 성공해야 한다.
             'email': null,
@@ -18155,44 +18470,67 @@ class _HomePageState extends State<HomePage>
     return DateTime(month.year, month.month, 1);
   }
 
-  // 보이는 월의 meal_logs 를 가져와 [_diaryLogsByDate] 캐시를 갱신한다.
-  // 도장 표시는 "아점/저녁 중 하나라도 있으면" 으로 판단하므로 키만 있으면 충분하다.
+  // 보이는 월의 meal_logs / meal_diary_notes 를 가져와 캐시를 갱신한다.
+  // 도장: meal_logs 존재 / ★: current_weight ≤ target_weight.
   Future<void> _fetchDiaryMonthLogs(DateTime month) async {
     final user = supabase.auth.currentUser;
     if (user == null) {
       _diaryLogsByDate = {};
+      _diaryCurrentWeightByDate = {};
       _diaryLogsCachedMonthKey = null;
       return;
     }
     final start = _dateKey(_monthStart(month));
     final end = _dateKey(_monthEnd(month));
     try {
-      final data = await supabase
-          .from('meal_logs')
-          .select(
-            'id, user_id, user_pet_id, meal_date, meal_slot, result_type, affection_gain, image_path, memo, captured_at, created_at',
-          )
-          .eq('user_id', user.id)
-          .gte('meal_date', start)
-          .lte('meal_date', end);
+      final results = await Future.wait([
+        supabase
+            .from('meal_logs')
+            .select(
+              'id, user_id, user_pet_id, meal_date, meal_slot, result_type, affection_gain, image_path, memo, captured_at, created_at',
+            )
+            .eq('user_id', user.id)
+            .gte('meal_date', start)
+            .lte('meal_date', end),
+        supabase
+            .from('meal_diary_notes')
+            .select('diary_date, current_weight_kg')
+            .eq('user_id', user.id)
+            .gte('diary_date', start)
+            .lte('diary_date', end),
+      ]);
 
-      final rows = (data as List)
+      final logRows = (results[0] as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      final noteRows = (results[1] as List)
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
 
       final byDate = <String, List<Map<String, dynamic>>>{};
-      for (final row in rows) {
+      for (final row in logRows) {
         final key = row['meal_date']?.toString();
         if (key == null || key.isEmpty) continue;
         byDate.putIfAbsent(key, () => []).add(row);
       }
+
+      final weightByDate = <String, double?>{};
+      for (final row in noteRows) {
+        final key = row['diary_date']?.toString();
+        if (key == null || key.isEmpty) continue;
+        weightByDate[key] = _parseDiaryWeightKg(row['current_weight_kg']);
+      }
+
       _diaryLogsByDate = byDate;
+      _diaryCurrentWeightByDate = weightByDate;
       _diaryLogsCachedMonthKey =
           '${month.year}-${month.month.toString().padLeft(2, '0')}';
     } catch (e) {
       debugPrint('fetch diary month logs failed: $e');
       _diaryLogsByDate = {};
+      _diaryCurrentWeightByDate = {};
       _diaryLogsCachedMonthKey = null;
     }
   }
@@ -18222,7 +18560,7 @@ class _HomePageState extends State<HomePage>
   //       id uuid primary key default gen_random_uuid(),
   //       user_id uuid not null references auth.users(id) on delete cascade,
   //       diary_date date not null,
-  //       weight_kg numeric,
+  //       current_weight_kg numeric,
   //       note_text text,
   //       created_at timestamptz default now(),
   //       updated_at timestamptz default now(),
@@ -18234,7 +18572,7 @@ class _HomePageState extends State<HomePage>
     try {
       final data = await supabase
           .from('meal_diary_notes')
-          .select('id, user_id, diary_date, weight_kg, note_text')
+          .select('id, user_id, diary_date, current_weight_kg, note_text')
           .eq('user_id', user.id)
           .eq('diary_date', dateKey)
           .maybeSingle();
@@ -18260,7 +18598,7 @@ class _HomePageState extends State<HomePage>
       return false;
     }
 
-    double? weight;
+    double? currentWeightKg;
     final wRaw = (weightText ?? '').trim();
     if (wRaw.isNotEmpty) {
       final parsed = double.tryParse(wRaw.replaceAll(',', '.'));
@@ -18268,7 +18606,7 @@ class _HomePageState extends State<HomePage>
         _showSnack(l10n.snackWeightNumberOnly);
         return false;
       }
-      weight = parsed;
+      currentWeightKg = parsed;
     }
 
     final dateKey = _dateKey(date);
@@ -18278,10 +18616,12 @@ class _HomePageState extends State<HomePage>
       await supabase.from('meal_diary_notes').upsert({
         'user_id': user.id,
         'diary_date': dateKey,
-        'weight_kg': weight,
+        'current_weight_kg': currentWeightKg,
         'note_text': note.isEmpty ? null : note,
         'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,diary_date');
+      // 달력 ★ 즉시 반영용 캐시 갱신.
+      _diaryCurrentWeightByDate[dateKey] = currentWeightKg;
       return true;
     } catch (e) {
       _showSnack(l10n.snackDiarySaveFailed(e.toString()));
@@ -18349,6 +18689,7 @@ class _HomePageState extends State<HomePage>
     const kMuted = Color(0xFF6A6A6A);
     const kSunday = Color(0xFF7E7E7E);
     const kDot = Color(0xFFFF0000);
+    const kGoalStar = Color(0xFF0051FF);
     const diaryFontFallback = <String>['Courier New', 'Courier', 'monospace'];
     final mono = TextStyle(
       fontSize: 11,
@@ -18359,6 +18700,7 @@ class _HomePageState extends State<HomePage>
       height: 1.05,
     );
     final monoSunday = mono.copyWith(color: kSunday);
+    final targetWeightKg = _parseDiaryWeightKg(_profile?['target_weight_kg']);
 
     final canPrev = _isDiaryMonthInRange(
       DateTime(visibleMonth.year, visibleMonth.month - 1, 1),
@@ -18383,11 +18725,16 @@ class _HomePageState extends State<HomePage>
       final date = DateTime(visibleMonth.year, visibleMonth.month, day);
       final dateKey = _dateKey(date);
       final hasMeal = (diaryLogsByDate[dateKey] ?? const []).isNotEmpty;
+      final isGoalAchieved = isWeightGoalAchieved(
+        currentWeightKg: _diaryCurrentWeightByDate[dateKey],
+        targetWeightKg: targetWeightKg,
+      );
       final isToday = dateKey == today;
       final isSundayCol = c == 0;
 
       return Material(
         color: Colors.transparent,
+        clipBehavior: Clip.none,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () => onTapDate(date),
@@ -18404,7 +18751,7 @@ class _HomePageState extends State<HomePage>
             ),
             child: Center(
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(vertical: 1),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
@@ -18414,18 +18761,37 @@ class _HomePageState extends State<HomePage>
                       style: isSundayCol ? monoSunday : mono,
                       textAlign: TextAlign.center,
                     ),
-                    SizedBox(height: hasMeal ? 3 : 5),
-                    if (hasMeal)
-                      Container(
-                        width: 4,
-                        height: 4,
-                        decoration: const BoxDecoration(
-                          color: kDot,
-                          shape: BoxShape.circle,
-                        ),
-                      )
-                    else
-                      const SizedBox(height: 4),
+                    const SizedBox(height: 2),
+                    // 점(4px)과 ★(≈9px)가 같은 슬롯을 쓰도록 높이를 맞춘다.
+                    // 이전 height:4 슬롯은 ★ glyph 가 세로로 잘렸다.
+                    SizedBox(
+                      height: 10,
+                      child: Center(
+                        child: isGoalAchieved
+                            ? const Text(
+                                '★',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  color: kGoalStar,
+                                  height: 1.0,
+                                  leadingDistribution:
+                                      TextLeadingDistribution.even,
+                                ),
+                              )
+                            : hasMeal
+                            ? Container(
+                                width: 4,
+                                height: 4,
+                                decoration: const BoxDecoration(
+                                  color: kDot,
+                                  shape: BoxShape.circle,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -18530,25 +18896,12 @@ class _HomePageState extends State<HomePage>
     const kBlack = Color(0xFF000000);
     final canPrevYear = visibleYear > _diaryMinMonth.year;
     final canNextYear = visibleYear < _diaryMaxMonth.year;
-    const monthLabels = <String>[
-      'Jan.',
-      'Feb.',
-      'Mar.',
-      'Apr.',
-      'May.',
-      'Jun.',
-      'Jul.',
-      'Aug.',
-      'Sep.',
-      'Oct.',
-      'Nov.',
-      'Dec.',
-    ];
 
     Widget monthCell(int month) {
       final isSelected =
           visibleYear == highlightYear && month == highlightMonth;
       final enabled = _isDiaryMonthInRange(DateTime(visibleYear, month, 1));
+      final label = _formatDiaryMonthPickerLabel(sheetContext, month);
 
       return Material(
         color: Colors.transparent,
@@ -18574,7 +18927,7 @@ class _HomePageState extends State<HomePage>
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                monthLabels[month - 1],
+                label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13,
@@ -18778,6 +19131,41 @@ class _HomePageState extends State<HomePage>
       color: Color(0xFF4A4A4A),
       height: 1.0,
     );
+    const targetWeightLabelStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF000000),
+      height: 1.0,
+    );
+    // placeholder만 중앙, 입력값은 닉네임과 동일(좌측·11pt).
+    const targetWeightHintStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF7C7C7C),
+      height: 1.0,
+    );
+
+    // 패널 266 / padding 14*2 → content 238.
+    // 대제목↔닉네임↔…↔목표체중↔시작하기 사이 6개 gap을 동일하게.
+    const double profileSetupContentHeight = 238;
+    const double profileSetupTitleHeight = 16;
+    const double profileSetupRowHeight = 26;
+    const double profileSetupStartButtonHeight = 36;
+    const double profileSetupStartButtonBottomGap = 2;
+    const double profileSetupStartButtonTop =
+        profileSetupContentHeight -
+        profileSetupStartButtonHeight -
+        profileSetupStartButtonBottomGap; // 200
+    const int profileSetupGapCount = 6;
+    const double profileSetupEqualGap =
+        (profileSetupStartButtonTop -
+            profileSetupTitleHeight -
+            (5 * profileSetupRowHeight)) /
+        profileSetupGapCount; // 9
+    double profileSetupRowTop(int index) =>
+        profileSetupTitleHeight +
+        profileSetupEqualGap +
+        index * (profileSetupRowHeight + profileSetupEqualGap);
 
     Widget iosFieldShell({required Widget child}) {
       return Container(
@@ -18799,35 +19187,91 @@ class _HomePageState extends State<HomePage>
       required String label,
       required Widget field,
       double? labelFontSize,
+      TextStyle? labelStyleOverride,
+      bool fitLabel = false,
+      Widget? labelOverride,
     }) {
-      final rowLabelStyle = labelFontSize == null
-          ? labelStyle
-          : labelStyle.copyWith(fontSize: labelFontSize);
+      final rowLabelStyle =
+          labelStyleOverride ??
+          (labelFontSize == null
+              ? labelStyle
+              : labelStyle.copyWith(fontSize: labelFontSize));
+      Widget labelChild =
+          labelOverride ??
+          Text(
+            label,
+            textAlign: TextAlign.left,
+            maxLines: 1,
+            softWrap: false,
+            style: rowLabelStyle,
+          );
+      if (fitLabel && labelOverride == null) {
+        labelChild = FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: labelChild,
+        );
+      }
       return Positioned(
         top: top,
         left: 0,
         width: 244,
-        height: 26,
+        height: profileSetupRowHeight,
         child: Row(
           children: [
-            SizedBox(
-              width: 60,
-              child: Text(
-                label,
-                textAlign: TextAlign.left,
-                style: rowLabelStyle,
-              ),
-            ),
+            SizedBox(width: 60, child: labelChild),
             const SizedBox(width: 8),
-            SizedBox(width: 176, height: 26, child: field),
+            SizedBox(width: 176, height: profileSetupRowHeight, child: field),
           ],
+        ),
+      );
+    }
+
+    Widget? englishTargetWeightLabel() {
+      if (!_isEnglishLocale) return null;
+      final full = l10n.profileTargetWeightKg;
+      final kgIdx = full.lastIndexOf('(');
+      final line1 = kgIdx > 0 ? full.substring(0, kgIdx).trim() : full;
+      final line2 = kgIdx > 0 ? full.substring(kgIdx).trim() : '';
+      const twoLineStyle = TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF000000),
+        height: 1.05,
+      );
+      return SizedBox(
+        height: profileSetupRowHeight,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                line1,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                softWrap: false,
+                style: twoLineStyle,
+              ),
+              if (line2.isNotEmpty)
+                Text(
+                  line2,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: twoLineStyle,
+                ),
+            ],
+          ),
         ),
       );
     }
 
     return SizedBox(
       width: 244,
-      height: 196,
+      height: profileSetupContentHeight,
       child: Stack(
         children: [
           Positioned(
@@ -18840,7 +19284,7 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           row(
-            top: 30,
+            top: profileSetupRowTop(0),
             label: l10n.nickname,
             field: iosFieldShell(
               child: _buildKeyboardAccessoryTriggerField(
@@ -18862,7 +19306,7 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           row(
-            top: 60,
+            top: profileSetupRowTop(1),
             label: l10n.gender,
             field: _buildCompactProfileSelect(
               selectKey: 'gender',
@@ -18874,7 +19318,7 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           row(
-            top: 90,
+            top: profileSetupRowTop(2),
             label: l10n.ageRange,
             labelFontSize: _isEnglishLocale ? 10 : null,
             field: _buildCompactProfileSelect(
@@ -18888,7 +19332,7 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           row(
-            top: 120,
+            top: profileSetupRowTop(3),
             label: l10n.dietGoal,
             field: _buildCompactProfileSelect(
               selectKey: 'dietGoal',
@@ -18899,11 +19343,44 @@ class _HomePageState extends State<HomePage>
               onChanged: (value) => setState(() => _selectedDietGoal = value),
             ),
           ),
+          row(
+            top: profileSetupRowTop(4),
+            label: l10n.profileTargetWeightKg,
+            labelStyleOverride: targetWeightLabelStyle,
+            fitLabel: !_isEnglishLocale,
+            labelOverride: englishTargetWeightLabel(),
+            field: iosFieldShell(
+              child: _buildKeyboardAccessoryTriggerField(
+                key: 'profile_target_weight_kg',
+                controller: _targetWeightController,
+                sourceFocusNode: _targetWeightFocusNode,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  WeightKgInputFormatter(),
+                  LengthLimitingTextInputFormatter(
+                    6,
+                    maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                  ),
+                ],
+                enabled: !_isSavingProfile,
+                style: fieldTextStyle,
+                hintText: l10n.profileTargetWeightOptional,
+                hintStyle: targetWeightHintStyle,
+                alignment: Alignment.centerLeft,
+                hintAlignment: Alignment.center,
+                maxLines: 1,
+                padding: EdgeInsets.zero,
+                decoration: const BoxDecoration(color: Colors.transparent),
+              ),
+            ),
+          ),
           Positioned(
-            top: 158,
+            top: profileSetupStartButtonTop,
             left: 0,
             width: 244,
-            height: 36,
+            height: profileSetupStartButtonHeight,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -18982,7 +19459,10 @@ class _HomePageState extends State<HomePage>
       _debugBlock(
         title: 'pet_species',
         children: [
-          _kv('count', '${_mvpPetSpecies().length}종 (MVP) / ${_petSpecies.length}종 (DB)'),
+          _kv(
+            'count',
+            '${_mvpPetSpecies().length}종 (MVP) / ${_petSpecies.length}종 (DB)',
+          ),
           _kv(
             'cat',
             '${_petSpecies.where((s) => s['family'] == 'cat').length}종',
@@ -19156,6 +19636,10 @@ class _HomePageState extends State<HomePage>
       _kv('gender', p['gender']?.toString() ?? '(없음)'),
       _kv('age_range', p['age_range']?.toString() ?? '(없음)'),
       _kv('diet_goal', p['diet_goal']?.toString() ?? '(없음)'),
+      _kv(
+        'has_target_weight_kg',
+        p['target_weight_kg'] == null ? 'false' : 'true',
+      ),
       _kv('account_type', accountType),
       _kv('gold_balance', p['gold_balance']?.toString() ?? '-'),
       _kv('linked_at', p['linked_at']?.toString() ?? '(null)'),
@@ -19405,6 +19889,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required this.onPhotoTap,
     required this.fetchNote,
     required this.saveNote,
+    this.targetWeightKg,
     required this.calendarBuilder,
     required this.monthPickerBuilder,
     this.bindKeyboardInput,
@@ -19416,7 +19901,8 @@ class _DietDiarySheetPanel extends StatefulWidget {
 
   final bool embeddedInGameMenuPanel;
   final VoidCallback? onEmbeddedBack;
-  final String Function(DateTime month)? monthYearCaptionBuilder;
+  final String Function(BuildContext context, DateTime month)?
+  monthYearCaptionBuilder;
 
   final DateTime initialMonth;
   final DateTime Function(DateTime month) clampMonth;
@@ -19435,6 +19921,9 @@ class _DietDiarySheetPanel extends StatefulWidget {
     required String noteText,
   })
   saveNote;
+
+  /// profiles.target_weight_kg — 식단일지에서는 조회·표시만 한다.
+  final dynamic targetWeightKg;
   final void Function({
     required String key,
     required TextEditingController controller,
@@ -19576,7 +20065,12 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
     });
   }
 
-  String _formatDetailHeaderCaption(DateTime d) {
+  String _formatDetailHeaderCaption(BuildContext context, DateTime d) {
+    final isKorean = Localizations.localeOf(context).languageCode == 'ko';
+    if (isKorean) {
+      final shortYear = (d.year % 100).toString().padLeft(2, '0');
+      return '$shortYear년 ${d.month}월 ${d.day}일';
+    }
     final raw = DateFormat('MMM', 'en_US').format(d);
     final mon = raw.endsWith('.') ? raw : '$raw.';
     final yy = (d.year % 100).toString().padLeft(2, '0');
@@ -19613,6 +20107,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
         key: _detailPanelKey,
         date: selectedDate!,
         logs: dayLogs,
+        targetWeightKg: widget.targetWeightKg,
         bindKeyboardInput: widget.bindKeyboardInput,
         buildKeyboardTriggerField: widget.buildKeyboardTriggerField,
         signedUrlBuilder: widget.signedUrlBuilder,
@@ -19652,7 +20147,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
       final embeddedTitleTop =
           kVegePetGameMenuSubPanelTitleTop +
           (isEnglish ? kVegePetGameMenuSubPanelTitleTopEnOffset : 0.0);
-      final caption = widget.monthYearCaptionBuilder!(visibleMonth);
+      final caption = widget.monthYearCaptionBuilder!(context, visibleMonth);
       Widget embeddedHeader({
         required String rightCaption,
         required VoidCallback? onCaptionTap,
@@ -19724,7 +20219,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
                           onTap: onCaptionTap,
                           child: Text(
                             rightCaption,
-                            textAlign: TextAlign.center,
+                            textAlign: TextAlign.right,
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -19780,7 +20275,7 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             embeddedHeader(
-              rightCaption: _formatDetailHeaderCaption(selectedDate!),
+              rightCaption: _formatDetailHeaderCaption(context, selectedDate!),
               onCaptionTap: null,
               onBackTap: () => unawaited(_handleDetailBackToCalendar()),
             ),
@@ -19885,6 +20380,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
     super.key,
     required this.date,
     required this.logs,
+    this.targetWeightKg,
     this.bindKeyboardInput,
     required this.signedUrlBuilder,
     required this.onPhotoTap,
@@ -19897,6 +20393,9 @@ class _DietDiaryDetailPanel extends StatefulWidget {
 
   final DateTime date;
   final List<Map<String, dynamic>> logs;
+
+  /// profiles.target_weight_kg (조회 전용)
+  final dynamic targetWeightKg;
   final void Function({
     required String key,
     required TextEditingController controller,
@@ -19939,20 +20438,13 @@ class _DietDiaryDetailPanel extends StatefulWidget {
 class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   static const String _diaryFontFamily = 'Pretendard';
   static const List<String> _diaryFontFallback = <String>['sans-serif'];
-  static final TextInputFormatter _weightFormatter =
-      TextInputFormatter.withFunction((oldValue, newValue) {
-        final text = newValue.text;
-        if (text.isEmpty) return newValue;
-        if (text.length > 6) return oldValue;
-        if (!RegExp(r'^[0-9.]+$').hasMatch(text)) return oldValue;
-        if ('.'.allMatches(text).length > 1) return oldValue;
-        return newValue;
-      });
+  static final TextInputFormatter _weightFormatter = WeightKgInputFormatter();
 
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
   final FocusNode _weightFocusNode = FocusNode();
   final FocusNode _noteFocusNode = FocusNode();
+  final ScrollController _diaryDetailScrollController = ScrollController();
 
   bool _isLoadingNote = true;
   bool _isSaving = false;
@@ -19970,7 +20462,13 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       controller: _weightController,
       focusNode: _weightFocusNode,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [_weightFormatter],
+      inputFormatters: [
+        _weightFormatter,
+        LengthLimitingTextInputFormatter(
+          6,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
     );
     widget.bindKeyboardInput?.call(
       key: 'diet_note',
@@ -19991,17 +20489,26 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
   void didUpdateWidget(covariant _DietDiaryDetailPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.date != widget.date) {
+      _resetDetailScrollOffset();
       _bootstrap();
     }
   }
 
   @override
   void dispose() {
+    _diaryDetailScrollController.dispose();
     _weightFocusNode.dispose();
     _noteFocusNode.dispose();
     _weightController.dispose();
     _noteController.dispose();
     super.dispose();
+  }
+
+  void _resetDetailScrollOffset() {
+    if (_diaryDetailScrollController.hasClients &&
+        _diaryDetailScrollController.offset != 0) {
+      _diaryDetailScrollController.jumpTo(0);
+    }
   }
 
   String _dateKey(DateTime d) {
@@ -20038,8 +20545,8 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
     final note = results[2] as Map<String, dynamic>?;
 
     if (note != null) {
-      final w = note['weight_kg'];
-      _weightController.text = w == null ? '' : w.toString();
+      final w = note['current_weight_kg'];
+      _weightController.text = formatWeightKgForInput(w);
       _noteController.text = note['note_text']?.toString() ?? '';
     } else {
       _weightController.clear();
@@ -20117,6 +20624,114 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
     );
   }
 
+  /// 설정 패널과 동일한 thumb 양식 (3px · #99000000 · radius 20).
+  Widget _buildDiaryDetailManualScrollbar() {
+    return AnimatedBuilder(
+      animation: _diaryDetailScrollController,
+      builder: (context, _) {
+        try {
+          final controller = _diaryDetailScrollController;
+          if (!controller.hasClients) return const SizedBox.shrink();
+          final position = controller.position;
+          if (!position.hasContentDimensions) return const SizedBox.shrink();
+
+          final viewportHeight = position.viewportDimension;
+          final maxScroll = position.maxScrollExtent;
+          if (!viewportHeight.isFinite || viewportHeight <= 0) {
+            return const SizedBox.shrink();
+          }
+          if (!maxScroll.isFinite || maxScroll <= 0) {
+            // 스크롤 불필요해도 thumb 는 항상 보이게 (설정과 동일 양식).
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  width: 3,
+                  height: 24,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0x99000000),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          final contentHeight = viewportHeight + maxScroll;
+          if (!contentHeight.isFinite || contentHeight <= 0) {
+            return const SizedBox.shrink();
+          }
+
+          final rawThumbHeight =
+              viewportHeight * (viewportHeight / contentHeight);
+          if (!rawThumbHeight.isFinite) return const SizedBox.shrink();
+
+          final thumbHeight = rawThumbHeight.clamp(24.0, viewportHeight);
+          final maxThumbTop = viewportHeight - thumbHeight;
+          if (!maxThumbTop.isFinite || maxThumbTop < 0) {
+            return const SizedBox.shrink();
+          }
+
+          final offset = controller.offset;
+          if (!offset.isFinite) return const SizedBox.shrink();
+
+          final fraction = (offset / maxScroll).clamp(0.0, 1.0);
+          final thumbTop = fraction * maxThumbTop;
+          if (!thumbTop.isFinite) return const SizedBox.shrink();
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: thumbTop,
+                right: 0,
+                width: 3,
+                height: thumbHeight,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0x99000000),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+            ],
+          );
+        } catch (e, st) {
+          debugPrint('diary detail scrollbar skipped: $e\n$st');
+          return const SizedBox.shrink();
+        }
+      },
+    );
+  }
+
+  Widget _buildWeightLabelFieldRow({
+    required double labelWidth,
+    required String label,
+    required Widget field,
+    required TextStyle labelStyle,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: labelWidth,
+          child: Text(
+            label,
+            style: labelStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(child: field),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const labelBaseSize = 11.0;
@@ -20137,103 +20752,246 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       fontFamilyFallback: _diaryFontFallback,
       height: 1.2,
     );
+    final l10n = AppLocalizations.of(context);
+    // 라벨이 길어져 입력창은 좌측에서만 축소(우측 끝 유지 = Expanded).
+    final labelWidth = isEnglish ? 128.0 : 98.0;
+    final targetWeightText = formatWeightKgForInput(widget.targetWeightKg);
+    final targetWeightKgParsed = targetWeightText.isEmpty
+        ? null
+        : double.tryParse(targetWeightText);
 
     return GestureDetector(
       behavior: HitTestBehavior.deferToChild,
       onTap: () {},
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 4),
+        child: Stack(
+          fit: StackFit.expand,
+          clipBehavior: Clip.hardEdge,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _photoSlot(
-                  label: AppLocalizations.of(context).diaryPhotoBrunchLabel,
-                  url: _brunchUrl,
-                ),
-                _photoSlot(
-                  label: AppLocalizations.of(context).diaryPhotoDinnerLabel,
-                  url: _dinnerUrl,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: isEnglish ? 76 : 62,
-                  child: Text(
-                    AppLocalizations.of(context).diaryWeightLabel,
-                    style: labelStyle,
-                    maxLines: 1,
-                    overflow: TextOverflow.visible,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: _diaryFieldShell(
-                    child:
-                        widget.buildKeyboardTriggerField?.call(
-                          key: 'diet_weight',
-                          controller: _weightController,
-                          sourceFocusNode: _weightFocusNode,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
+            Positioned(
+              left: 8,
+              right: 8,
+              top: 0,
+              bottom: 0,
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: SingleChildScrollView(
+                  controller: _diaryDetailScrollController,
+                  physics: const ClampingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _photoSlot(
+                            label: l10n.diaryPhotoBrunchLabel,
+                            url: _brunchUrl,
                           ),
-                          inputFormatters: [_weightFormatter],
-                          enabled: !_isSaving && !_isLoadingNote,
-                          style: fieldStyle,
-                          maxLines: 1,
-                          hintText: '',
-                          padding: EdgeInsets.zero,
-                          alignment: Alignment.centerLeft,
-                          decoration: const BoxDecoration(
-                            color: Colors.transparent,
+                          _photoSlot(
+                            label: l10n.diaryPhotoDinnerLabel,
+                            url: _dinnerUrl,
                           ),
-                        ) ??
-                        const SizedBox.shrink(),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 7),
-            Text(
-              AppLocalizations.of(context).diaryNoteLabel,
-              style: labelStyle,
-            ),
-            const SizedBox(height: 4),
-            Expanded(
-              child: _diaryFieldShell(
-                height: double.infinity,
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                alignment: Alignment.topLeft,
-                child:
-                    widget.buildKeyboardTriggerField?.call(
-                      key: 'diet_note',
-                      controller: _noteController,
-                      sourceFocusNode: _noteFocusNode,
-                      keyboardType: TextInputType.multiline,
-                      inputFormatters: [
-                        LengthLimitingTextInputFormatter(
-                          64,
-                          maxLengthEnforcement: MaxLengthEnforcement.enforced,
-                        ),
-                      ],
-                      enabled: !_isSaving && !_isLoadingNote,
-                      style: fieldStyle,
-                      maxLines: 4,
-                      hintText: '',
-                      padding: EdgeInsets.zero,
-                      alignment: Alignment.topLeft,
-                      decoration: const BoxDecoration(
-                        color: Colors.transparent,
+                        ],
                       ),
-                    ) ??
-                    const SizedBox.shrink(),
+                      const SizedBox(height: 8),
+                      _buildWeightLabelFieldRow(
+                        labelWidth: labelWidth,
+                        label: l10n.diaryWeightLabel,
+                        labelStyle: labelStyle,
+                        field: _diaryFieldShell(
+                          child:
+                              widget.buildKeyboardTriggerField?.call(
+                                key: 'diet_weight',
+                                controller: _weightController,
+                                sourceFocusNode: _weightFocusNode,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: [
+                                  _weightFormatter,
+                                  LengthLimitingTextInputFormatter(
+                                    6,
+                                    maxLengthEnforcement:
+                                        MaxLengthEnforcement.enforced,
+                                  ),
+                                ],
+                                enabled: !_isSaving && !_isLoadingNote,
+                                style: fieldStyle,
+                                maxLines: 1,
+                                hintText: '',
+                                padding: EdgeInsets.zero,
+                                alignment: Alignment.centerLeft,
+                                decoration: const BoxDecoration(
+                                  color: Colors.transparent,
+                                ),
+                              ) ??
+                              const SizedBox.shrink(),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      _buildWeightLabelFieldRow(
+                        labelWidth: labelWidth,
+                        label: l10n.diaryTargetWeightKg,
+                        labelStyle: labelStyle,
+                        field: _diaryFieldShell(
+                          child: Text(
+                            targetWeightText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: fieldStyle,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _weightController,
+                        builder: (context, value, _) {
+                          final raw = value.text.trim().replaceAll(',', '.');
+                          final currentWeightKg = raw.isEmpty
+                              ? null
+                              : double.tryParse(raw);
+                          final remaining = computeRemainingWeightDisplay(
+                            currentWeightKg: currentWeightKg,
+                            targetWeightKg: targetWeightKgParsed,
+                          );
+
+                          // 목표 달성/남은 체중 전환 시 아래 항목 y 위치가 흔들리지 않게 행 높이 고정.
+                          return SizedBox(
+                            height: 26,
+                            child: remaining.goalAchieved
+                                ? Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      l10n.diaryWeightGoalAchieved,
+                                      style: labelStyle.copyWith(
+                                        color: const Color(0xFF0051FF),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  )
+                                : LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final boxText =
+                                          remaining.displayValue == null
+                                          ? ''
+                                          : (isEnglish
+                                                ? '${remaining.displayValue} kg'
+                                                : '${remaining.displayValue}kg');
+
+                                      // '• ' 너비 측정 후, 기존 전체 표시창 폭의 1/3만 사용(우측 축소).
+                                      final bulletPainter = TextPainter(
+                                        text: TextSpan(
+                                          text: '• ',
+                                          style: labelStyle,
+                                        ),
+                                        maxLines: 1,
+                                        textDirection: ui.TextDirection.ltr,
+                                      )..layout();
+                                      final suffixPainter = TextPainter(
+                                        text: TextSpan(
+                                          text: l10n.diaryWeightRemaining,
+                                          style: labelStyle,
+                                        ),
+                                        maxLines: 1,
+                                        textDirection: ui.TextDirection.ltr,
+                                      )..layout();
+                                      const gap = 6.0;
+                                      final prevBoxW =
+                                          (constraints.maxWidth -
+                                                  bulletPainter.width -
+                                                  gap -
+                                                  suffixPainter.width)
+                                              .clamp(0.0, constraints.maxWidth);
+                                      // 기존 (prevBoxW/3)+8 최종 너비에 +4px.
+                                      final boxW =
+                                          ((prevBoxW / 3) + 12).clamp(0.0, prevBoxW);
+
+                                      return Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            '• ',
+                                            style: labelStyle,
+                                            maxLines: 1,
+                                          ),
+                                          SizedBox(
+                                            width: boxW,
+                                            child: _diaryFieldShell(
+                                              child: Text(
+                                                boxText,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.left,
+                                                style: fieldStyle,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: gap),
+                                          Text(
+                                            l10n.diaryWeightRemaining,
+                                            style: labelStyle,
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 7),
+                      Text(l10n.diaryNoteLabel, style: labelStyle),
+                      const SizedBox(height: 4),
+                      _diaryFieldShell(
+                        // 4줄(fontSize 11 · height 1.2) + 상하 padding 8.
+                        height: 8 + 8 + (11 * 1.2 * 4),
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                        alignment: Alignment.topLeft,
+                        child:
+                            widget.buildKeyboardTriggerField?.call(
+                              key: 'diet_note',
+                              controller: _noteController,
+                              sourceFocusNode: _noteFocusNode,
+                              keyboardType: TextInputType.multiline,
+                              inputFormatters: [
+                                LengthLimitingTextInputFormatter(
+                                  64,
+                                  maxLengthEnforcement:
+                                      MaxLengthEnforcement.enforced,
+                                ),
+                              ],
+                              enabled: !_isSaving && !_isLoadingNote,
+                              style: fieldStyle,
+                              maxLines: 4,
+                              hintText: '',
+                              padding: EdgeInsets.zero,
+                              alignment: Alignment.topLeft,
+                              decoration: const BoxDecoration(
+                                color: Colors.transparent,
+                              ),
+                            ) ??
+                            const SizedBox.shrink(),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                ),
               ),
+            ),
+            Positioned(
+              right: 8,
+              top: 0,
+              bottom: 0,
+              width: 3,
+              child: _buildDiaryDetailManualScrollbar(),
             ),
           ],
         ),

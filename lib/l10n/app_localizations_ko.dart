@@ -281,6 +281,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get dietGoal => '식단 목적';
 
   @override
+  String get profileTargetWeightKg => '목표 체중(kg)';
+
+  @override
+  String get profileTargetWeightKgInvalid => '목표 체중을 올바르게 입력해주세요.';
+
+  @override
+  String get profileTargetWeightOptional => '(선택 사항)';
+
+  @override
   String get start => '시작하기';
 
   @override
@@ -699,7 +708,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get diaryPhotoDinnerLabel => '(저녁)';
 
   @override
-  String get diaryWeightLabel => '• 체중(kg)';
+  String get diaryWeightLabel => '• 현재 체중(Kg)';
+
+  @override
+  String get diaryTargetWeightKg => '• 목표 체중(Kg)';
+
+  @override
+  String get diaryWeightRemaining => '남았어요!';
+
+  @override
+  String get diaryWeightGoalAchieved => '• 목표 달성🎉';
 
   @override
   String get diaryNoteLabel => '• 식후 감정 & 실패 요인';

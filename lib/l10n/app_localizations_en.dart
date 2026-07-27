@@ -288,6 +288,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dietGoal => 'Diet Goal';
 
   @override
+  String get profileTargetWeightKg => 'Target weight (kg)';
+
+  @override
+  String get profileTargetWeightKgInvalid =>
+      'Please enter a valid target weight.';
+
+  @override
+  String get profileTargetWeightOptional => '(Optional)';
+
+  @override
   String get start => 'Start';
 
   @override
@@ -726,7 +736,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get diaryPhotoDinnerLabel => '(Dinner)';
 
   @override
-  String get diaryWeightLabel => '• Weight (kg)';
+  String get diaryWeightLabel => '• Current weight (kg)';
+
+  @override
+  String get diaryTargetWeightKg => '• Target weight (kg)';
+
+  @override
+  String get diaryWeightRemaining => 'to go!';
+
+  @override
+  String get diaryWeightGoalAchieved => '• Goal achieved! 🎉';
 
   @override
   String get diaryNoteLabel => '• Post-meal mood & notes';
