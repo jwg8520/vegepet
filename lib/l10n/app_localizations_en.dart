@@ -60,19 +60,34 @@ class AppLocalizationsEn extends AppLocalizations {
   String get withdrawAccount => 'Delete Account';
 
   @override
-  String get emailAccountLink => 'Link Email';
+  String get accountLink => 'Link account';
 
   @override
-  String get emailLinkCompleted => 'Linked';
+  String get accountLinkCompleted => 'Linked';
 
   @override
-  String get guestAccount => 'Guest';
+  String get googleAccountLinkedLine => 'Google account linked';
 
   @override
-  String get emailLinkedAccount => 'Linked Email';
+  String get appleAccountLinkedLine => 'Apple account linked';
 
   @override
-  String get noLinkedEmail => 'No email linked';
+  String get signInWithApple => 'Sign in with Apple';
+
+  @override
+  String get signInWithGoogle => 'Sign in with Google';
+
+  @override
+  String get accountLinkGuideOnlyOneProvider =>
+      '• Only one Apple or Google account can be linked.';
+
+  @override
+  String get accountLinkGuideCannotChange =>
+      '• Linked accounts cannot be changed.';
+
+  @override
+  String get appleAccountLinkComingSoon =>
+      'Apple account linking will be available in the next update.';
 
   @override
   String get pushNoticeEvent => 'Announcements & Events';
@@ -529,20 +544,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get snackLoginRequired => 'Please log in first.';
 
   @override
-  String get snackInvalidEmail => '※ Please enter a valid email address.';
+  String get snackAccountAlreadyLinked => 'An account is already linked.';
 
   @override
-  String get snackEmailRequired => 'Please enter your email.';
+  String get snackAccountLinkCompleted => 'Your account has been linked.';
 
   @override
-  String get snackOtpRequired => 'Please enter the verification code.';
-
-  @override
-  String get snackEmailAlreadyLinked =>
-      'This account is already linked to an email.';
-
-  @override
-  String get snackEmailLinkCompleted => 'Email linked.';
+  String get snackAccountLinkFailed =>
+      'We couldn\'t link your account. Please try again in a moment.';
 
   @override
   String get snackTicketEmpty => 'You don\'t have any Random Adoption Tickets.';
@@ -623,98 +632,48 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get emailLinkSendOtpButton => 'Send Code';
+  String get accountLinkInviteTitle => 'Link an account?';
 
   @override
-  String get emailLinkEmailRowLabel => '• Email';
+  String get accountLinkInviteBody =>
+      'Link an account to restore your VegePet data after reinstalling the app or changing devices.';
 
   @override
-  String get emailLinkOtpRowLabel => '• Code';
+  String get accountLinkInviteLater => 'Later';
 
   @override
-  String get emailLinkResendCodeButton => 'Resend Code';
+  String get accountLinkInviteNow => 'Link account';
 
   @override
-  String get emailLinkVerifyCompleteButton => 'Verify';
+  String get accountLinkSuccessTitle => 'Account Linked 💫';
 
   @override
-  String emailOtpRetryAfterSeconds(int seconds) {
-    return 'Resend in ${seconds}s';
-  }
-
-  @override
-  String get emailAlreadyUsedTitle => 'Email Already in Use';
-
-  @override
-  String get emailAlreadyUsedBody =>
-      'This email is already in use.\nPlease enter a different email.';
-
-  @override
-  String get emailLinkInviteTitle => 'Protect Your VegePet!';
-
-  @override
-  String get emailLinkInviteBodyLine1 =>
-      'If you uninstall the app, your cute VegePet could disappear... 😢';
-
-  @override
-  String get emailLinkInviteBodyLine2 =>
-      'Would you like to link your email in Settings now?';
-
-  @override
-  String get emailLinkInviteLater => 'Later';
-
-  @override
-  String get emailLinkInviteNow => 'Link Email';
-
-  @override
-  String get emailLinkSuccessTitle => 'Email Linked 💫';
-
-  @override
-  String get emailLinkSuccessBody =>
+  String get accountLinkSuccessBody =>
       'Your account has been successfully linked.';
 
   @override
-  String get emailLinkSuccessConfirm => 'OK';
+  String get accountLinkSuccessConfirm => 'OK';
 
   @override
-  String get emailFormatErrorTitle => 'Invalid Email';
+  String get linkedAccountInUseTitle => 'Account already in use';
 
   @override
-  String get emailFormatErrorBody => '※ Please enter a valid email address.';
+  String get linkedAccountInUseBody =>
+      'This Google account is already linked to another VegePet account. Use the account recovery sign-in flow to load that account.';
 
   @override
-  String get emailFormatErrorConfirm => 'OK';
+  String get linkedAccountInUseConfirm => 'OK';
 
   @override
-  String get emailOtpInvalidNoticeTitle => '⚠️ Invalid Code';
-
-  @override
-  String get emailOtpInvalidNoticeBody =>
-      'Please try again. The code expires after 1 hour.';
-
-  @override
-  String get emailOtpInvalidNoticeConfirm => 'OK';
-
-  @override
-  String get emailDuplicateNoticeTitle => '⚠️ Email Already Linked';
-
-  @override
-  String get emailDuplicateNoticeBody =>
-      'This email is already linked. Once verification is complete, your existing data will be loaded onto this device.';
-
-  @override
-  String get emailDuplicateNoticeConfirm => 'OK';
-
-  @override
-  String get remoteEmailLinkedLogoutTitle =>
+  String get remoteAccountLinkedLogoutTitle =>
       '⚠️ Account Linked on Another Device';
 
   @override
-  String get remoteEmailLinkedLogoutBody =>
+  String get remoteAccountLinkedLogoutBody =>
       'Your account was linked on another device. This app will sign out and restart in Guest Mode.';
 
   @override
-  String get remoteEmailLinkedLogoutConfirm => 'OK';
+  String get remoteAccountLinkedLogoutConfirm => 'OK';
 
   @override
   String get duplicatePetNameNoticeTitle => 'Duplicate Name';
@@ -773,27 +732,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get snackLanguageChangeFailed =>
       'Failed to change language. Please try again.';
-
-  @override
-  String get snackOtpSent => 'A verification code has been sent to your email.';
-
-  @override
-  String snackOtpSendFailed(String error) {
-    return 'Failed to send verification code: $error';
-  }
-
-  @override
-  String get snackEmailOtpRequired =>
-      'Please enter your email and verification code.';
-
-  @override
-  String snackOtpVerifyFailed(String error) {
-    return 'Failed to verify code: $error';
-  }
-
-  @override
-  String get snackEmailLinkPartialSavedFailed =>
-      'Your email was verified, but we couldn\'t save the profile status. Please reopen Settings.';
 
   @override
   String get snackMealAlreadyCertified => 'You\'ve already checked this meal.';

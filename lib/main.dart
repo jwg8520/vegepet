@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,6 +43,31 @@ const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
 //   - `service_role` / secret 키는 절대 이 파일(또는 어떤 Flutter 코드)에도 넣지 않는다.
 //     RLS bypass가 필요한 작업은 Edge Function 환경변수의 service_role 로만 수행한다.
 const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
+
+// ============================================================================
+// Google 계정 연동 (Sign in with Google)
+// ----------------------------------------------------------------------------
+// 아래 두 값은 Google Cloud 콘솔이 발급한 **공개 Client ID** 이며, 클라이언트
+// 노출이 전제된 값이다. iOS 번들(Info.plist GIDClientID / URL Scheme)에도 같은
+// 값이 들어간다.
+//
+// 보안 원칙:
+//   - Google Web OAuth "Client Secret" 은 이 파일을 포함한 어떤 Flutter/iOS
+//     리소스에도 절대 넣지 않는다. Secret 은 Supabase Dashboard 의 Google
+//     Provider 서버 설정에만 존재해야 한다.
+//   - idToken / accessToken / refreshToken 전체 값을 로그로 출력하지 않는다.
+//   - 사용자 이메일 전체를 디버그 로그로 출력하지 않는다.
+// ============================================================================
+const _kGoogleIosClientId =
+    '256004504301-fbgm6n2kfj9lgnrjjp1as1f40c3rm3lp.apps.googleusercontent.com';
+const _kGoogleWebClientId =
+    '256004504301-r54kqh865r0m14orroqnd1hut36t5m6l.apps.googleusercontent.com';
+
+/// 현재 Supabase Auth 사용자에 연결된 영구 계정 provider.
+///
+/// `profiles.account_type` 은 표시용 상태이고, 실제 판정은 Auth identities 를
+/// 우선 기준으로 삼는다.
+enum _LinkedAccountProvider { none, google, apple }
 
 // ============================================================================
 // 식단 사진 업로드 + AI 판정 구조 (Edge Function 연동 준비)
@@ -708,8 +734,8 @@ class _HomePageState extends State<HomePage>
   bool _settingsBgmBusy = false;
   bool _settingsSfxBusy = false;
 
-  /// 설정 위 마당 오버레이: 이메일 OTP 발송(인증 코드 받기) 전용 글래스 패널.
-  bool _isEmailLinkPanelOpen = false;
+  /// 설정 위 마당 오버레이: Google/Apple 공용 계정 연동 글래스 패널.
+  bool _isAccountLinkPanelOpen = false;
 
   /// 설정 위 마당 오버레이: 고객센터(문의 이메일·복사) 글래스 패널.
   bool _isCustomerCenterPanelOpen = false;
@@ -732,14 +758,14 @@ class _HomePageState extends State<HomePage>
   /// 설정 > 회원 탈퇴 2차 최종 확인 (240×116 · 마당 좌표계).
   bool _isWithdrawFinalConfirmOpen = false;
 
-  /// 첫 식단 인증 성공 직후 이메일 연동 추천 (240×116 · 마당 좌표계).
-  bool _isEmailLinkInviteNoticeOpen = false;
+  /// 첫 식단 인증 성공 직후 계정 연동 추천 (240×116 · 마당 좌표계).
+  bool _isAccountLinkInviteNoticeOpen = false;
 
-  /// 이메일 연동 성공 직후 안내 (240×116 · 마당 좌표계).
-  bool _isEmailLinkSuccessNoticeOpen = false;
-  bool _isEmailFormatErrorNoticeOpen = false;
-  bool _isEmailDuplicateNoticeOpen = false;
-  bool _isEmailOtpInvalidNoticeOpen = false;
+  /// 계정 연동 성공 직후 안내 (240×116 · 마당 좌표계).
+  bool _isAccountLinkSuccessNoticeOpen = false;
+
+  /// 선택한 Google 계정이 이미 다른 베지펫 계정에 연동된 경우 (240×116).
+  bool _isLinkedAccountInUseNoticeOpen = false;
 
   /// 도감 등록 펫과 동일한 이름으로 분양 펫 이름 저장 시도 시 (240×116 · 마당 좌표계).
   bool _isDuplicatePetNameNoticeOpen = false;
@@ -750,8 +776,8 @@ class _HomePageState extends State<HomePage>
   /// 도감 완성 후 랜덤 분양권 사용 안내 (240×116 · 마당 좌표계).
   bool _isPokedexCompleteTicketNoticeOpen = false;
 
-  /// 다른 기기에서 동일 이메일 연동 시 기존 기기 로그아웃 안내 (240×116).
-  bool _isRemoteEmailLinkedLogoutNoticeOpen = false;
+  /// 다른 기기에서 동일 계정 연동 시 기존 기기 로그아웃 안내 (240×116).
+  bool _isRemoteAccountLinkedLogoutNoticeOpen = false;
   bool _isResettingToGuestAfterRemoteLogout = false;
 
   /// 다른 기기에서의 회원탈퇴/Auth user 삭제로 인해 현재 기기 세션이
@@ -779,21 +805,16 @@ class _HomePageState extends State<HomePage>
   RealtimeChannel? _accountProfileWatchChannel;
   String? _accountProfileWatchUserId;
 
-  /// 이미 등록된 이메일 OTP 로그인(기존 계정 복구) 모드.
-  bool _emailLinkRestoreMode = false;
   bool _isDeletingAccount = false;
-  bool _emailLinkPanelSendBusy = false;
-  bool _emailLinkPanelVerifyBusy = false;
-  bool _emailLinkPanelResendBusy = false;
-  bool _emailLinkOtpSent = false;
-  String _emailLinkOtpSentForEmail = '';
-  DateTime? _emailLinkOtpSentAt;
-  Timer? _emailLinkOtpSessionTimer;
-  bool _suppressEmailLinkControllerSessionClear = false;
-  final TextEditingController _emailLinkController = TextEditingController();
-  final TextEditingController _emailLinkOtpController = TextEditingController();
-  final FocusNode _emailLinkFocusNode = FocusNode();
-  final FocusNode _emailLinkOtpFocusNode = FocusNode();
+
+  /// Sign in with Google 연타 방지.
+  bool _isGoogleLinkBusy = false;
+
+  /// Sign in with Apple 연타 방지 (실제 인증 로직은 다음 단계).
+  bool _isAppleLinkBusy = false;
+
+  /// [GoogleSignIn.initialize] 는 앱 생애주기당 정확히 한 번만 호출한다.
+  bool _googleSignInInitialized = false;
   final FocusNode _keyboardAccessoryFocusNode = FocusNode();
 
   FocusNode? _activeKeyboardFocusNode;
@@ -827,8 +848,6 @@ class _HomePageState extends State<HomePage>
   int? _petPettingRequiredTaps;
   String? _petPettingTargetDate;
   String? _petPettingTargetPetId;
-  Timer? _emailOtpCooldownTimer;
-  int _emailOtpCooldownSeconds = 0;
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   bool _noticeEventPushEnabled = false;
@@ -921,14 +940,14 @@ class _HomePageState extends State<HomePage>
   static const double _kSettingsGrayRowW = 212;
   static const double _kSettingsGrayRowH = 22;
 
-  /// 이메일 계정 연동 글래스 패널 (844×390 마당 기준).
-  static const double _kEmailLinkPanelLeft = 567;
-  static const double _kEmailLinkPanelTop = 88;
-  static const double _kEmailLinkPanelW = 230;
-  static const double _kEmailLinkPanelH = 212;
-
-  /// 이메일 OTP 발송 후 인증코드 입력란 활성 유지 시간(창 닫았다 다시 열어도 유지).
-  static const Duration _kEmailLinkOtpSessionDuration = Duration(hours: 1);
+  /// 계정 연동(Google/Apple) 글래스 패널 (844×390 마당 기준).
+  ///
+  /// 기존 이메일 OTP 패널과 같은 left/top/width 를 유지하고, 높이만 새 콘텐츠
+  /// (버튼 2개 + 안내 문구 2줄) 기준 최소 범위로 조정한다.
+  static const double _kAccountLinkPanelLeft = 567;
+  static const double _kAccountLinkPanelTop = 88;
+  static const double _kAccountLinkPanelW = 230;
+  static const double _kAccountLinkPanelH = 196;
 
   static const String _kCustomerCenterEmail = 'acoustic.jwg@gmail.com';
   static const double _kCustomerCenterPanelLeft = 567;
@@ -975,28 +994,8 @@ class _HomePageState extends State<HomePage>
         ),
       ],
     );
-    _ensureKeyboardFocusBinding(
-      key: 'email_link',
-      controller: _emailLinkController,
-      focusNode: _emailLinkFocusNode,
-      keyboardType: TextInputType.emailAddress,
-      inputFormatters: [
-        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
-      ],
-    );
-    _emailLinkController.addListener(
-      _onEmailLinkControllerChangedForOtpSession,
-    );
-    _ensureKeyboardFocusBinding(
-      key: 'email_link_otp',
-      controller: _emailLinkOtpController,
-      focusNode: _emailLinkOtpFocusNode,
-      keyboardType: TextInputType.number,
-      inputFormatters: [
-        FilteringTextInputFormatter.digitsOnly,
-        LengthLimitingTextInputFormatter(8),
-      ],
-    );
+    // 계정 연동은 Google/Apple 네이티브 SDK 로만 진행하므로 이메일/인증코드
+    // 입력 필드와 keyboard accessory binding 은 더 이상 필요하지 않다.
     _petToySwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -1142,18 +1141,12 @@ class _HomePageState extends State<HomePage>
     _nicknameController.removeListener(_enforceProfileNicknameMaxLength);
     _profileSelectScrollController?.dispose();
     _closeProfileSelectOverlay(notify: false, animated: false);
-    _emailOtpCooldownTimer?.cancel();
-    _emailLinkOtpSessionTimer?.cancel();
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
     _nicknameController.dispose();
     _nicknameFocusNode.dispose();
     _targetWeightController.dispose();
     _targetWeightFocusNode.dispose();
-    _emailLinkController.dispose();
-    _emailLinkOtpController.dispose();
-    _emailLinkFocusNode.dispose();
-    _emailLinkOtpFocusNode.dispose();
     _keyboardAccessoryFocusNode.dispose();
     _petToySwapController.dispose();
     _petMealSwapController.dispose();
@@ -1340,11 +1333,11 @@ class _HomePageState extends State<HomePage>
     bool forceProfileFormSync = false,
     bool clearProfileForm = false,
   }) {
-    final isEmailSession = _isCurrentEmailAuthSession();
+    final isPermanentSession = _isCurrentPermanentAuthSession();
 
-    // email session reset 중에만 stale profile form 주입을 막는다.
+    // 연동 계정 session reset 중에만 stale profile form 주입을 막는다.
     // anonymous guest bootstrap 은 reset 플래그가 켜져 있어도 정상 적용해야 한다.
-    if (_isResettingDeletedAccountSession && isEmailSession) {
+    if (_isResettingDeletedAccountSession && isPermanentSession) {
       _clearProfileFormState();
       return;
     }
@@ -1435,7 +1428,7 @@ class _HomePageState extends State<HomePage>
       _settingsPanelSwapInProgress = false;
       _isHelpPanelOpen = false;
       _helpPanelSwapInProgress = false;
-      _isEmailLinkPanelOpen = false;
+      _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
     });
     unawaited(_yardGame.removeActivePetComponent());
@@ -1444,10 +1437,8 @@ class _HomePageState extends State<HomePage>
   /// anonymous guest + profile 없음인데 프로필 입력창이 안 떠 있는 먹통 상태를 복구한다.
   void _ensureFreshGuestProfileSetupVisible() {
     final user = supabase.auth.currentUser;
-    final isAnonymous =
-        user != null && (user.email == null || user.email!.trim().isEmpty);
-
-    if (!isAnonymous) return;
+    if (user == null) return;
+    if (!_isCurrentUserAnonymous()) return;
     if (_profile != null) return;
     if (_activePet != null) return;
     if (!mounted) return;
@@ -2132,24 +2123,23 @@ class _HomePageState extends State<HomePage>
       if (supabase.auth.currentSession == null) {
         await supabase.auth.signInAnonymously();
       }
-      final currentUser = supabase.auth.currentUser;
-      final isEmailSession = currentUser?.email?.trim().isNotEmpty == true;
+      final isPermanentSession = _isCurrentPermanentAuthSession();
 
       await _fetchCoreUserData();
 
-      if (isEmailSession && _profile == null) {
-        debugPrint('email session profile missing; reset to fresh guest');
+      if (isPermanentSession && _profile == null) {
+        debugPrint('linked account profile missing; reset to fresh guest');
         if (!_isResettingDeletedAccountSession) {
           await _resetToFreshGuestAfterDeletedAccount();
         }
         completeStartupLoadingWhenYardReady = true;
         return;
       }
-      await _syncAuthEmailToProfileIfNeeded();
+      await _syncLinkedProviderToProfileIfNeeded();
 
       _applyPostFetchUiState();
       _ensureFreshGuestProfileSetupVisible();
-      _syncProfileDeletionWatchForCurrentSession();
+      _syncAccountDeletionWatchForCurrentSession();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(_bootstrapOptionalServices());
@@ -2233,49 +2223,53 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  bool _isEmailLinkedProfile() {
-    final p = _profile;
-    if (p == null) return false;
-    final accountType = p['account_type']?.toString();
-    final email = p['email']?.toString().trim() ?? '';
-    return accountType == 'email' && email.isNotEmpty;
+  /// 현재 Auth 사용자가 anonymous guest 인지.
+  bool _isCurrentUserAnonymous() {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+    if (user.isAnonymous == true) return true;
+    return !_hasAnyLinkedAccountIdentity(user);
   }
 
-  String? _currentAuthEmail() {
-    return supabase.auth.currentUser?.email;
+  bool _hasProviderIdentity(User? user, String provider) {
+    final identities = user?.identities ?? const <UserIdentity>[];
+    return identities.any((identity) => identity.provider == provider);
   }
 
-  /// 프로필 또는 Auth 세션 기준으로 이미 이메일 연동된 상태인지(UI 가드용).
-  bool _hasEffectiveEmailLink() {
-    final authEmail = _currentAuthEmail()?.trim();
-    if (authEmail != null && authEmail.isNotEmpty) return true;
-    return _isEmailLinkedProfile();
+  bool _hasGoogleIdentity(User? user) => _hasProviderIdentity(user, 'google');
+
+  bool _hasAppleIdentity(User? user) => _hasProviderIdentity(user, 'apple');
+
+  bool _hasAnyLinkedAccountIdentity(User? user) {
+    return _hasGoogleIdentity(user) || _hasAppleIdentity(user);
   }
 
-  String _resolvedDisplayEmailLine([AppLocalizations? l10n]) {
-    final isEn = _isEnglishLocale;
-    final auth = _currentAuthEmail()?.trim();
-    if (auth != null && auth.isNotEmpty) {
-      return isEn ? 'Linked email: $auth' : '연결된 이메일: $auth';
+  /// 실제 연동 provider. Auth identities 를 우선 기준으로 삼는다.
+  ///
+  /// Auth identity 가 없는데 `profiles.account_type` 만 google/apple 인 경우는
+  /// 연동 완료로 취급하지 않는다.
+  _LinkedAccountProvider _currentLinkedAccountProvider() {
+    final user = supabase.auth.currentUser;
+    if (user == null) return _LinkedAccountProvider.none;
+    if (_hasGoogleIdentity(user)) return _LinkedAccountProvider.google;
+    if (_hasAppleIdentity(user)) return _LinkedAccountProvider.apple;
+    return _LinkedAccountProvider.none;
+  }
+
+  /// Google 또는 Apple 중 하나가 이미 연동되어 있는지 (UI 가드용).
+  bool _hasAnyLinkedAccount() {
+    return _currentLinkedAccountProvider() != _LinkedAccountProvider.none;
+  }
+
+  String? _linkedAccountProviderKey(_LinkedAccountProvider provider) {
+    switch (provider) {
+      case _LinkedAccountProvider.google:
+        return 'google';
+      case _LinkedAccountProvider.apple:
+        return 'apple';
+      case _LinkedAccountProvider.none:
+        return null;
     }
-    final pe = _profile?['email']?.toString().trim() ?? '';
-    if (pe.isNotEmpty) {
-      return isEn ? 'Linked email: $pe' : '연결된 이메일: $pe';
-    }
-    return l10n?.noLinkedEmail ?? (isEn ? 'No email linked' : '연동된 이메일 없음');
-  }
-
-  bool _looksLikeEmail(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty || trimmed.contains(' ')) return false;
-    final at = trimmed.indexOf('@');
-    if (at <= 0 || at >= trimmed.length - 1) return false;
-    final local = trimmed.substring(0, at);
-    final domain = trimmed.substring(at + 1);
-    if (local.isEmpty || domain.isEmpty) return false;
-    if (!domain.contains('.')) return false;
-    if (domain.startsWith('.') || domain.endsWith('.')) return false;
-    return true;
   }
 
   String _formatAuthError(Object e) {
@@ -2283,95 +2277,55 @@ class _HomePageState extends State<HomePage>
     return e.toString();
   }
 
-  Future<bool> _isEmailAlreadyLinkedInProfiles(String email) async {
-    final normalized = email.trim().toLowerCase();
-    if (normalized.isEmpty) return false;
-    final currentUserId = supabase.auth.currentUser?.id;
-
-    try {
-      final rows = await supabase
-          .from('profiles')
-          .select('id,email,account_type')
-          .eq('account_type', 'email')
-          .eq('email', normalized)
-          .limit(5);
-
-      for (final row in rows as List) {
-        final profileId = row['id']?.toString();
-        if (currentUserId != null && profileId == currentUserId) continue;
-        return true;
-      }
-      return false;
-    } catch (e, st) {
-      debugPrint('email duplicate profile check failed: $e\n$st');
-      return false;
-    }
-  }
-
-  bool _isEmailAlreadyUsedError(Object e) {
+  /// 선택한 provider identity 가 이미 다른 Supabase 사용자에게 연결된 경우.
+  bool _isIdentityAlreadyLinkedError(Object e) {
     final message = _formatAuthError(e).toLowerCase();
-
     return message.contains('already') ||
         message.contains('exists') ||
         message.contains('registered') ||
         message.contains('duplicate') ||
-        message.contains('unique') ||
-        message.contains('already been registered') ||
-        message.contains('email address is already') ||
-        message.contains('user already registered') ||
-        message.contains('email already') ||
-        message.contains('already exists');
+        message.contains('identity_already_exists') ||
+        message.contains('unique');
   }
 
-  bool _isEmailOtpInvalidOrExpiredError(Object e) {
-    final text = _formatAuthError(e).toLowerCase();
-    return text.contains('invalid') ||
-        text.contains('token') ||
-        text.contains('otp') ||
-        text.contains('expired') ||
-        text.contains('email token') ||
-        text.contains('confirmation token') ||
-        text.contains('verification');
-  }
-
-  Future<void> _showEmailDuplicateNotice() async {
-    // 이메일 연동 흐름 중: 다른 yard 알림을 닫지 않는다.
+  Future<void> _showLinkedAccountInUseNotice() async {
+    // 계정 연동 흐름 중: 다른 yard 알림을 닫지 않는다.
     await _showYardNotice(
-      isOpen: () => _isEmailDuplicateNoticeOpen,
-      markOpen: () => _isEmailDuplicateNoticeOpen = true,
+      isOpen: () => _isLinkedAccountInUseNoticeOpen,
+      markOpen: () => _isLinkedAccountInUseNoticeOpen = true,
       instantCloseOtherYardNotices: false,
     );
   }
 
-  Future<void> _hideEmailDuplicateNotice() async {
+  Future<void> _hideLinkedAccountInUseNotice() async {
     await _hideYardNotice(
-      isOpen: () => _isEmailDuplicateNoticeOpen,
-      markClosed: () => _isEmailDuplicateNoticeOpen = false,
+      isOpen: () => _isLinkedAccountInUseNoticeOpen,
+      markClosed: () => _isLinkedAccountInUseNoticeOpen = false,
     );
   }
 
-  void _closeEmailDuplicateNoticeOverlay() {
+  void _closeLinkedAccountInUseNoticeOverlay() {
     _requestHideYardNotice(
-      isOpen: () => _isEmailDuplicateNoticeOpen,
-      hide: _hideEmailDuplicateNotice,
+      isOpen: () => _isLinkedAccountInUseNoticeOpen,
+      hide: _hideLinkedAccountInUseNotice,
     );
   }
 
-  Future<void> _showRemoteEmailLinkedLogoutNotice() async {
+  Future<void> _showRemoteAccountLinkedLogoutNotice() async {
     await _showYardNotice(
-      isOpen: () => _isRemoteEmailLinkedLogoutNoticeOpen,
-      markOpen: () => _isRemoteEmailLinkedLogoutNoticeOpen = true,
+      isOpen: () => _isRemoteAccountLinkedLogoutNoticeOpen,
+      markOpen: () => _isRemoteAccountLinkedLogoutNoticeOpen = true,
     );
   }
 
   /// 추후 백엔드/DB 감지 로직에서 호출할 hook.
-  Future<void> _handleRemoteEmailLinkedDetected() async {
-    if (_isRemoteEmailLinkedLogoutNoticeOpen) return;
+  Future<void> _handleRemoteAccountLinkedDetected() async {
+    if (_isRemoteAccountLinkedLogoutNoticeOpen) return;
     if (_isResettingToGuestAfterRemoteLogout) return;
-    await _showRemoteEmailLinkedLogoutNotice();
+    await _showRemoteAccountLinkedLogoutNotice();
   }
 
-  Future<void> _confirmRemoteEmailLinkedLogoutAndReset() async {
+  Future<void> _confirmRemoteAccountLinkedLogoutAndReset() async {
     if (_isResettingToGuestAfterRemoteLogout) return;
 
     _safeSetState(() => _isResettingToGuestAfterRemoteLogout = true);
@@ -2386,16 +2340,11 @@ class _HomePageState extends State<HomePage>
         debugPrint('remote logout signOut failed: $e');
       }
 
-      _resetEmailLinkPanelOtpFlow();
-      _emailLinkRestoreMode = false;
-      _emailLinkController.clear();
-      _emailLinkOtpController.clear();
+      _resetAccountLinkPanelBusy();
+      await _signOutGoogleSdkQuietly();
 
       if (!mounted) return;
       _safeSetState(() {
-        _emailOtpCooldownTimer?.cancel();
-        _emailOtpCooldownTimer = null;
-        _emailOtpCooldownSeconds = 0;
         _lastResultType = null;
         _lastFeedbackText = null;
         _lastStatusMessage = null;
@@ -2449,14 +2398,14 @@ class _HomePageState extends State<HomePage>
         _pokedexPanelSwapInProgress = false;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
-        _isEmailLinkPanelOpen = false;
+        _isAccountLinkPanelOpen = false;
         _isCustomerCenterPanelOpen = false;
         _isHelpPanelOpen = false;
         _helpPanelSwapInProgress = false;
         _isStoryPanelOpen = false;
         _storyPanelSwapInProgress = false;
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
-        _isRemoteEmailLinkedLogoutNoticeOpen = false;
+        _isRemoteAccountLinkedLogoutNoticeOpen = false;
 
         _selectedSpeciesId = null;
         _clearProfileFormState();
@@ -2485,11 +2434,11 @@ class _HomePageState extends State<HomePage>
 
       await _bootstrap();
     } catch (e, st) {
-      debugPrint('remote email linked logout reset failed: $e\n$st');
+      debugPrint('remote account linked logout reset failed: $e\n$st');
       if (!mounted) return;
       _safeSetState(() {
         _isResettingToGuestAfterRemoteLogout = false;
-        _isRemoteEmailLinkedLogoutNoticeOpen = false;
+        _isRemoteAccountLinkedLogoutNoticeOpen = false;
       });
       try {
         await _bootstrap();
@@ -2520,153 +2469,30 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Future<void> _showEmailAlreadyUsedDialog() async {
-    await _showEmailDuplicateNotice();
+  /// 계정 연동 패널의 provider 별 busy 상태만 초기화한다.
+  void _resetAccountLinkPanelBusy() {
+    _isGoogleLinkBusy = false;
+    _isAppleLinkBusy = false;
   }
 
-  void _startEmailOtpCooldown() {
-    _emailOtpCooldownTimer?.cancel();
-
-    _safeSetState(() {
-      _emailOtpCooldownSeconds = 60;
-    });
-
-    _emailOtpCooldownTimer = Timer.periodic(const Duration(seconds: 1), (
-      timer,
-    ) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      if (_emailOtpCooldownSeconds <= 1) {
-        timer.cancel();
-        _emailOtpCooldownTimer = null;
-        _safeSetState(() {
-          _emailOtpCooldownSeconds = 0;
-        });
-        return;
-      }
-
-      _safeSetState(() {
-        _emailOtpCooldownSeconds -= 1;
-      });
-    });
+  void _closeAccountLinkPanel() {
+    _resetAccountLinkPanelBusy();
+    _isAccountLinkPanelOpen = false;
   }
 
-  bool _isEmailOtpCooldownActive() {
-    return _emailOtpCooldownSeconds > 0;
+  void _prepareAccountLinkPanelForOpen() {
+    _resetAccountLinkPanelBusy();
   }
 
-  void _clearEmailLinkOtpSession() {
-    _emailLinkOtpSessionTimer?.cancel();
-    _emailLinkOtpSessionTimer = null;
-    _emailLinkOtpSent = false;
-    _emailLinkOtpSentForEmail = '';
-    _emailLinkOtpSentAt = null;
-    _emailLinkOtpController.clear();
-    _emailLinkRestoreMode = false;
-  }
-
-  /// OTP 세션이 1시간을 넘기면 인증코드 입력란을 다시 비활성화한다.
-  bool _expireEmailLinkOtpSessionIfNeeded() {
-    if (!_emailLinkOtpSent) return false;
-    final sentAt = _emailLinkOtpSentAt;
-    if (sentAt == null ||
-        DateTime.now().difference(sentAt) >= _kEmailLinkOtpSessionDuration) {
-      _clearEmailLinkOtpSession();
-      return true;
-    }
-    return false;
-  }
-
-  void _scheduleEmailLinkOtpSessionExpiry() {
-    _emailLinkOtpSessionTimer?.cancel();
-    _emailLinkOtpSessionTimer = null;
-    if (!_emailLinkOtpSent) return;
-    final sentAt = _emailLinkOtpSentAt;
-    if (sentAt == null) return;
-
-    final remaining =
-        _kEmailLinkOtpSessionDuration - DateTime.now().difference(sentAt);
-    if (remaining <= Duration.zero) {
-      if (_expireEmailLinkOtpSessionIfNeeded() && mounted) {
-        _safeSetState(() {});
-      }
-      return;
-    }
-
-    _emailLinkOtpSessionTimer = Timer(remaining, () {
-      if (!mounted) return;
-      if (_expireEmailLinkOtpSessionIfNeeded()) {
-        _safeSetState(() {});
-      }
-    });
-  }
-
-  void _markEmailLinkOtpSessionActive(String email) {
-    _emailLinkOtpSent = true;
-    _emailLinkOtpSentForEmail = email.trim();
-    _emailLinkOtpSentAt = DateTime.now();
-    _scheduleEmailLinkOtpSessionExpiry();
-  }
-
-  void _setEmailLinkControllerTextSilently(String value) {
-    _suppressEmailLinkControllerSessionClear = true;
-    _emailLinkController.text = value;
-    _suppressEmailLinkControllerSessionClear = false;
-  }
-
-  /// 연동창만 닫는다. OTP 세션(인증코드 입력 활성)은 1시간 동안 유지.
-  void _closeEmailLinkPanel({bool resetOtpSession = false}) {
-    _emailLinkPanelSendBusy = false;
-    _emailLinkPanelVerifyBusy = false;
-    _emailLinkPanelResendBusy = false;
-    _expireEmailLinkOtpSessionIfNeeded();
-    if (resetOtpSession) {
-      _clearEmailLinkOtpSession();
-      _setEmailLinkControllerTextSilently('');
-      _emailLinkOtpController.clear();
-      _emailLinkRestoreMode = false;
-    }
-    _isEmailLinkPanelOpen = false;
-  }
-
-  void _prepareEmailLinkPanelForOpen() {
-    _expireEmailLinkOtpSessionIfNeeded();
-    _emailLinkPanelSendBusy = false;
-    _emailLinkPanelVerifyBusy = false;
-    _emailLinkPanelResendBusy = false;
-    if (_emailLinkOtpSent && _emailLinkOtpSentForEmail.isNotEmpty) {
-      final sentEmail = _emailLinkOtpSentForEmail.trim();
-      final currentEmail = _emailLinkController.text.trim();
-      if (currentEmail.toLowerCase() != sentEmail.toLowerCase()) {
-        _setEmailLinkControllerTextSilently(sentEmail);
-      }
-    } else {
-      _emailLinkRestoreMode = false;
-      _emailLinkOtpController.clear();
-    }
-    _scheduleEmailLinkOtpSessionExpiry();
-  }
-
-  void _resetEmailLinkPanelOtpFlow() {
-    _clearEmailLinkOtpSession();
-    _emailLinkController.clear();
-    _emailLinkPanelSendBusy = false;
-    _emailLinkPanelVerifyBusy = false;
-    _emailLinkPanelResendBusy = false;
-  }
-
-  /// 이메일 OTP 인증 완료 등 Auth 세션이 바뀐 직후 호출되는 전체 reload.
+  /// 계정 연동 완료 등 Auth 세션이 바뀐 직후 호출되는 전체 reload.
   ///
   /// 도감/식단일지 캐시는 모두 비우고, 기존 계정의 profile / 펫 / 식단 / 분양권
   /// 데이터를 다시 받아 화면 상태(_status / 프로필 입력창 / 분양창 표시 여부)도
   /// 재계산한다.
   ///
-  /// 중복 이메일 인증으로 “기존 계정 복구” 흐름이 끝난 직후에는
-  /// [forceProfileFormSync] 를 true 로 호출해 이전 guest 단계의 controller /
-  /// select 값을 새 계정 profile 값으로 강제 덮어써야 한다.
+  /// 다른 계정 profile 로 전환되는 흐름에서는 [forceProfileFormSync] 를 true 로
+  /// 호출해 이전 단계의 controller / select 값을 새 계정 profile 값으로 강제
+  /// 덮어써야 한다.
   Future<void> _refreshAllUserDataAfterAuthChange({
     bool forceProfileFormSync = false,
   }) async {
@@ -2674,20 +2500,22 @@ class _HomePageState extends State<HomePage>
     _clearUserScopedCaches();
     await _fetchCoreUserData();
     _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
-    _syncProfileDeletionWatchForCurrentSession();
+    _syncAccountDeletionWatchForCurrentSession();
   }
 
-  bool _isCurrentEmailAuthSession() {
-    final email = supabase.auth.currentUser?.email?.trim();
-    return email != null && email.isNotEmpty;
+  /// Google/Apple identity 가 연결된 영구 계정 세션인지.
+  ///
+  /// 이전에는 `currentUser.email` 유무로 판정했지만, 계정 연동이 Google/Apple
+  /// provider 기준으로 바뀌었으므로 Auth identities 를 기준으로 판정한다.
+  bool _isCurrentPermanentAuthSession() {
+    return _hasAnyLinkedAccountIdentity(supabase.auth.currentUser);
   }
 
-  Future<bool> _isCurrentEmailSessionProfileAlive() async {
+  Future<bool> _isCurrentAccountProfileAlive() async {
     final user = supabase.auth.currentUser;
     if (user == null) return false;
 
-    final email = user.email?.trim();
-    if (email == null || email.isEmpty) {
+    if (!_hasAnyLinkedAccountIdentity(user)) {
       return true;
     }
 
@@ -2700,7 +2528,7 @@ class _HomePageState extends State<HomePage>
 
       return (rows as List).isNotEmpty;
     } catch (e, st) {
-      debugPrint('email session profile alive check failed: $e\n$st');
+      debugPrint('linked account profile alive check failed: $e\n$st');
 
       if (_isAuthUserMissingForeignKeyError(e)) {
         return false;
@@ -2712,9 +2540,9 @@ class _HomePageState extends State<HomePage>
 
   Future<bool> _checkDeletedAccountAndResetIfNeeded(String reason) async {
     if (_isResettingDeletedAccountSession) return true;
-    if (!_isCurrentEmailAuthSession()) return false;
+    if (!_isCurrentPermanentAuthSession()) return false;
 
-    final alive = await _isCurrentEmailSessionProfileAlive();
+    final alive = await _isCurrentAccountProfileAlive();
     if (alive) return false;
 
     debugPrint('deleted account detected: $reason');
@@ -2733,15 +2561,15 @@ class _HomePageState extends State<HomePage>
     _accountHealthCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!mounted) return;
       if (_isResettingDeletedAccountSession) return;
-      if (!_isCurrentEmailAuthSession()) return;
+      if (!_isCurrentPermanentAuthSession()) return;
       unawaited(
         _checkDeletedAccountAndResetIfNeeded('periodic account health check'),
       );
     });
   }
 
-  void _syncProfileDeletionWatchForCurrentSession() {
-    if (_isCurrentEmailAuthSession()) {
+  void _syncAccountDeletionWatchForCurrentSession() {
+    if (_isCurrentPermanentAuthSession()) {
       _subscribeCurrentProfileDeletionWatch();
     } else {
       _unsubscribeProfileDeletionWatch();
@@ -2750,9 +2578,8 @@ class _HomePageState extends State<HomePage>
 
   void _subscribeCurrentProfileDeletionWatch() {
     final user = supabase.auth.currentUser;
-    final email = user?.email?.trim();
 
-    if (user == null || email == null || email.isEmpty) {
+    if (user == null || !_hasAnyLinkedAccountIdentity(user)) {
       _unsubscribeProfileDeletionWatch();
       return;
     }
@@ -2813,11 +2640,7 @@ class _HomePageState extends State<HomePage>
     _clearProfileFormState();
     _clearUserScopedCaches();
 
-    _resetEmailLinkPanelOtpFlow();
-    _emailLinkRestoreMode = false;
-    _emailOtpCooldownTimer?.cancel();
-    _emailOtpCooldownTimer = null;
-    _emailOtpCooldownSeconds = 0;
+    _resetAccountLinkPanelBusy();
 
     _isUploadingMeal = false;
     _uploadingSlot = null;
@@ -2864,7 +2687,7 @@ class _HomePageState extends State<HomePage>
 
     _isSettingsPanelOpen = false;
     _settingsPanelSwapInProgress = false;
-    _isEmailLinkPanelOpen = false;
+    _isAccountLinkPanelOpen = false;
     _isCustomerCenterPanelOpen = false;
 
     _isStoryPanelOpen = false;
@@ -2931,7 +2754,8 @@ class _HomePageState extends State<HomePage>
         _invalidateUserScopedAsyncWork(reason: 'deletedAccountReset');
       }
 
-      _clearEmailLinkOtpSession();
+      _resetAccountLinkPanelBusy();
+      await _signOutGoogleSdkQuietly();
 
       // auth 정리는 UI를 막지 않도록 timeout을 건다.
       await _ensureAnonymousSessionAfterFreshGuestReset();
@@ -2969,77 +2793,24 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _showEmailLinkSuccessNotice() async {
+  Future<void> _showAccountLinkSuccessNotice() async {
     await _showYardNotice(
-      isOpen: () => _isEmailLinkSuccessNoticeOpen,
-      markOpen: () => _isEmailLinkSuccessNoticeOpen = true,
+      isOpen: () => _isAccountLinkSuccessNoticeOpen,
+      markOpen: () => _isAccountLinkSuccessNoticeOpen = true,
     );
   }
 
-  Future<void> _hideEmailLinkSuccessNotice() async {
+  Future<void> _hideAccountLinkSuccessNotice() async {
     await _hideYardNotice(
-      isOpen: () => _isEmailLinkSuccessNoticeOpen,
-      markClosed: () => _isEmailLinkSuccessNoticeOpen = false,
+      isOpen: () => _isAccountLinkSuccessNoticeOpen,
+      markClosed: () => _isAccountLinkSuccessNoticeOpen = false,
     );
   }
 
-  Future<void> _showEmailFormatErrorNotice() async {
-    await _showYardNotice(
-      isOpen: () => _isEmailFormatErrorNoticeOpen,
-      markOpen: () => _isEmailFormatErrorNoticeOpen = true,
-    );
-  }
-
-  Future<void> _hideEmailFormatErrorNotice() async {
-    await _hideYardNotice(
-      isOpen: () => _isEmailFormatErrorNoticeOpen,
-      markClosed: () => _isEmailFormatErrorNoticeOpen = false,
-    );
-  }
-
-  void _closeEmailFormatErrorNoticeOverlay() {
+  void _closeAccountLinkSuccessNoticeOverlay() {
     _requestHideYardNotice(
-      isOpen: () => _isEmailFormatErrorNoticeOpen,
-      hide: _hideEmailFormatErrorNotice,
-    );
-  }
-
-  Future<void> _showEmailOtpInvalidNotice() async {
-    await _showYardNotice(
-      isOpen: () => _isEmailOtpInvalidNoticeOpen,
-      markOpen: () => _isEmailOtpInvalidNoticeOpen = true,
-    );
-  }
-
-  Future<void> _hideEmailOtpInvalidNotice() async {
-    await _hideYardNotice(
-      isOpen: () => _isEmailOtpInvalidNoticeOpen,
-      markClosed: () => _isEmailOtpInvalidNoticeOpen = false,
-    );
-  }
-
-  void _closeEmailOtpInvalidNoticeOverlay() {
-    _requestHideYardNotice(
-      isOpen: () => _isEmailOtpInvalidNoticeOpen,
-      hide: _hideEmailOtpInvalidNotice,
-    );
-  }
-
-  Future<bool> _promptEmailFormatErrorIfNeeded(String email) async {
-    final trimmed = email.trim();
-    if (trimmed.isEmpty) {
-      await _showEmailFormatErrorNotice();
-      return true;
-    }
-    if (_looksLikeEmail(trimmed)) return false;
-    await _showEmailFormatErrorNotice();
-    return true;
-  }
-
-  void _closeEmailLinkSuccessNoticeOverlay() {
-    _requestHideYardNotice(
-      isOpen: () => _isEmailLinkSuccessNoticeOpen,
-      hide: _hideEmailLinkSuccessNotice,
+      isOpen: () => _isAccountLinkSuccessNoticeOpen,
+      hide: _hideAccountLinkSuccessNotice,
     );
   }
 
@@ -3488,155 +3259,258 @@ class _HomePageState extends State<HomePage>
     return true;
   }
 
-  Future<void> _syncAuthEmailToProfileIfNeeded() async {
+  /// Auth identities 를 우선 기준으로 `profiles.account_type` / `email` /
+  /// `linked_at` 을 재동기화한다.
+  ///
+  /// - Auth identity 가 없으면 `account_type` 을 절대 google/apple 로 만들지 않는다.
+  /// - Auth identity 와 profiles 값이 불일치하면 Auth identity 를 정답으로 본다.
+  /// - 사용자 소유권은 언제나 Supabase user UUID 기준이며, email 로 사용자를
+  ///   조회하거나 병합하지 않는다.
+  Future<void> _syncLinkedProviderToProfileIfNeeded() async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
-    final authEmail = user.email?.trim();
-    if (authEmail == null || authEmail.isEmpty) return;
+    final provider = _currentLinkedAccountProvider();
+    final providerKey = _linkedAccountProviderKey(provider);
+    if (providerKey == null) {
+      // 게스트: profiles.account_type 이 잘못 google/apple 로 남아 있으면 되돌린다.
+      final storedType = _profile?['account_type']?.toString();
+      if (storedType == 'google' || storedType == 'apple') {
+        debugPrint(
+          'profiles.account_type=$storedType but no auth identity; '
+          'restoring guest state',
+        );
+        try {
+          await supabase
+              .from('profiles')
+              .update({
+                'email': null,
+                'account_type': 'guest',
+                'linked_at': null,
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('id', user.id);
+          await _fetchProfile();
+        } catch (e) {
+          debugPrint('restore guest account_type failed: $e');
+        }
+      }
+      return;
+    }
 
-    final profileEmail = _profile?['email']?.toString().trim() ?? '';
-    final accountType = _profile?['account_type']?.toString();
+    final identityEmail = _linkedIdentityEmail(user, providerKey);
+    final storedType = _profile?['account_type']?.toString();
+    final storedEmail = _profile?['email']?.toString().trim() ?? '';
+    final storedLinkedAt = _profile?['linked_at'];
 
-    if (profileEmail == authEmail && accountType == 'email') return;
+    final typeMatches = storedType == providerKey;
+    final emailMatches = identityEmail == null
+        ? true
+        : storedEmail == identityEmail;
+    if (typeMatches && emailMatches && storedLinkedAt != null) return;
+
+    if (storedType != null &&
+        storedType != providerKey &&
+        (storedType == 'google' || storedType == 'apple')) {
+      debugPrint(
+        'account_type mismatch: profiles=$storedType auth=$providerKey; '
+        'auth identity wins',
+      );
+    }
 
     try {
       await supabase
           .from('profiles')
           .update({
-            'email': authEmail,
-            'account_type': 'email',
-            'linked_at':
-                _profile?['linked_at'] ?? DateTime.now().toIso8601String(),
+            'email': ?identityEmail,
+            'account_type': providerKey,
+            'linked_at': storedLinkedAt ?? DateTime.now().toIso8601String(),
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', user.id);
 
       await _fetchProfile();
     } catch (e) {
-      debugPrint('sync auth email to profile failed: $e');
+      debugPrint('sync linked provider to profile failed: $e');
     }
   }
 
-  Future<bool> _sendEmailLinkOtp(String email) async {
-    final l10n = AppLocalizations.of(context);
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      _showSnack(l10n.snackLoginRequired);
-      return false;
+  /// 연결된 provider identity 의 이메일. 전체 값을 로그로 남기지 않는다.
+  String? _linkedIdentityEmail(User? user, String provider) {
+    final identities = user?.identities ?? const <UserIdentity>[];
+    for (final identity in identities) {
+      if (identity.provider != provider) continue;
+      final raw = identity.identityData?['email']?.toString().trim();
+      if (raw != null && raw.isNotEmpty) return raw;
     }
-    final trimmed = email.trim();
-    if (trimmed.isEmpty) {
-      _showSnack(l10n.snackEmailRequired);
-      return false;
-    }
+    final authEmail = user?.email?.trim();
+    if (authEmail != null && authEmail.isNotEmpty) return authEmail;
+    return null;
+  }
 
-    final alreadyLinkedInProfiles = await _isEmailAlreadyLinkedInProfiles(
-      trimmed,
+  /// Google 네이티브 SDK 초기화. 앱 생애주기당 정확히 한 번만 수행한다.
+  Future<void> _ensureGoogleSignInInitialized() async {
+    if (_googleSignInInitialized) return;
+    await GoogleSignIn.instance.initialize(
+      clientId: _kGoogleIosClientId,
+      serverClientId: _kGoogleWebClientId,
     );
-    if (alreadyLinkedInProfiles) {
-      if (mounted) {
-        _safeSetState(() => _emailLinkRestoreMode = true);
-      } else {
-        _emailLinkRestoreMode = true;
-      }
-      await _showEmailDuplicateNotice();
-    }
+    _googleSignInInitialized = true;
+  }
 
+  Future<void> _signOutGoogleSdkQuietly() async {
+    if (!_googleSignInInitialized) return;
     try {
-      if (alreadyLinkedInProfiles) {
-        await supabase.auth.signInWithOtp(email: trimmed);
-      } else {
-        await supabase.auth.updateUser(UserAttributes(email: trimmed));
-        if (mounted) {
-          _safeSetState(() => _emailLinkRestoreMode = false);
-        } else {
-          _emailLinkRestoreMode = false;
-        }
-      }
-      _showSnack(l10n.snackOtpSent);
-      return true;
+      await GoogleSignIn.instance.signOut();
     } catch (e) {
-      if (_isEmailAlreadyUsedError(e) && !alreadyLinkedInProfiles) {
-        try {
-          if (mounted) {
-            _safeSetState(() => _emailLinkRestoreMode = true);
-          } else {
-            _emailLinkRestoreMode = true;
-          }
-          await _showEmailDuplicateNotice();
-          await supabase.auth.signInWithOtp(email: trimmed);
-          _showSnack(l10n.snackOtpSent);
-          return true;
-        } catch (restoreError) {
-          _showSnack(l10n.snackOtpSendFailed(_formatAuthError(restoreError)));
-          return false;
-        }
-      }
-      _showSnack(l10n.snackOtpSendFailed(_formatAuthError(e)));
-      return false;
+      debugPrint('google sdk sign-out skipped: $e');
     }
   }
 
-  Future<bool> _verifyEmailLinkOtp({
-    required String email,
-    required String token,
-  }) async {
+  /// 사용자가 Google 계정 선택을 취소했는지 판정.
+  bool _isGoogleSignInCanceled(Object e) {
+    if (e is! GoogleSignInException) return false;
+    return e.code == GoogleSignInExceptionCode.canceled ||
+        e.code == GoogleSignInExceptionCode.interrupted ||
+        e.code == GoogleSignInExceptionCode.uiUnavailable;
+  }
+
+  /// Apple 계정 연동. 이번 단계는 UI 배치만 하고 준비 중 안내만 표시한다.
+  ///
+  /// 실제 Apple 인증(`sign_in_with_apple` + `linkIdentityWithIdToken`)은 다음
+  /// 단계에서 이 함수 본문만 교체해 확장한다. account_type / profiles.email /
+  /// Auth identity 는 이 단계에서 절대 변경하지 않는다.
+  Future<void> _linkAppleAccount() async {
+    if (_isAppleLinkBusy || _isGoogleLinkBusy) return;
     final l10n = AppLocalizations.of(context);
-    final trimmedEmail = email.trim();
-    final trimmedToken = token.trim();
-    if (trimmedEmail.isEmpty || trimmedToken.isEmpty) {
-      await _showEmailOtpInvalidNotice();
-      return false;
-    }
-    final wasRestoreMode = _emailLinkRestoreMode;
-    final otpType = wasRestoreMode ? OtpType.email : OtpType.emailChange;
-    try {
-      await supabase.auth.verifyOTP(
-        email: trimmedEmail,
-        token: trimmedToken,
-        type: otpType,
-      );
-    } catch (e, st) {
-      debugPrint('email otp verify failed: $e\n$st');
-      if (_isEmailAlreadyUsedError(e)) {
-        await _showEmailAlreadyUsedDialog();
-        return false;
-      }
-      if (_isEmailOtpInvalidOrExpiredError(e)) {
-        await _showEmailOtpInvalidNotice();
-        return false;
-      }
-      _showSnack(l10n.snackOtpVerifyFailed(_formatAuthError(e)));
-      return false;
+
+    if (_hasAnyLinkedAccount()) {
+      _showSnack(l10n.snackAccountAlreadyLinked);
+      return;
     }
 
+    _showSnack(l10n.appleAccountLinkComingSoon);
+  }
+
+  /// 현재 anonymous guest 세션(UUID 유지)에 Google identity 를 추가한다.
+  ///
+  /// `signInWithIdToken()` 은 기존 Google 계정 **로그인** API 이므로 사용하지
+  /// 않는다. guest UUID 를 유지해야 하므로 Supabase Manual Linking 의
+  /// `linkIdentityWithIdToken()` 한 가지 경로만 사용한다.
+  Future<void> _linkGoogleAccount() async {
+    if (_isGoogleLinkBusy || _isAppleLinkBusy) return;
+
+    final l10n = AppLocalizations.of(context);
+    final beforeUser = supabase.auth.currentUser;
+    if (beforeUser == null) {
+      _showSnack(l10n.snackLoginRequired);
+      return;
+    }
+    if (_hasAnyLinkedAccount()) {
+      _showSnack(l10n.snackAccountAlreadyLinked);
+      _safeSetState(_closeAccountLinkPanel);
+      return;
+    }
+
+    final beforeUserId = beforeUser.id;
+    _safeSetState(() => _isGoogleLinkBusy = true);
+
     try {
-      // 신규 이메일 연동 시에는 기존 guest 입력값을 보존하고, 중복 이메일
-      // 복구(restore) 시에는 기존 계정 profile 값으로 form 을 강제 덮어쓴다.
-      if (wasRestoreMode) {
-        // restore 흐름에서는 새 계정 profile 데이터가 이미 DB에 있으므로,
-        // 별도의 guest profile row sync 는 건너뛰고 바로 전체 reload 한다.
-        await _refreshAllUserDataAfterAuthChange(forceProfileFormSync: true);
-      } else {
-        await _syncAuthEmailToProfileIfNeeded();
-        await _refreshAllUserDataAfterAuthChange();
+      await _ensureGoogleSignInInitialized();
+
+      final GoogleSignInAccount account;
+      try {
+        account = await GoogleSignIn.instance.authenticate();
+      } on GoogleSignInException catch (e) {
+        if (_isGoogleSignInCanceled(e)) {
+          debugPrint('google account link canceled by user: ${e.code}');
+          return;
+        }
+        rethrow;
       }
+
+      final idToken = account.authentication.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        debugPrint('google account link failed: id token missing');
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
+      try {
+        await supabase.auth.linkIdentityWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: idToken,
+        );
+      } catch (e) {
+        if (_isIdentityAlreadyLinkedError(e)) {
+          debugPrint('google identity already linked to another user');
+          await _signOutGoogleSdkQuietly();
+          if (!mounted) return;
+          await _showLinkedAccountInUseNotice();
+          return;
+        }
+        rethrow;
+      }
+
+      // 링크 직후 서버 기준으로 identities 를 다시 확인한다.
+      final identities = await supabase.auth.getUserIdentities();
+      final linkedGoogle = identities.any((i) => i.provider == 'google');
+      final afterUserId = supabase.auth.currentUser?.id;
+
+      if (!linkedGoogle) {
+        debugPrint('google account link failed: identity not found after link');
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
+      if (afterUserId == null || afterUserId != beforeUserId) {
+        // UUID 가 바뀌면 기존 guest 데이터 소유권이 끊어진다. 연동 성공으로
+        // 처리하지 않고 profiles 도 변경하지 않는다.
+        debugPrint(
+          'google account link aborted: user id changed '
+          '(before=$beforeUserId after=$afterUserId)',
+        );
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
+      debugPrint('google account link ok: uuid preserved ($beforeUserId)');
+
+      final googleEmail =
+          _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
+          account.email.trim();
+      final linkedAt = DateTime.now().toIso8601String();
+
+      await supabase
+          .from('profiles')
+          .update({
+            'email': googleEmail.isEmpty ? null : googleEmail,
+            'account_type': 'google',
+            'linked_at': linkedAt,
+            'updated_at': linkedAt,
+          })
+          .eq('id', afterUserId);
+
+      await _refreshAllUserDataAfterAuthChange();
+      if (!mounted) return;
+
+      _dismissFocus();
+      _safeSetState(() {
+        _closeAccountLinkPanel();
+        _isAccountLinkInviteNoticeOpen = false;
+      });
+      _showSnack(l10n.snackAccountLinkCompleted);
+      await _showAccountLinkSuccessNotice();
+    } catch (e, st) {
+      debugPrint('google account link failed: $e\n$st');
+      if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
+    } finally {
       if (mounted) {
-        _safeSetState(() => _emailLinkRestoreMode = false);
+        _safeSetState(() => _isGoogleLinkBusy = false);
       } else {
-        _emailLinkRestoreMode = false;
+        _isGoogleLinkBusy = false;
       }
-      return true;
-    } catch (e) {
-      _showSnack(l10n.snackEmailLinkPartialSavedFailed);
-      debugPrint('verify email otp profile sync failed: $e');
-      if (mounted) {
-        _safeSetState(() => _emailLinkRestoreMode = false);
-      } else {
-        _emailLinkRestoreMode = false;
-      }
-      return true;
     }
   }
 
@@ -4470,7 +4344,7 @@ class _HomePageState extends State<HomePage>
       _showSnack(slot == 'brunch' ? '아점 인증 완료 (+5)' : '저녁 인증 완료 (+5)');
 
       if (isFirstEver) {
-        await _maybeShowEmailLinkInviteAfterFirstMeal();
+        await _maybeShowAccountLinkInviteAfterFirstMeal();
       }
     } catch (e) {
       if (!mounted) return;
@@ -4809,46 +4683,46 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _maybeShowEmailLinkInviteAfterFirstMeal() async {
+  Future<void> _maybeShowAccountLinkInviteAfterFirstMeal() async {
     if (_firstMealPopupShownThisSession) return;
-    if (_hasEffectiveEmailLink()) return;
+    if (_hasAnyLinkedAccount()) return;
     _firstMealPopupShownThisSession = true;
-    await _showEmailLinkInviteNotice();
+    await _showAccountLinkInviteNotice();
   }
 
-  Future<void> _showEmailLinkInviteNotice() async {
-    if (_hasEffectiveEmailLink()) return;
+  Future<void> _showAccountLinkInviteNotice() async {
+    if (_hasAnyLinkedAccount()) return;
     await _showYardNotice(
-      isOpen: () => _isEmailLinkInviteNoticeOpen,
-      markOpen: () => _isEmailLinkInviteNoticeOpen = true,
+      isOpen: () => _isAccountLinkInviteNoticeOpen,
+      markOpen: () => _isAccountLinkInviteNoticeOpen = true,
     );
   }
 
-  Future<void> _hideEmailLinkInviteNotice() async {
+  Future<void> _hideAccountLinkInviteNotice() async {
     await _hideYardNotice(
-      isOpen: () => _isEmailLinkInviteNoticeOpen,
-      markClosed: () => _isEmailLinkInviteNoticeOpen = false,
+      isOpen: () => _isAccountLinkInviteNoticeOpen,
+      markClosed: () => _isAccountLinkInviteNoticeOpen = false,
     );
   }
 
-  void _closeEmailLinkInviteNoticeOverlay() {
+  void _closeAccountLinkInviteNoticeOverlay() {
     _requestHideYardNotice(
-      isOpen: () => _isEmailLinkInviteNoticeOpen,
-      hide: _hideEmailLinkInviteNotice,
+      isOpen: () => _isAccountLinkInviteNoticeOpen,
+      hide: _hideAccountLinkInviteNotice,
     );
   }
 
-  Future<void> _onEmailLinkInviteLinkTap() async {
-    if (!_isEmailLinkInviteNoticeOpen) return;
-    await _hideEmailLinkInviteNotice();
+  Future<void> _onAccountLinkInviteLinkTap() async {
+    if (!_isAccountLinkInviteNoticeOpen) return;
+    await _hideAccountLinkInviteNotice();
     if (!mounted) return;
     await _openSettingsFromGameMenu();
     if (!mounted) return;
     _dismissFocus();
     _safeSetState(() {
-      _prepareEmailLinkPanelForOpen();
+      _prepareAccountLinkPanelForOpen();
       _isCustomerCenterPanelOpen = false;
-      _isEmailLinkPanelOpen = true;
+      _isAccountLinkPanelOpen = true;
     });
   }
 
@@ -5184,9 +5058,7 @@ class _HomePageState extends State<HomePage>
       await supabase.auth.signOut();
       if (!mounted) return;
       _safeSetState(() {
-        _emailOtpCooldownTimer?.cancel();
-        _emailOtpCooldownTimer = null;
-        _emailOtpCooldownSeconds = 0;
+        _resetAccountLinkPanelBusy();
         _profile = null;
         _petSpecies = [];
         _activePet = null;
@@ -5360,6 +5232,19 @@ class _HomePageState extends State<HomePage>
 
       await supabase.from('user_items').delete().eq('user_id', user.id);
       await supabase.from('user_pets').delete().eq('user_id', user.id);
+
+      // 개발자 초기화는 **사용자 데이터만** 초기화한다. Auth identity 자체는
+      // 해제하지 않으므로, Google/Apple identity 가 살아 있는 계정의
+      // account_type 을 guest 로 되돌려 Auth 와 불일치하게 만들지 않는다.
+      // (Auth 계정까지 지우는 것은 회원 탈퇴 흐름의 책임이다.)
+      final hasLinkedIdentity = _hasAnyLinkedAccountIdentity(user);
+      if (hasLinkedIdentity) {
+        debugPrint(
+          'developer reset: linked identity present '
+          '(${_linkedAccountProviderKey(_currentLinkedAccountProvider())}); '
+          'keeping profiles account_type/email/linked_at',
+        );
+      }
       await supabase
           .from('profiles')
           .update({
@@ -5368,25 +5253,22 @@ class _HomePageState extends State<HomePage>
             'age_range': null,
             'diet_goal': null,
             'target_weight_kg': null,
-            'email': null,
-            'account_type': 'guest',
-            'linked_at': null,
+            if (!hasLinkedIdentity) 'email': null,
+            if (!hasLinkedIdentity) 'account_type': 'guest',
+            if (!hasLinkedIdentity) 'linked_at': null,
             'gold_balance': 1000,
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', user.id);
 
+      await _signOutGoogleSdkQuietly();
       await supabase.auth.signOut();
       await supabase.auth.signInAnonymously();
 
       if (!mounted) return;
       _invalidateUserScopedAsyncWork(reason: 'developerReset');
       _safeSetState(() {
-        _resetEmailLinkPanelOtpFlow();
-        _emailLinkRestoreMode = false;
-        _emailOtpCooldownTimer?.cancel();
-        _emailOtpCooldownTimer = null;
-        _emailOtpCooldownSeconds = 0;
+        _resetAccountLinkPanelBusy();
         _lastResultType = null;
         _lastFeedbackText = null;
         _lastStatusMessage = null;
@@ -7312,17 +7194,6 @@ class _HomePageState extends State<HomePage>
         _activeKeyboardController != null;
   }
 
-  void _onEmailLinkControllerChangedForOtpSession() {
-    if (_suppressEmailLinkControllerSessionClear) return;
-    if (!_emailLinkOtpSent) return;
-    final currentEmail = _emailLinkController.text.trim().toLowerCase();
-    final sentEmail = _emailLinkOtpSentForEmail.trim().toLowerCase();
-    if (currentEmail.isEmpty) return;
-    if (sentEmail.isNotEmpty && currentEmail != sentEmail) {
-      _safeSetState(_clearEmailLinkOtpSession);
-    }
-  }
-
   void _dismissKeyboardOnly() {
     _keyboardAccessoryFocusNode.unfocus();
     FocusManager.instance.primaryFocus?.unfocus();
@@ -7688,15 +7559,13 @@ class _HomePageState extends State<HomePage>
     _isWithdrawFinalConfirmOpen = false;
     _isNameInterlockNoticeOpen = false;
     _isProfileSelectMissingNoticeOpen = false;
-    _isEmailLinkInviteNoticeOpen = false;
-    _isEmailLinkSuccessNoticeOpen = false;
-    _isEmailFormatErrorNoticeOpen = false;
-    _isEmailOtpInvalidNoticeOpen = false;
-    _isEmailDuplicateNoticeOpen = false;
+    _isAccountLinkInviteNoticeOpen = false;
+    _isAccountLinkSuccessNoticeOpen = false;
+    _isLinkedAccountInUseNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
     _isMaturityCompleteNoticeOpen = false;
     _isPokedexCompleteTicketNoticeOpen = false;
-    _isRemoteEmailLinkedLogoutNoticeOpen = false;
+    _isRemoteAccountLinkedLogoutNoticeOpen = false;
     _isRandomTicketUseConfirmOpen = false;
   }
 
@@ -8317,23 +8186,21 @@ class _HomePageState extends State<HomePage>
           _buildInYardPetNamingPanel(),
         _buildBagItemDetailGlobalOverlay(),
         _buildPokedexMaturePetDetailGlobalOverlay(),
-        _buildEmailLinkPanelGlobalOverlay(),
+        _buildAccountLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
         _buildShopNoticeGlobalOverlay(),
         _buildRandomTicketUseConfirmGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
-        _buildEmailLinkInviteNoticeGlobalOverlay(),
-        _buildEmailLinkSuccessNoticeGlobalOverlay(),
-        _buildEmailFormatErrorNoticeGlobalOverlay(),
-        _buildEmailOtpInvalidNoticeGlobalOverlay(),
-        _buildEmailDuplicateNoticeGlobalOverlay(),
+        _buildAccountLinkInviteNoticeGlobalOverlay(),
+        _buildAccountLinkSuccessNoticeGlobalOverlay(),
+        _buildLinkedAccountInUseNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
         _buildProfileSelectMissingNoticeGlobalOverlay(),
         _buildMaturityCompleteNoticeGlobalOverlay(),
         _buildPokedexCompleteTicketNoticeGlobalOverlay(),
-        _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay(),
+        _buildRemoteAccountLinkedLogoutNoticeGlobalOverlay(),
         if (_showStartupLoadingOverlay) _buildStartupLoadingOverlay(),
       ],
     );
@@ -8585,8 +8452,8 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildEmailLinkInviteNoticeGlobalOverlay() {
-    if (!_isYardConfirmOverlayFadeVisible(_isEmailLinkInviteNoticeOpen)) {
+  Widget _buildAccountLinkInviteNoticeGlobalOverlay() {
+    if (!_isYardConfirmOverlayFadeVisible(_isAccountLinkInviteNoticeOpen)) {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
@@ -8599,7 +8466,7 @@ class _HomePageState extends State<HomePage>
       color: const Color(0xFF000000),
       height: isEn ? 1.0 : 1.2,
     );
-    final emailInviteTitleTop = isEn ? 15.0 : 16.0;
+    final inviteTitleTop = isEn ? 15.0 : 16.0;
     final bodyStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: isEn ? 9 : 10,
@@ -8636,14 +8503,14 @@ class _HomePageState extends State<HomePage>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          SizedBox(height: emailInviteTitleTop),
+                          SizedBox(height: inviteTitleTop),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 Text(
-                                  l10n.emailLinkInviteTitle,
+                                  l10n.accountLinkInviteTitle,
                                   textAlign: TextAlign.left,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -8651,17 +8518,9 @@ class _HomePageState extends State<HomePage>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  l10n.emailLinkInviteBodyLine1,
+                                  l10n.accountLinkInviteBody,
                                   textAlign: TextAlign.left,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.visible,
-                                  style: bodyStyle,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  l10n.emailLinkInviteBodyLine2,
-                                  textAlign: TextAlign.left,
-                                  maxLines: 2,
+                                  maxLines: 3,
                                   overflow: TextOverflow.visible,
                                   style: bodyStyle,
                                 ),
@@ -8681,7 +8540,7 @@ class _HomePageState extends State<HomePage>
                               borderRadius: BorderRadius.circular(14),
                               child: InkWell(
                                 onTap: () =>
-                                    unawaited(_onEmailLinkInviteLinkTap()),
+                                    unawaited(_onAccountLinkInviteLinkTap()),
                                 borderRadius: BorderRadius.circular(14),
                                 child: Ink(
                                   height: 28,
@@ -8704,7 +8563,7 @@ class _HomePageState extends State<HomePage>
                                   ),
                                   child: Center(
                                     child: _buildPastelBlueGradientButtonText(
-                                      l10n.emailLinkInviteNow,
+                                      l10n.accountLinkInviteNow,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -8719,7 +8578,7 @@ class _HomePageState extends State<HomePage>
                               color: Colors.transparent,
                               borderRadius: BorderRadius.circular(14),
                               child: InkWell(
-                                onTap: _closeEmailLinkInviteNoticeOverlay,
+                                onTap: _closeAccountLinkInviteNoticeOverlay,
                                 borderRadius: BorderRadius.circular(14),
                                 child: Ink(
                                   height: 28,
@@ -8742,7 +8601,7 @@ class _HomePageState extends State<HomePage>
                                   ),
                                   child: Center(
                                     child: Text(
-                                      l10n.emailLinkInviteLater,
+                                      l10n.accountLinkInviteLater,
                                       textAlign: TextAlign.center,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -8772,65 +8631,36 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildEmailLinkSuccessNoticeGlobalOverlay() {
+  Widget _buildAccountLinkSuccessNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
       VegePetNoticeConfig(
-        isOpen: _isEmailLinkSuccessNoticeOpen,
-        title: l10n.emailLinkSuccessTitle,
-        body: l10n.emailLinkSuccessBody,
-        primaryLabel: l10n.emailLinkSuccessConfirm,
-        onPrimaryTap: _closeEmailLinkSuccessNoticeOverlay,
+        isOpen: _isAccountLinkSuccessNoticeOpen,
+        title: l10n.accountLinkSuccessTitle,
+        body: l10n.accountLinkSuccessBody,
+        primaryLabel: l10n.accountLinkSuccessConfirm,
+        onPrimaryTap: _closeAccountLinkSuccessNoticeOverlay,
         outsideDismissible: false,
         bodyMaxLines: 2,
       ),
     );
   }
 
-  Widget _buildEmailFormatErrorNoticeGlobalOverlay() {
-    final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
-        isOpen: _isEmailFormatErrorNoticeOpen,
-        title: l10n.emailFormatErrorTitle,
-        body: l10n.emailFormatErrorBody,
-        primaryLabel: l10n.emailFormatErrorConfirm,
-        onPrimaryTap: _closeEmailFormatErrorNoticeOverlay,
-        onOutsideTap: () => unawaited(_hideEmailFormatErrorNotice()),
-        bodyColor: const Color(0xFFB92020),
-      ),
-    );
-  }
-
-  Widget _buildEmailOtpInvalidNoticeGlobalOverlay() {
-    final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
-        isOpen: _isEmailOtpInvalidNoticeOpen,
-        title: l10n.emailOtpInvalidNoticeTitle,
-        body: l10n.emailOtpInvalidNoticeBody,
-        primaryLabel: l10n.emailOtpInvalidNoticeConfirm,
-        onPrimaryTap: _closeEmailOtpInvalidNoticeOverlay,
-        onOutsideTap: _closeEmailOtpInvalidNoticeOverlay,
-        bodyOverflow: TextOverflow.visible,
-      ),
-    );
-  }
-
-  Widget _buildEmailDuplicateNoticeGlobalOverlay() {
+  Widget _buildLinkedAccountInUseNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     final isEn = _isEnglishLocale;
     return _buildVegePetOneButtonNoticeOverlay(
       VegePetNoticeConfig(
-        isOpen: _isEmailDuplicateNoticeOpen,
-        title: l10n.emailDuplicateNoticeTitle,
-        body: l10n.emailDuplicateNoticeBody,
-        primaryLabel: l10n.emailDuplicateNoticeConfirm,
-        onPrimaryTap: _closeEmailDuplicateNoticeOverlay,
+        isOpen: _isLinkedAccountInUseNoticeOpen,
+        title: l10n.linkedAccountInUseTitle,
+        body: l10n.linkedAccountInUseBody,
+        primaryLabel: l10n.linkedAccountInUseConfirm,
+        onPrimaryTap: _closeLinkedAccountInUseNoticeOverlay,
         outsideDismissible: false,
         titleBlockTranslateYOffset: isEn ? -2 : 0,
-        bodyMaxLinesEn: 3,
-        bodyMaxLinesKo: 2,
+        bodyFontSizeEn: 9,
+        bodyMaxLinesEn: 4,
+        bodyMaxLinesKo: 3,
         bodyOverflow: TextOverflow.visible,
         blockDialogPointerWithGestureDetector: false,
       ),
@@ -8854,7 +8684,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildRemoteEmailLinkedLogoutNoticeDialog() {
+  Widget _buildRemoteAccountLinkedLogoutNoticeDialog() {
     final l10n = AppLocalizations.of(context);
     final isEn = _isEnglishLocale;
     final resetting = _isResettingToGuestAfterRemoteLogout;
@@ -8872,7 +8702,7 @@ class _HomePageState extends State<HomePage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    l10n.remoteEmailLinkedLogoutTitle,
+                    l10n.remoteAccountLinkedLogoutTitle,
                     textAlign: TextAlign.left,
                     maxLines: isEn ? 2 : 1,
                     overflow: TextOverflow.ellipsis,
@@ -8886,7 +8716,7 @@ class _HomePageState extends State<HomePage>
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    l10n.remoteEmailLinkedLogoutBody,
+                    l10n.remoteAccountLinkedLogoutBody,
                     textAlign: TextAlign.left,
                     softWrap: true,
                     maxLines: isEn ? 3 : 2,
@@ -8912,8 +8742,9 @@ class _HomePageState extends State<HomePage>
               child: InkWell(
                 onTap: resetting
                     ? null
-                    : () =>
-                          unawaited(_confirmRemoteEmailLinkedLogoutAndReset()),
+                    : () => unawaited(
+                        _confirmRemoteAccountLinkedLogoutAndReset(),
+                      ),
                 borderRadius: BorderRadius.circular(14),
                 child: Ink(
                   height: 30,
@@ -8934,7 +8765,7 @@ class _HomePageState extends State<HomePage>
                   ),
                   child: Center(
                     child: _buildPastelBlueGradientButtonText(
-                      l10n.remoteEmailLinkedLogoutConfirm,
+                      l10n.remoteAccountLinkedLogoutConfirm,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
@@ -8948,9 +8779,9 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildRemoteEmailLinkedLogoutNoticeGlobalOverlay() {
+  Widget _buildRemoteAccountLinkedLogoutNoticeGlobalOverlay() {
     if (!_isYardConfirmOverlayFadeVisible(
-      _isRemoteEmailLinkedLogoutNoticeOpen,
+      _isRemoteAccountLinkedLogoutNoticeOpen,
     )) {
       return const SizedBox.shrink();
     }
@@ -8973,7 +8804,7 @@ class _HomePageState extends State<HomePage>
               top: kVegePetConfirmDialogTop,
               width: kVegePetConfirmDialogW,
               height: kVegePetConfirmDialogH,
-              child: _buildRemoteEmailLinkedLogoutNoticeDialog(),
+              child: _buildRemoteAccountLinkedLogoutNoticeDialog(),
             ),
           ],
         ),
@@ -8985,15 +8816,14 @@ class _HomePageState extends State<HomePage>
     _dismissFocus();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
     _safeSetState(() {
-      _resetEmailLinkPanelOtpFlow();
-      _isEmailLinkPanelOpen = false;
+      _resetAccountLinkPanelBusy();
+      _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
       _isShopNoticeOpen = false;
       _isNameInterlockNoticeOpen = false;
-      _isEmailLinkInviteNoticeOpen = false;
-      _isEmailLinkSuccessNoticeOpen = false;
-      _isEmailFormatErrorNoticeOpen = false;
-      _isEmailDuplicateNoticeOpen = false;
+      _isAccountLinkInviteNoticeOpen = false;
+      _isAccountLinkSuccessNoticeOpen = false;
+      _isLinkedAccountInUseNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
       _isMaturityCompleteNoticeOpen = false;
       _isPokedexCompleteTicketNoticeOpen = false;
@@ -9590,8 +9420,8 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildEmailLinkPanelGlobalOverlay() {
-    if (!_isEmailLinkPanelOpen) {
+  Widget _buildAccountLinkPanelGlobalOverlay() {
+    if (!_isAccountLinkPanelOpen) {
       return const SizedBox.shrink();
     }
     return Positioned.fill(
@@ -9604,17 +9434,17 @@ class _HomePageState extends State<HomePage>
               behavior: HitTestBehavior.translucent,
               onTap: () {
                 if (_dismissKeyboardIfVisibleOnly()) return;
-                _safeSetState(() => _closeEmailLinkPanel());
+                _safeSetState(_closeAccountLinkPanel);
               },
               child: const SizedBox.expand(),
             ),
           ),
           Positioned(
-            left: _kEmailLinkPanelLeft,
-            top: _kEmailLinkPanelTop,
-            width: _kEmailLinkPanelW,
-            height: _kEmailLinkPanelH,
-            child: _buildEmailLinkGlassPanel(),
+            left: _kAccountLinkPanelLeft,
+            top: _kAccountLinkPanelTop,
+            width: _kAccountLinkPanelW,
+            height: _kAccountLinkPanelH,
+            child: _buildAccountLinkGlassPanel(),
           ),
         ],
       ),
@@ -9811,288 +9641,113 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Future<void> _onEmailLinkPanelPrimaryTap() async {
-    if (_emailLinkPanelSendBusy || _emailLinkPanelVerifyBusy) return;
-
-    if (!_emailLinkOtpSent) {
-      if (_isEmailOtpCooldownActive()) return;
-      final raw = _emailLinkController.text.trim();
-      if (await _promptEmailFormatErrorIfNeeded(raw)) return;
-      _safeSetState(() => _emailLinkPanelSendBusy = true);
-      final ok = await _sendEmailLinkOtp(raw);
-      if (!mounted) return;
-      _safeSetState(() {
-        _emailLinkPanelSendBusy = false;
-        if (ok) {
-          _markEmailLinkOtpSessionActive(raw);
-        }
-      });
-      if (ok) {
-        _startEmailOtpCooldown();
-      }
-    } else {
-      final l10n = AppLocalizations.of(context);
-      if (_hasEffectiveEmailLink()) {
-        _showSnack(l10n.snackEmailAlreadyLinked);
-        return;
-      }
-      final raw = _emailLinkController.text.trim();
-      if (raw.isEmpty) {
-        _showSnack(l10n.snackEmailRequired);
-        return;
-      }
-      if (await _promptEmailFormatErrorIfNeeded(raw)) return;
-      final code = _emailLinkOtpController.text.trim();
-      if (code.isEmpty) {
-        await _showEmailOtpInvalidNotice();
-        return;
-      }
-      _safeSetState(() => _emailLinkPanelVerifyBusy = true);
-      final ok = await _verifyEmailLinkOtp(email: raw, token: code);
-      if (!mounted) return;
-      _safeSetState(() => _emailLinkPanelVerifyBusy = false);
-      if (ok) {
-        if (!mounted) return;
-        _dismissFocus();
-        _safeSetState(() {
-          _resetEmailLinkPanelOtpFlow();
-          _isEmailLinkPanelOpen = false;
-        });
-        await _showEmailLinkSuccessNotice();
-      }
-    }
-  }
-
-  Future<void> _onEmailLinkPanelResendOtp() async {
-    if (_emailLinkPanelResendBusy || _isEmailOtpCooldownActive()) return;
-    final raw = _emailLinkController.text.trim();
-    if (raw.isEmpty) {
-      _showSnack(AppLocalizations.of(context).snackEmailRequired);
-      return;
-    }
-    if (await _promptEmailFormatErrorIfNeeded(raw)) return;
-    _safeSetState(() => _emailLinkPanelResendBusy = true);
-    final ok = await _sendEmailLinkOtp(raw);
-    if (!mounted) return;
-    _safeSetState(() {
-      _emailLinkPanelResendBusy = false;
-      if (ok) {
-        _markEmailLinkOtpSessionActive(raw);
-      }
-    });
-    if (ok) {
-      _startEmailOtpCooldown();
-    }
-  }
-
-  Widget _buildEmailLinkGlassPanel() {
-    final l10n = AppLocalizations.of(context);
-    final cooldownActive = _emailOtpCooldownSeconds > 0;
-    final otpEnabled = _emailLinkOtpSent;
-    final fieldTextStyle = _settingsPanelTextStyle(
-      11,
-      FontWeight.w600,
-      const Color(0xFF4A4A4A),
-      height: 1.1,
-    );
-    const labelStyle = TextStyle(
-      fontFamily: 'Pretendard',
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: Color(0xFF000000),
-      height: 1.15,
-    );
-
-    Widget labeledSection({required String label, required Widget field}) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.left,
-                style: labelStyle,
-              ),
-            ),
-            const SizedBox(height: 4),
-            field,
-          ],
-        ),
-      );
-    }
-
-    Widget shellTextField({
-      required String key,
-      required TextEditingController controller,
-      required FocusNode focusNode,
-      required bool enabled,
-      required TextInputType keyboardType,
-      required List<TextInputFormatter> formatters,
-    }) {
-      return _buildKeyboardAccessoryTriggerField(
-        key: key,
-        controller: controller,
-        sourceFocusNode: focusNode,
-        keyboardType: keyboardType,
-        inputFormatters: formatters,
-        enabled: enabled,
-        style: fieldTextStyle,
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-      );
-    }
-
-    final primaryDisabled = !_emailLinkOtpSent
-        ? (_emailLinkPanelSendBusy || cooldownActive)
-        : _emailLinkPanelVerifyBusy;
-    final primaryLabel = !_emailLinkOtpSent
-        ? l10n.emailLinkSendOtpButton
-        : l10n.emailLinkVerifyCompleteButton;
-    final primaryBusy = !_emailLinkOtpSent
-        ? _emailLinkPanelSendBusy
-        : _emailLinkPanelVerifyBusy;
-    final resendEnabled =
-        _emailLinkOtpSent && !cooldownActive && !_emailLinkPanelResendBusy;
-    const actionButtonDecoration = BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.all(Radius.circular(18)),
-      border: Border.fromBorderSide(
-        BorderSide(color: Color(0xFFF1F1F1), width: 0.8),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Color(0x08000000),
-          blurRadius: 4,
-          offset: Offset(0, 1),
-        ),
-      ],
-    );
-    final middleSections = <Widget>[
-      labeledSection(
-        label: l10n.emailLinkEmailRowLabel,
-        field: shellTextField(
-          key: 'email_link',
-          controller: _emailLinkController,
-          focusNode: _emailLinkFocusNode,
-          enabled: true,
-          keyboardType: TextInputType.emailAddress,
-          formatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9@.]')),
-          ],
-        ),
-      ),
-      labeledSection(
-        label: l10n.emailLinkOtpRowLabel,
-        field: shellTextField(
-          key: 'email_link_otp',
-          controller: _emailLinkOtpController,
-          focusNode: _emailLinkOtpFocusNode,
-          enabled: otpEnabled,
-          keyboardType: TextInputType.number,
-          formatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(8),
-          ],
-        ),
-      ),
-      if (cooldownActive && !_emailLinkOtpSent)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            l10n.emailOtpRetryAfterSeconds(_emailOtpCooldownSeconds),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: _settingsPanelTextStyle(
-              10,
-              FontWeight.w600,
-              const Color(0xFFB92020),
-              height: 1.0,
-            ),
-          ),
-        ),
-      if (_emailLinkOtpSent)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: SizedBox(
-            height: 22,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: (cooldownActive || _emailLinkPanelResendBusy)
-                    ? null
-                    : () => unawaited(_onEmailLinkPanelResendOtp()),
-                borderRadius: BorderRadius.circular(18),
-                child: Ink(
-                  decoration: resendEnabled
-                      ? actionButtonDecoration
-                      : const BoxDecoration(color: Colors.transparent),
-                  child: Center(
-                    child: _emailLinkPanelResendBusy
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF6B6B6B),
-                            ),
-                          )
-                        : cooldownActive
-                        ? Text(
-                            l10n.emailOtpRetryAfterSeconds(
-                              _emailOtpCooldownSeconds,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: _settingsPanelTextStyle(
-                              11,
-                              FontWeight.w600,
-                              const Color(0xFFB92020),
-                              height: 1.0,
-                            ),
-                          )
-                        : _buildPastelBlueGradientButtonText(
-                            l10n.emailLinkResendCodeButton,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                  ),
+  /// 계정 연동 패널의 provider 버튼 (Apple / Google 공통 shell).
+  Widget _buildAccountLinkProviderButton({
+    required String label,
+    required IconData icon,
+    required Color background,
+    required Color foreground,
+    required Color borderColor,
+    required bool busy,
+    required VoidCallback? onTap,
+  }) {
+    return SizedBox(
+      height: 30,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(15),
+          child: Ink(
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: borderColor, width: 0.8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
                 ),
-              ),
+              ],
+            ),
+            child: Center(
+              child: busy
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: foreground,
+                      ),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(icon, size: 15, color: foreground),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              label,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: foreground,
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
             ),
           ),
         ),
-    ];
+      ),
+    );
+  }
+
+  /// 계정 연동 글래스 패널.
+  ///
+  /// 기존 이메일 OTP 패널의 위치/폭/blur/글래스/borderRadius/외부 탭 닫기를
+  /// 유지하고, 내부만 Apple(위) · Google(아래) 버튼 + 정책 안내 2줄로 교체한다.
+  Widget _buildAccountLinkGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    final anyBusy = _isGoogleLinkBusy || _isAppleLinkBusy;
+
+    const guideStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 9,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF4A4A4A),
+      height: 1.3,
+    );
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
       child: _buildVegePetGlassPanel(
-        width: _kEmailLinkPanelW,
-        height: _kEmailLinkPanelH,
+        width: _kAccountLinkPanelW,
+        height: _kAccountLinkPanelH,
         shadowBlurRadius: 10,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: FittedBox(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.center,
                 child: Text(
-                  l10n.emailAccountLink,
+                  l10n.accountLink,
                   textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -10104,74 +9759,54 @@ class _HomePageState extends State<HomePage>
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              height: 28,
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(18),
-                child: InkWell(
-                  onTap: primaryDisabled
-                      ? null
-                      : () => unawaited(_onEmailLinkPanelPrimaryTap()),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: const Color(0xFFF1F1F1),
-                        width: 0.8,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.03),
-                          blurRadius: 4,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
+              const SizedBox(height: 14),
+              _buildAccountLinkProviderButton(
+                label: l10n.signInWithApple,
+                icon: Icons.apple,
+                background: const Color(0xFF000000),
+                foreground: Colors.white,
+                borderColor: const Color(0xFF000000),
+                busy: _isAppleLinkBusy,
+                onTap: anyBusy ? null : () => unawaited(_linkAppleAccount()),
+              ),
+              const SizedBox(height: 10),
+              _buildAccountLinkProviderButton(
+                label: l10n.signInWithGoogle,
+                // TODO(vegepet): 공식 Google "G" 로고 asset 추가 후 교체한다.
+                // 브랜드 가이드상 G 로고를 임의로 그리면 안 되므로 임시로
+                // 일반 계정 아이콘을 사용한다.
+                icon: Icons.account_circle_outlined,
+                background: Colors.white,
+                foreground: const Color(0xFF1F1F1F),
+                borderColor: const Color(0xFFDADCE0),
+                busy: _isGoogleLinkBusy,
+                onTap: anyBusy ? null : () => unawaited(_linkGoogleAccount()),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.accountLinkGuideOnlyOneProvider,
+                      textAlign: TextAlign.left,
+                      maxLines: 2,
+                      overflow: TextOverflow.visible,
+                      style: guideStyle,
                     ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Opacity(
-                          opacity: primaryBusy ? 0.35 : 1,
-                          child: _buildPastelBlueGradientButtonText(
-                            primaryLabel,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (primaryBusy)
-                          const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF6B6B6B),
-                            ),
-                          ),
-                      ],
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.accountLinkGuideCannotChange,
+                      textAlign: TextAlign.left,
+                      maxLines: 2,
+                      overflow: TextOverflow.visible,
+                      style: guideStyle,
                     ),
-                  ),
+                  ],
                 ),
               ),
-            ),
-            Positioned(
-              top: 16 + 13,
-              left: 0,
-              right: 0,
-              bottom: 8 + 28,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: middleSections,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -10305,8 +9940,8 @@ class _HomePageState extends State<HomePage>
         _isRandomTicketUseConfirmOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
-        _isEmailLinkInviteNoticeOpen ||
-        _isEmailLinkSuccessNoticeOpen;
+        _isAccountLinkInviteNoticeOpen ||
+        _isAccountLinkSuccessNoticeOpen;
   }
 
   double get _gameMenuYardExitFadeMultiplier {
@@ -15117,7 +14752,7 @@ class _HomePageState extends State<HomePage>
           : null;
       final wasLogged = resultType != null && resultType != 'uncertain';
       if (wasFirstEver && wasLogged) {
-        await _maybeShowEmailLinkInviteAfterFirstMeal();
+        await _maybeShowAccountLinkInviteAfterFirstMeal();
       }
     } catch (e) {
       if (!mounted) return;
@@ -16534,7 +16169,7 @@ class _HomePageState extends State<HomePage>
     _gameHelpSwapController.value = 0;
     _isHelpPanelOpen = false;
     _helpPanelSwapInProgress = false;
-    _isEmailLinkPanelOpen = false;
+    _isAccountLinkPanelOpen = false;
     _isCustomerCenterPanelOpen = false;
     _instantCloseYardConfirmOverlays();
     _isStoryPanelOpen = false;
@@ -16555,7 +16190,7 @@ class _HomePageState extends State<HomePage>
     _safeSetState(() {
       _isSettingsPanelOpen = false;
       _settingsPanelSwapInProgress = false;
-      _isEmailLinkPanelOpen = false;
+      _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
@@ -16667,20 +16302,15 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    if (_isEmailLinkInviteNoticeOpen) {
+    if (_isAccountLinkInviteNoticeOpen) {
       return;
     }
 
-    if (_isEmailFormatErrorNoticeOpen) {
-      unawaited(_hideEmailFormatErrorNotice());
+    if (_isLinkedAccountInUseNoticeOpen) {
       return;
     }
 
-    if (_isEmailDuplicateNoticeOpen) {
-      return;
-    }
-
-    if (_isRemoteEmailLinkedLogoutNoticeOpen) {
+    if (_isRemoteAccountLinkedLogoutNoticeOpen) {
       return;
     }
 
@@ -16689,7 +16319,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    if (_isEmailLinkSuccessNoticeOpen) {
+    if (_isAccountLinkSuccessNoticeOpen) {
       return;
     }
 
@@ -16723,9 +16353,9 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    if (_isEmailLinkPanelOpen) {
+    if (_isAccountLinkPanelOpen) {
       _dismissFocus();
-      _safeSetState(() => _closeEmailLinkPanel());
+      _safeSetState(_closeAccountLinkPanel);
       return;
     }
 
@@ -16923,7 +16553,7 @@ class _HomePageState extends State<HomePage>
         _loadPushSettings(),
         _loadSoundSettings(),
       ]);
-      await _syncAuthEmailToProfileIfNeeded();
+      await _syncLinkedProviderToProfileIfNeeded();
     } catch (e) {
       debugPrint('prepare settings panel data failed: $e');
     }
@@ -17302,7 +16932,7 @@ class _HomePageState extends State<HomePage>
     _safeSetState(() {
       _settingsPanelSwapInProgress = false;
       _isSettingsPanelOpen = false;
-      _isEmailLinkPanelOpen = false;
+      _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
       _instantCloseYardConfirmOverlays();
       _activeSettingsSupportDoc = null;
@@ -17331,8 +16961,8 @@ class _HomePageState extends State<HomePage>
     debugPrint('open support doc: active=$type rendering=$type');
     _safeSetState(() {
       _isCustomerCenterPanelOpen = false;
-      _isEmailLinkPanelOpen = false;
-      _resetEmailLinkPanelOtpFlow();
+      _isAccountLinkPanelOpen = false;
+      _resetAccountLinkPanelBusy();
       _activeSettingsSupportDoc = type;
       _renderingSettingsSupportDoc = type;
       _settingsSupportDocSwapInProgress = true;
@@ -17626,21 +17256,21 @@ class _HomePageState extends State<HomePage>
   }
 
   String _settingsAccountPrimaryLine(AppLocalizations l10n) {
-    if (_hasEffectiveEmailLink()) {
-      final auth = _currentAuthEmail()?.trim();
-      if (auth != null && auth.isNotEmpty) return auth;
-      final pe = _profile?['email']?.toString().trim() ?? '';
-      if (pe.isNotEmpty) return pe;
-      return _resolvedDisplayEmailLine(l10n);
+    switch (_currentLinkedAccountProvider()) {
+      case _LinkedAccountProvider.google:
+        return l10n.googleAccountLinkedLine;
+      case _LinkedAccountProvider.apple:
+        return l10n.appleAccountLinkedLine;
+      case _LinkedAccountProvider.none:
+        final uid = supabase.auth.currentUser?.id ?? '';
+        final prefix = uid.length <= 18 ? uid : uid.substring(0, 18);
+        return l10n.settingsGuestUserIdLine(prefix);
     }
-    final uid = supabase.auth.currentUser?.id ?? '';
-    final prefix = uid.length <= 18 ? uid : uid.substring(0, 18);
-    return l10n.settingsGuestUserIdLine(prefix);
   }
 
   Widget _buildSettingsGameMenuGlassPanel() {
     final l10n = AppLocalizations.of(context);
-    final linked = _hasEffectiveEmailLink();
+    final linked = _hasAnyLinkedAccount();
     final accountPrimary = _settingsAccountPrimaryLine(l10n);
 
     final rowLabelStyle = _settingsPanelTextStyle(
@@ -17810,14 +17440,9 @@ class _HomePageState extends State<HomePage>
                               ),
                               const SizedBox(height: 6),
                               if (linked)
+                                // 연동 완료 상태: 비활성. 연동 해제·변경은
+                                // 앱에서 제공하지 않으므로 패널을 열지 않는다.
                                 _buildSettingsGrayRow(
-                                  onTap: () {
-                                    _showSnack(
-                                      AppLocalizations.of(
-                                        context,
-                                      ).snackEmailAlreadyLinked,
-                                    );
-                                  },
                                   child: Row(
                                     children: [
                                       ShaderMask(
@@ -17841,7 +17466,7 @@ class _HomePageState extends State<HomePage>
                                       Expanded(
                                         child:
                                             _buildPastelBlueGradientButtonText(
-                                              l10n.emailLinkCompleted,
+                                              l10n.accountLinkCompleted,
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
                                               textAlign: TextAlign.start,
@@ -17855,12 +17480,12 @@ class _HomePageState extends State<HomePage>
                               else
                                 _buildSettingsGrayRow(
                                   onTap: () {
-                                    if (_hasEffectiveEmailLink()) return;
+                                    if (_hasAnyLinkedAccount()) return;
                                     _dismissFocus();
                                     _safeSetState(() {
-                                      _prepareEmailLinkPanelForOpen();
+                                      _prepareAccountLinkPanelForOpen();
                                       _isCustomerCenterPanelOpen = false;
-                                      _isEmailLinkPanelOpen = true;
+                                      _isAccountLinkPanelOpen = true;
                                     });
                                   },
                                   child: Row(
@@ -17886,7 +17511,7 @@ class _HomePageState extends State<HomePage>
                                       Expanded(
                                         child:
                                             _buildPastelBlueGradientButtonText(
-                                              l10n.emailAccountLink,
+                                              l10n.accountLink,
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
                                               textAlign: TextAlign.start,
@@ -19525,7 +19150,7 @@ class _HomePageState extends State<HomePage>
             label: const Text('개발용 전체 초기화'),
           ),
           OutlinedButton.icon(
-            onPressed: () => unawaited(_handleRemoteEmailLinkedDetected()),
+            onPressed: () => unawaited(_handleRemoteAccountLinkedDetected()),
             icon: const Icon(Icons.phonelink_erase_outlined, size: 18),
             label: const Text('원격 연동 로그아웃 알림 테스트'),
           ),
@@ -20909,8 +20534,10 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                                                   suffixPainter.width)
                                               .clamp(0.0, constraints.maxWidth);
                                       // 기존 (prevBoxW/3)+8 최종 너비에 +4px.
-                                      final boxW =
-                                          ((prevBoxW / 3) + 12).clamp(0.0, prevBoxW);
+                                      final boxW = ((prevBoxW / 3) + 12).clamp(
+                                        0.0,
+                                        prevBoxW,
+                                      );
 
                                       return Row(
                                         crossAxisAlignment:

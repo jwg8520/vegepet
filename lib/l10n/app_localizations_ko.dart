@@ -60,19 +60,32 @@ class AppLocalizationsKo extends AppLocalizations {
   String get withdrawAccount => '회원 탈퇴';
 
   @override
-  String get emailAccountLink => '이메일 계정 연동';
+  String get accountLink => '계정 연동';
 
   @override
-  String get emailLinkCompleted => '이메일 연동 완료';
+  String get accountLinkCompleted => '연동 완료';
 
   @override
-  String get guestAccount => '게스트 체험 계정';
+  String get googleAccountLinkedLine => 'Google 계정 연동됨';
 
   @override
-  String get emailLinkedAccount => '이메일 연동 계정';
+  String get appleAccountLinkedLine => 'Apple 계정 연동됨';
 
   @override
-  String get noLinkedEmail => '연동된 이메일 없음';
+  String get signInWithApple => 'Sign in with Apple';
+
+  @override
+  String get signInWithGoogle => 'Sign in with Google';
+
+  @override
+  String get accountLinkGuideOnlyOneProvider =>
+      '• Apple 혹은 Google 중 1가지의 계정만 연동이 가능합니다.';
+
+  @override
+  String get accountLinkGuideCannotChange => '• 연동된 계정은 변경이 불가합니다.';
+
+  @override
+  String get appleAccountLinkComingSoon => 'Apple 계정 연동은 다음 단계에서 지원될 예정이에요.';
 
   @override
   String get pushNoticeEvent => '공지 및 이벤트';
@@ -513,19 +526,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackLoginRequired => '로그인이 필요해요.';
 
   @override
-  String get snackInvalidEmail => '※ 올바른 이메일 형식으로 입력해주세요.';
+  String get snackAccountAlreadyLinked => '이미 계정 연동이 완료되어 있어요.';
 
   @override
-  String get snackEmailRequired => '이메일을 입력해주세요.';
+  String get snackAccountLinkCompleted => '계정 연동이 완료되었어요.';
 
   @override
-  String get snackOtpRequired => '인증 코드를 입력해주세요.';
-
-  @override
-  String get snackEmailAlreadyLinked => '이미 이메일 계정으로 연동되어 있어요.';
-
-  @override
-  String get snackEmailLinkCompleted => '이메일 계정 연동이 완료되었어요.';
+  String get snackAccountLinkFailed => '계정 연동에 실패했어요. 잠시 후 다시 시도해주세요.';
 
   @override
   String get snackTicketEmpty => '보유 중인 랜덤 분양권이 없어요.';
@@ -601,92 +608,46 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get emailLinkSendOtpButton => '인증 코드 받기';
+  String get accountLinkInviteTitle => '계정을 연동할까요?';
 
   @override
-  String get emailLinkEmailRowLabel => '• 이메일';
+  String get accountLinkInviteBody =>
+      '계정을 연동하면 앱을 다시 설치하거나 기기를 변경해도 기존 베지펫 데이터를 불러올 수 있어요.';
 
   @override
-  String get emailLinkOtpRowLabel => '• 인증 코드';
+  String get accountLinkInviteLater => '나중에';
 
   @override
-  String get emailLinkResendCodeButton => '인증 코드 다시 받기';
+  String get accountLinkInviteNow => '계정 연동';
 
   @override
-  String get emailLinkVerifyCompleteButton => '인증 완료';
+  String get accountLinkSuccessTitle => '연동 완료💫';
 
   @override
-  String emailOtpRetryAfterSeconds(int seconds) {
-    return '$seconds초 후에 재전송 가능';
-  }
+  String get accountLinkSuccessBody => '계정이 성공적으로 연동되었습니다.';
 
   @override
-  String get emailAlreadyUsedTitle => '이메일 연동 불가';
+  String get accountLinkSuccessConfirm => '확인';
 
   @override
-  String get emailAlreadyUsedBody => '이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.';
+  String get linkedAccountInUseTitle => '이미 사용 중인 계정이에요';
 
   @override
-  String get emailLinkInviteTitle => '베지펫을 지켜주세요!';
+  String get linkedAccountInUseBody =>
+      '이 Google 계정은 이미 다른 베지펫 계정에 연동되어 있어요. 기존 계정 불러오기는 별도 로그인 화면에서 진행해주세요.';
 
   @override
-  String get emailLinkInviteBodyLine1 => '앱이 지워지면 귀여운 베지펫이 사라져요..😢';
+  String get linkedAccountInUseConfirm => '확인';
 
   @override
-  String get emailLinkInviteBodyLine2 => '지금 설정에서 이메일 연동을 진행할까요?';
+  String get remoteAccountLinkedLogoutTitle => '⚠️계정 연동 감지';
 
   @override
-  String get emailLinkInviteLater => '나중에';
-
-  @override
-  String get emailLinkInviteNow => '연동하기';
-
-  @override
-  String get emailLinkSuccessTitle => '연동 완료💫';
-
-  @override
-  String get emailLinkSuccessBody => '계정이 성공적으로 연동되었습니다.';
-
-  @override
-  String get emailLinkSuccessConfirm => '확인';
-
-  @override
-  String get emailFormatErrorTitle => '이메일 형식 오류';
-
-  @override
-  String get emailFormatErrorBody => '※ 올바른 이메일 형식을 입력해주세요!';
-
-  @override
-  String get emailFormatErrorConfirm => '확인';
-
-  @override
-  String get emailOtpInvalidNoticeTitle => '⚠️올바르지 않은 코드';
-
-  @override
-  String get emailOtpInvalidNoticeBody => '다시 입력해주세요. 입력 제한 시간은 1시간 입니다.';
-
-  @override
-  String get emailOtpInvalidNoticeConfirm => '확인';
-
-  @override
-  String get emailDuplicateNoticeTitle => '⚠️중복 이메일';
-
-  @override
-  String get emailDuplicateNoticeBody =>
-      '이미 연동된 이메일이 존재합니다. 인증을 완료하면 기존 데이터를 이 기기에 불러옵니다.';
-
-  @override
-  String get emailDuplicateNoticeConfirm => '확인';
-
-  @override
-  String get remoteEmailLinkedLogoutTitle => '⚠️계정 연동 감지';
-
-  @override
-  String get remoteEmailLinkedLogoutBody =>
+  String get remoteAccountLinkedLogoutBody =>
       '사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.';
 
   @override
-  String get remoteEmailLinkedLogoutConfirm => '확인';
+  String get remoteAccountLinkedLogoutConfirm => '확인';
 
   @override
   String get duplicatePetNameNoticeTitle => '중복 이름';
@@ -744,26 +705,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get snackLanguageChangeFailed => '언어 변경에 실패했어요. 다시 시도해주세요.';
-
-  @override
-  String get snackOtpSent => '인증 코드가 이메일로 발송되었어요.';
-
-  @override
-  String snackOtpSendFailed(String error) {
-    return '인증 코드 발송에 실패했어요: $error';
-  }
-
-  @override
-  String get snackEmailOtpRequired => '이메일과 인증 코드를 입력해주세요.';
-
-  @override
-  String snackOtpVerifyFailed(String error) {
-    return '인증 코드 확인에 실패했어요: $error';
-  }
-
-  @override
-  String get snackEmailLinkPartialSavedFailed =>
-      '이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.';
 
   @override
   String get snackMealAlreadyCertified => '이미 해당 식단 인증을 완료했어요.';

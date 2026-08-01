@@ -200,35 +200,59 @@ abstract class AppLocalizations {
   /// **'회원 탈퇴'**
   String get withdrawAccount;
 
-  /// No description provided for @emailAccountLink.
+  /// No description provided for @accountLink.
   ///
   /// In ko, this message translates to:
-  /// **'이메일 계정 연동'**
-  String get emailAccountLink;
+  /// **'계정 연동'**
+  String get accountLink;
 
-  /// No description provided for @emailLinkCompleted.
+  /// No description provided for @accountLinkCompleted.
   ///
   /// In ko, this message translates to:
-  /// **'이메일 연동 완료'**
-  String get emailLinkCompleted;
+  /// **'연동 완료'**
+  String get accountLinkCompleted;
 
-  /// No description provided for @guestAccount.
+  /// No description provided for @googleAccountLinkedLine.
   ///
   /// In ko, this message translates to:
-  /// **'게스트 체험 계정'**
-  String get guestAccount;
+  /// **'Google 계정 연동됨'**
+  String get googleAccountLinkedLine;
 
-  /// No description provided for @emailLinkedAccount.
+  /// No description provided for @appleAccountLinkedLine.
   ///
   /// In ko, this message translates to:
-  /// **'이메일 연동 계정'**
-  String get emailLinkedAccount;
+  /// **'Apple 계정 연동됨'**
+  String get appleAccountLinkedLine;
 
-  /// No description provided for @noLinkedEmail.
+  /// No description provided for @signInWithApple.
   ///
   /// In ko, this message translates to:
-  /// **'연동된 이메일 없음'**
-  String get noLinkedEmail;
+  /// **'Sign in with Apple'**
+  String get signInWithApple;
+
+  /// No description provided for @signInWithGoogle.
+  ///
+  /// In ko, this message translates to:
+  /// **'Sign in with Google'**
+  String get signInWithGoogle;
+
+  /// No description provided for @accountLinkGuideOnlyOneProvider.
+  ///
+  /// In ko, this message translates to:
+  /// **'• Apple 혹은 Google 중 1가지의 계정만 연동이 가능합니다.'**
+  String get accountLinkGuideOnlyOneProvider;
+
+  /// No description provided for @accountLinkGuideCannotChange.
+  ///
+  /// In ko, this message translates to:
+  /// **'• 연동된 계정은 변경이 불가합니다.'**
+  String get accountLinkGuideCannotChange;
+
+  /// No description provided for @appleAccountLinkComingSoon.
+  ///
+  /// In ko, this message translates to:
+  /// **'Apple 계정 연동은 다음 단계에서 지원될 예정이에요.'**
+  String get appleAccountLinkComingSoon;
 
   /// No description provided for @pushNoticeEvent.
   ///
@@ -1094,35 +1118,23 @@ abstract class AppLocalizations {
   /// **'로그인이 필요해요.'**
   String get snackLoginRequired;
 
-  /// No description provided for @snackInvalidEmail.
+  /// No description provided for @snackAccountAlreadyLinked.
   ///
   /// In ko, this message translates to:
-  /// **'※ 올바른 이메일 형식으로 입력해주세요.'**
-  String get snackInvalidEmail;
+  /// **'이미 계정 연동이 완료되어 있어요.'**
+  String get snackAccountAlreadyLinked;
 
-  /// No description provided for @snackEmailRequired.
+  /// No description provided for @snackAccountLinkCompleted.
   ///
   /// In ko, this message translates to:
-  /// **'이메일을 입력해주세요.'**
-  String get snackEmailRequired;
+  /// **'계정 연동이 완료되었어요.'**
+  String get snackAccountLinkCompleted;
 
-  /// No description provided for @snackOtpRequired.
+  /// No description provided for @snackAccountLinkFailed.
   ///
   /// In ko, this message translates to:
-  /// **'인증 코드를 입력해주세요.'**
-  String get snackOtpRequired;
-
-  /// No description provided for @snackEmailAlreadyLinked.
-  ///
-  /// In ko, this message translates to:
-  /// **'이미 이메일 계정으로 연동되어 있어요.'**
-  String get snackEmailAlreadyLinked;
-
-  /// No description provided for @snackEmailLinkCompleted.
-  ///
-  /// In ko, this message translates to:
-  /// **'이메일 계정 연동이 완료되었어요.'**
-  String get snackEmailLinkCompleted;
+  /// **'계정 연동에 실패했어요. 잠시 후 다시 시도해주세요.'**
+  String get snackAccountLinkFailed;
 
   /// No description provided for @snackTicketEmpty.
   ///
@@ -1262,173 +1274,83 @@ abstract class AppLocalizations {
   /// **'Guest : {userIdPrefix}'**
   String settingsGuestUserIdLine(String userIdPrefix);
 
-  /// No description provided for @emailLinkSendOtpButton.
+  /// No description provided for @accountLinkInviteTitle.
   ///
   /// In ko, this message translates to:
-  /// **'인증 코드 받기'**
-  String get emailLinkSendOtpButton;
+  /// **'계정을 연동할까요?'**
+  String get accountLinkInviteTitle;
 
-  /// No description provided for @emailLinkEmailRowLabel.
+  /// No description provided for @accountLinkInviteBody.
   ///
   /// In ko, this message translates to:
-  /// **'• 이메일'**
-  String get emailLinkEmailRowLabel;
+  /// **'계정을 연동하면 앱을 다시 설치하거나 기기를 변경해도 기존 베지펫 데이터를 불러올 수 있어요.'**
+  String get accountLinkInviteBody;
 
-  /// No description provided for @emailLinkOtpRowLabel.
-  ///
-  /// In ko, this message translates to:
-  /// **'• 인증 코드'**
-  String get emailLinkOtpRowLabel;
-
-  /// No description provided for @emailLinkResendCodeButton.
-  ///
-  /// In ko, this message translates to:
-  /// **'인증 코드 다시 받기'**
-  String get emailLinkResendCodeButton;
-
-  /// No description provided for @emailLinkVerifyCompleteButton.
-  ///
-  /// In ko, this message translates to:
-  /// **'인증 완료'**
-  String get emailLinkVerifyCompleteButton;
-
-  /// No description provided for @emailOtpRetryAfterSeconds.
-  ///
-  /// In ko, this message translates to:
-  /// **'{seconds}초 후에 재전송 가능'**
-  String emailOtpRetryAfterSeconds(int seconds);
-
-  /// No description provided for @emailAlreadyUsedTitle.
-  ///
-  /// In ko, this message translates to:
-  /// **'이메일 연동 불가'**
-  String get emailAlreadyUsedTitle;
-
-  /// No description provided for @emailAlreadyUsedBody.
-  ///
-  /// In ko, this message translates to:
-  /// **'이미 사용된 이메일입니다.\n다른 이메일을 입력해주세요.'**
-  String get emailAlreadyUsedBody;
-
-  /// No description provided for @emailLinkInviteTitle.
-  ///
-  /// In ko, this message translates to:
-  /// **'베지펫을 지켜주세요!'**
-  String get emailLinkInviteTitle;
-
-  /// No description provided for @emailLinkInviteBodyLine1.
-  ///
-  /// In ko, this message translates to:
-  /// **'앱이 지워지면 귀여운 베지펫이 사라져요..😢'**
-  String get emailLinkInviteBodyLine1;
-
-  /// No description provided for @emailLinkInviteBodyLine2.
-  ///
-  /// In ko, this message translates to:
-  /// **'지금 설정에서 이메일 연동을 진행할까요?'**
-  String get emailLinkInviteBodyLine2;
-
-  /// No description provided for @emailLinkInviteLater.
+  /// No description provided for @accountLinkInviteLater.
   ///
   /// In ko, this message translates to:
   /// **'나중에'**
-  String get emailLinkInviteLater;
+  String get accountLinkInviteLater;
 
-  /// No description provided for @emailLinkInviteNow.
+  /// No description provided for @accountLinkInviteNow.
   ///
   /// In ko, this message translates to:
-  /// **'연동하기'**
-  String get emailLinkInviteNow;
+  /// **'계정 연동'**
+  String get accountLinkInviteNow;
 
-  /// No description provided for @emailLinkSuccessTitle.
+  /// No description provided for @accountLinkSuccessTitle.
   ///
   /// In ko, this message translates to:
   /// **'연동 완료💫'**
-  String get emailLinkSuccessTitle;
+  String get accountLinkSuccessTitle;
 
-  /// No description provided for @emailLinkSuccessBody.
+  /// No description provided for @accountLinkSuccessBody.
   ///
   /// In ko, this message translates to:
   /// **'계정이 성공적으로 연동되었습니다.'**
-  String get emailLinkSuccessBody;
+  String get accountLinkSuccessBody;
 
-  /// No description provided for @emailLinkSuccessConfirm.
+  /// No description provided for @accountLinkSuccessConfirm.
   ///
   /// In ko, this message translates to:
   /// **'확인'**
-  String get emailLinkSuccessConfirm;
+  String get accountLinkSuccessConfirm;
 
-  /// No description provided for @emailFormatErrorTitle.
+  /// No description provided for @linkedAccountInUseTitle.
   ///
   /// In ko, this message translates to:
-  /// **'이메일 형식 오류'**
-  String get emailFormatErrorTitle;
+  /// **'이미 사용 중인 계정이에요'**
+  String get linkedAccountInUseTitle;
 
-  /// No description provided for @emailFormatErrorBody.
+  /// No description provided for @linkedAccountInUseBody.
   ///
   /// In ko, this message translates to:
-  /// **'※ 올바른 이메일 형식을 입력해주세요!'**
-  String get emailFormatErrorBody;
+  /// **'이 Google 계정은 이미 다른 베지펫 계정에 연동되어 있어요. 기존 계정 불러오기는 별도 로그인 화면에서 진행해주세요.'**
+  String get linkedAccountInUseBody;
 
-  /// No description provided for @emailFormatErrorConfirm.
-  ///
-  /// In ko, this message translates to:
-  /// **'확인'**
-  String get emailFormatErrorConfirm;
-
-  /// No description provided for @emailOtpInvalidNoticeTitle.
-  ///
-  /// In ko, this message translates to:
-  /// **'⚠️올바르지 않은 코드'**
-  String get emailOtpInvalidNoticeTitle;
-
-  /// No description provided for @emailOtpInvalidNoticeBody.
-  ///
-  /// In ko, this message translates to:
-  /// **'다시 입력해주세요. 입력 제한 시간은 1시간 입니다.'**
-  String get emailOtpInvalidNoticeBody;
-
-  /// No description provided for @emailOtpInvalidNoticeConfirm.
+  /// No description provided for @linkedAccountInUseConfirm.
   ///
   /// In ko, this message translates to:
   /// **'확인'**
-  String get emailOtpInvalidNoticeConfirm;
+  String get linkedAccountInUseConfirm;
 
-  /// No description provided for @emailDuplicateNoticeTitle.
-  ///
-  /// In ko, this message translates to:
-  /// **'⚠️중복 이메일'**
-  String get emailDuplicateNoticeTitle;
-
-  /// No description provided for @emailDuplicateNoticeBody.
-  ///
-  /// In ko, this message translates to:
-  /// **'이미 연동된 이메일이 존재합니다. 인증을 완료하면 기존 데이터를 이 기기에 불러옵니다.'**
-  String get emailDuplicateNoticeBody;
-
-  /// No description provided for @emailDuplicateNoticeConfirm.
-  ///
-  /// In ko, this message translates to:
-  /// **'확인'**
-  String get emailDuplicateNoticeConfirm;
-
-  /// No description provided for @remoteEmailLinkedLogoutTitle.
+  /// No description provided for @remoteAccountLinkedLogoutTitle.
   ///
   /// In ko, this message translates to:
   /// **'⚠️계정 연동 감지'**
-  String get remoteEmailLinkedLogoutTitle;
+  String get remoteAccountLinkedLogoutTitle;
 
-  /// No description provided for @remoteEmailLinkedLogoutBody.
+  /// No description provided for @remoteAccountLinkedLogoutBody.
   ///
   /// In ko, this message translates to:
   /// **'사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.'**
-  String get remoteEmailLinkedLogoutBody;
+  String get remoteAccountLinkedLogoutBody;
 
-  /// No description provided for @remoteEmailLinkedLogoutConfirm.
+  /// No description provided for @remoteAccountLinkedLogoutConfirm.
   ///
   /// In ko, this message translates to:
   /// **'확인'**
-  String get remoteEmailLinkedLogoutConfirm;
+  String get remoteAccountLinkedLogoutConfirm;
 
   /// No description provided for @duplicatePetNameNoticeTitle.
   ///
@@ -1537,36 +1459,6 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'언어 변경에 실패했어요. 다시 시도해주세요.'**
   String get snackLanguageChangeFailed;
-
-  /// No description provided for @snackOtpSent.
-  ///
-  /// In ko, this message translates to:
-  /// **'인증 코드가 이메일로 발송되었어요.'**
-  String get snackOtpSent;
-
-  /// No description provided for @snackOtpSendFailed.
-  ///
-  /// In ko, this message translates to:
-  /// **'인증 코드 발송에 실패했어요: {error}'**
-  String snackOtpSendFailed(String error);
-
-  /// No description provided for @snackEmailOtpRequired.
-  ///
-  /// In ko, this message translates to:
-  /// **'이메일과 인증 코드를 입력해주세요.'**
-  String get snackEmailOtpRequired;
-
-  /// No description provided for @snackOtpVerifyFailed.
-  ///
-  /// In ko, this message translates to:
-  /// **'인증 코드 확인에 실패했어요: {error}'**
-  String snackOtpVerifyFailed(String error);
-
-  /// No description provided for @snackEmailLinkPartialSavedFailed.
-  ///
-  /// In ko, this message translates to:
-  /// **'이메일 인증은 완료됐지만 프로필 상태 저장에 실패했어요. 설정을 다시 열어주세요.'**
-  String get snackEmailLinkPartialSavedFailed;
 
   /// No description provided for @snackMealAlreadyCertified.
   ///
