@@ -822,6 +822,17 @@ class _HomePageState extends State<HomePage>
 
   /// [GoogleSignIn.initialize] 는 앱 생애주기당 정확히 한 번만 호출한다.
   bool _googleSignInInitialized = false;
+
+  /// 서버 `getUserIdentities()` 기준으로 확정한 연동 provider.
+  ///
+  /// `supabase.auth.currentUser.identities` 는 link 직후 stale 할 수 있으므로
+  /// 설정 UI / 성공 판정은 이 캐시를 우선한다.
+  /// `_clearUserScopedCaches()` 로는 초기화하지 않는다(계정 전환·로그아웃만).
+  _LinkedAccountProvider _linkedAccountProvider = _LinkedAccountProvider.none;
+
+  /// bootstrap/서버 조회로 `_linkedAccountProvider` 가 한 번이라도 채워졌는지.
+  bool _linkedAccountProviderReady = false;
+
   final FocusNode _keyboardAccessoryFocusNode = FocusNode();
 
   FocusNode? _activeKeyboardFocusNode;
@@ -1380,6 +1391,7 @@ class _HomePageState extends State<HomePage>
     _invalidateUserScopedAsyncWork(reason: 'forceFreshGuestProfileSetup');
     _clearProfileFormState();
     _clearUserScopedCaches();
+    _resetLinkedAccountProviderCache();
 
     _safeSetState(() {
       _status = _ViewStatus.ready;
@@ -2143,6 +2155,7 @@ class _HomePageState extends State<HomePage>
         return;
       }
       await _syncLinkedProviderToProfileIfNeeded();
+      await _refreshLinkedAccountProviderFromServer();
 
       _applyPostFetchUiState();
       _ensureFreshGuestProfileSetupVisible();
@@ -2232,6 +2245,7 @@ class _HomePageState extends State<HomePage>
 
   /// 현재 Auth 사용자가 anonymous guest 인지.
   bool _isCurrentUserAnonymous() {
+    if (_hasAnyLinkedAccount()) return false;
     final user = supabase.auth.currentUser;
     if (user == null) return false;
     if (user.isAnonymous == true) return true;
@@ -2240,7 +2254,10 @@ class _HomePageState extends State<HomePage>
 
   bool _hasProviderIdentity(User? user, String provider) {
     final identities = user?.identities ?? const <UserIdentity>[];
-    return identities.any((identity) => identity.provider == provider);
+    final needle = provider.toLowerCase();
+    return identities.any(
+      (identity) => identity.provider.toLowerCase() == needle,
+    );
   }
 
   bool _hasGoogleIdentity(User? user) => _hasProviderIdentity(user, 'google');
@@ -2251,21 +2268,99 @@ class _HomePageState extends State<HomePage>
     return _hasGoogleIdentity(user) || _hasAppleIdentity(user);
   }
 
-  /// 실제 연동 provider. Auth identities 를 우선 기준으로 삼는다.
+  bool _identitiesContainProvider(
+    List<UserIdentity> identities,
+    String provider,
+  ) {
+    final needle = provider.toLowerCase();
+    return identities.any(
+      (identity) => identity.provider.toLowerCase() == needle,
+    );
+  }
+
+  /// 서버 `getUserIdentities()` 결과에서 연동 provider 를 판정한다.
+  Future<_LinkedAccountProvider> _fetchLinkedAccountProviderFromServer() async {
+    final identities = await supabase.auth.getUserIdentities();
+    if (_identitiesContainProvider(identities, 'google')) {
+      return _LinkedAccountProvider.google;
+    }
+    if (_identitiesContainProvider(identities, 'apple')) {
+      return _LinkedAccountProvider.apple;
+    }
+    return _LinkedAccountProvider.none;
+  }
+
+  /// 서버 identity 를 조회해 State 캐시를 갱신한다.
+  Future<_LinkedAccountProvider> _refreshLinkedAccountProviderFromServer({
+    bool notify = false,
+  }) async {
+    try {
+      final provider = await _fetchLinkedAccountProviderFromServer();
+      _linkedAccountProvider = provider;
+      _linkedAccountProviderReady = true;
+      _logGoogleLink(
+        'state_provider',
+        _linkedAccountProviderKey(provider) ?? 'none',
+      );
+      if (notify && mounted) {
+        _safeSetState(() {});
+      }
+      return provider;
+    } catch (e) {
+      debugPrint(
+        'refresh linked account provider from server failed: '
+        '${_summarizeGoogleLinkError(e)}',
+      );
+      // 서버 조회 실패 시 기존 캐시/ Auth fallback 을 유지한다.
+      return _currentLinkedAccountProvider();
+    }
+  }
+
+  /// 로그아웃·회원탈퇴·fresh guest 전환 시에만 연동 캐시를 비운다.
+  void _resetLinkedAccountProviderCache() {
+    _linkedAccountProvider = _LinkedAccountProvider.none;
+    _linkedAccountProviderReady = false;
+  }
+
+  /// 실제 연동 provider.
   ///
-  /// Auth identity 가 없는데 `profiles.account_type` 만 google/apple 인 경우는
-  /// 연동 완료로 취급하지 않는다.
+  /// 1) 서버 확인 State 캐시
+  /// 2) 현재 Auth user identities
+  /// 3) profiles.account_type (보조 fallback)
   _LinkedAccountProvider _currentLinkedAccountProvider() {
+    if (_linkedAccountProvider != _LinkedAccountProvider.none) {
+      return _linkedAccountProvider;
+    }
+
     final user = supabase.auth.currentUser;
-    if (user == null) return _LinkedAccountProvider.none;
     if (_hasGoogleIdentity(user)) return _LinkedAccountProvider.google;
     if (_hasAppleIdentity(user)) return _LinkedAccountProvider.apple;
+
+    if (!_linkedAccountProviderReady) {
+      final accountType = _profile?['account_type']
+          ?.toString()
+          .trim()
+          .toLowerCase();
+      if (accountType == 'google') return _LinkedAccountProvider.google;
+      if (accountType == 'apple') return _LinkedAccountProvider.apple;
+    }
+
     return _LinkedAccountProvider.none;
   }
 
   /// Google 또는 Apple 중 하나가 이미 연동되어 있는지 (UI 가드용).
   bool _hasAnyLinkedAccount() {
-    return _currentLinkedAccountProvider() != _LinkedAccountProvider.none;
+    if (_linkedAccountProvider != _LinkedAccountProvider.none) {
+      return true;
+    }
+    if (_hasAnyLinkedAccountIdentity(supabase.auth.currentUser)) {
+      return true;
+    }
+    final accountType = _profile?['account_type']
+        ?.toString()
+        .trim()
+        .toLowerCase();
+    return accountType == 'google' || accountType == 'apple';
   }
 
   String? _linkedAccountProviderKey(_LinkedAccountProvider provider) {
@@ -2504,25 +2599,28 @@ class _HomePageState extends State<HomePage>
     bool forceProfileFormSync = false,
   }) async {
     _invalidateUserScopedAsyncWork(reason: 'authChangeRefresh');
+    // _linkedAccountProvider 는 여기서 초기화하지 않는다.
+    // (계정 전환/로그아웃에서만 _resetLinkedAccountProviderCache 호출)
     _clearUserScopedCaches();
     await _fetchCoreUserData();
+    await _refreshLinkedAccountProviderFromServer();
     _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
     _syncAccountDeletionWatchForCurrentSession();
   }
 
   /// Google/Apple identity 가 연결된 영구 계정 세션인지.
   ///
-  /// 이전에는 `currentUser.email` 유무로 판정했지만, 계정 연동이 Google/Apple
-  /// provider 기준으로 바뀌었으므로 Auth identities 를 기준으로 판정한다.
+  /// 서버 캐시 · Auth identities · profiles.account_type 보조 fallback 을
+  /// 함께 본다. link 직후 stale currentUser.identities 만으로 false 가 되면 안 된다.
   bool _isCurrentPermanentAuthSession() {
-    return _hasAnyLinkedAccountIdentity(supabase.auth.currentUser);
+    return _hasAnyLinkedAccount();
   }
 
   Future<bool> _isCurrentAccountProfileAlive() async {
     final user = supabase.auth.currentUser;
     if (user == null) return false;
 
-    if (!_hasAnyLinkedAccountIdentity(user)) {
+    if (!_hasAnyLinkedAccount()) {
       return true;
     }
 
@@ -2586,7 +2684,7 @@ class _HomePageState extends State<HomePage>
   void _subscribeCurrentProfileDeletionWatch() {
     final user = supabase.auth.currentUser;
 
-    if (user == null || !_hasAnyLinkedAccountIdentity(user)) {
+    if (user == null || !_hasAnyLinkedAccount()) {
       _unsubscribeProfileDeletionWatch();
       return;
     }
@@ -2646,6 +2744,7 @@ class _HomePageState extends State<HomePage>
     _status = _ViewStatus.loading;
     _clearProfileFormState();
     _clearUserScopedCaches();
+    _resetLinkedAccountProviderCache();
 
     _resetAccountLinkPanelBusy();
 
@@ -3266,18 +3365,36 @@ class _HomePageState extends State<HomePage>
     return true;
   }
 
-  /// Auth identities 를 우선 기준으로 `profiles.account_type` / `email` /
+  /// 서버 identities 를 우선 기준으로 `profiles.account_type` / `email` /
   /// `linked_at` 을 재동기화한다.
   ///
-  /// - Auth identity 가 없으면 `account_type` 을 절대 google/apple 로 만들지 않는다.
-  /// - Auth identity 와 profiles 값이 불일치하면 Auth identity 를 정답으로 본다.
-  /// - 사용자 소유권은 언제나 Supabase user UUID 기준이며, email 로 사용자를
-  ///   조회하거나 병합하지 않는다.
-  Future<void> _syncLinkedProviderToProfileIfNeeded() async {
+  /// 성공 시 갱신된 profiles row 를 반환한다. identity 가 없으면 null.
+  /// update 실패는 삼키지 않고 예외를 전파하거나 로그 후 null 을 반환한다.
+  Future<Map<String, dynamic>?> _syncLinkedProviderToProfileIfNeeded() async {
     final user = supabase.auth.currentUser;
-    if (user == null) return;
+    if (user == null) return null;
 
-    final provider = _currentLinkedAccountProvider();
+    List<UserIdentity> identities;
+    try {
+      identities = await supabase.auth.getUserIdentities();
+    } catch (e) {
+      debugPrint(
+        'sync linked provider: getUserIdentities failed: '
+        '${_summarizeGoogleLinkError(e)}',
+      );
+      return null;
+    }
+
+    _LinkedAccountProvider provider = _LinkedAccountProvider.none;
+    if (_identitiesContainProvider(identities, 'google')) {
+      provider = _LinkedAccountProvider.google;
+    } else if (_identitiesContainProvider(identities, 'apple')) {
+      provider = _LinkedAccountProvider.apple;
+    }
+
+    _linkedAccountProvider = provider;
+    _linkedAccountProviderReady = true;
+
     final providerKey = _linkedAccountProviderKey(provider);
     if (providerKey == null) {
       // 게스트: profiles.account_type 이 잘못 google/apple 로 남아 있으면 되돌린다.
@@ -3288,7 +3405,7 @@ class _HomePageState extends State<HomePage>
           'restoring guest state',
         );
         try {
-          await supabase
+          final restored = await supabase
               .from('profiles')
               .update({
                 'email': null,
@@ -3296,25 +3413,36 @@ class _HomePageState extends State<HomePage>
                 'linked_at': null,
                 'updated_at': DateTime.now().toIso8601String(),
               })
-              .eq('id', user.id);
+              .eq('id', user.id)
+              .select();
+          final rows = (restored as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (rows.length == 1) {
+            _profile = {...?_profile, ...rows.first};
+            return rows.first;
+          }
           await _fetchProfile();
         } catch (e) {
           debugPrint('restore guest account_type failed: $e');
         }
       }
-      return;
+      return null;
     }
 
-    final identityEmail = _linkedIdentityEmail(user, providerKey);
+    final identityEmail =
+        _emailFromIdentities(identities, providerKey) ?? user.email?.trim();
     final storedType = _profile?['account_type']?.toString();
     final storedEmail = _profile?['email']?.toString().trim() ?? '';
     final storedLinkedAt = _profile?['linked_at'];
 
     final typeMatches = storedType == providerKey;
-    final emailMatches = identityEmail == null
+    final emailMatches = identityEmail == null || identityEmail.isEmpty
         ? true
         : storedEmail == identityEmail;
-    if (typeMatches && emailMatches && storedLinkedAt != null) return;
+    if (typeMatches && emailMatches && storedLinkedAt != null) {
+      return _profile == null ? null : Map<String, dynamic>.from(_profile!);
+    }
 
     if (storedType != null &&
         storedType != providerKey &&
@@ -3326,7 +3454,7 @@ class _HomePageState extends State<HomePage>
     }
 
     try {
-      await supabase
+      final updated = await supabase
           .from('profiles')
           .update({
             'email': ?identityEmail,
@@ -3334,22 +3462,54 @@ class _HomePageState extends State<HomePage>
             'linked_at': storedLinkedAt ?? DateTime.now().toIso8601String(),
             'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select();
 
-      await _fetchProfile();
+      final rows = (updated as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (rows.length != 1) {
+        debugPrint(
+          'sync linked provider to profile failed: rows=${rows.length}',
+        );
+        return null;
+      }
+
+      final row = rows.first;
+      if (row['id']?.toString() != user.id) {
+        debugPrint('sync linked provider to profile failed: id mismatch');
+        return null;
+      }
+
+      _profile = {...?_profile, ...row};
+      return row;
     } catch (e) {
-      debugPrint('sync linked provider to profile failed: $e');
+      debugPrint(
+        'sync linked provider to profile failed: '
+        '${_summarizeGoogleLinkError(e)}',
+      );
+      rethrow;
     }
+  }
+
+  /// identities 목록에서 provider email 을 추출한다. 전체 값은 로그로 남기지 않는다.
+  String? _emailFromIdentities(List<UserIdentity> identities, String provider) {
+    final needle = provider.toLowerCase();
+    for (final identity in identities) {
+      if (identity.provider.toLowerCase() != needle) continue;
+      final raw = identity.identityData?['email']?.toString().trim();
+      if (raw != null && raw.isNotEmpty) return raw;
+    }
+    return null;
   }
 
   /// 연결된 provider identity 의 이메일. 전체 값을 로그로 남기지 않는다.
   String? _linkedIdentityEmail(User? user, String provider) {
-    final identities = user?.identities ?? const <UserIdentity>[];
-    for (final identity in identities) {
-      if (identity.provider != provider) continue;
-      final raw = identity.identityData?['email']?.toString().trim();
-      if (raw != null && raw.isNotEmpty) return raw;
-    }
+    final fromIdentities = _emailFromIdentities(
+      user?.identities ?? const <UserIdentity>[],
+      provider,
+    );
+    if (fromIdentities != null) return fromIdentities;
     final authEmail = user?.email?.trim();
     if (authEmail != null && authEmail.isNotEmpty) return authEmail;
     return null;
@@ -3498,6 +3658,8 @@ class _HomePageState extends State<HomePage>
     final l10n = AppLocalizations.of(context);
     _dismissFocus();
     _safeSetState(() {
+      _linkedAccountProvider = _LinkedAccountProvider.google;
+      _linkedAccountProviderReady = true;
       _closeAccountLinkPanel();
       _isAccountLinkInviteNoticeOpen = false;
     });
@@ -3522,9 +3684,7 @@ class _HomePageState extends State<HomePage>
       }
       try {
         final identities = await supabase.auth.getUserIdentities();
-        final linked = identities.any(
-          (identity) => identity.provider == 'google',
-        );
+        final linked = _identitiesContainProvider(identities, 'google');
         _logGoogleLink('identity_verify', 'attempt=${i + 1} linked=$linked');
         if (linked) return true;
       } catch (e) {
@@ -3535,6 +3695,131 @@ class _HomePageState extends State<HomePage>
       }
     }
     return false;
+  }
+
+  /// Google 연동 성공 후 profiles 를 update(+select) 하고 결과를 검증한다.
+  ///
+  /// row 가 없으면 기존 필수 필드를 보존한 upsert 를 시도한다.
+  /// row 가 있는데 update 가 0행이면 RLS 문제로 보고 upsert 로 우회하지 않는다.
+  Future<Map<String, dynamic>> _persistGoogleLinkToProfile({
+    required String userId,
+    required String? googleEmail,
+  }) async {
+    final linkedAt = DateTime.now().toIso8601String();
+    final payload = <String, dynamic>{
+      'email': (googleEmail == null || googleEmail.isEmpty)
+          ? null
+          : googleEmail,
+      'account_type': 'google',
+      'linked_at': linkedAt,
+      'updated_at': linkedAt,
+    };
+
+    try {
+      final updated = await supabase
+          .from('profiles')
+          .update(payload)
+          .eq('id', userId)
+          .select();
+      final rows = (updated as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      if (rows.length == 1) {
+        final row = rows.first;
+        _validateGoogleLinkedProfileRow(row, userId: userId);
+        _profile = {...?_profile, ...row};
+        _logGoogleLink(
+          'profile_update',
+          'rows=1 account_type_ok=true '
+              'email_present=${_profileHasEmail(row)} '
+              'linked_at_present=${row['linked_at'] != null}',
+        );
+        return row;
+      }
+
+      _logGoogleLink('profile_update', 'rows=${rows.length}');
+
+      final existing = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (existing != null) {
+        throw StateError(
+          'profiles update affected ${rows.length} rows but row exists '
+          '(possible RLS)',
+        );
+      }
+
+      // row 자체가 없을 때만 기존 메모리 profile 필드를 보존해 upsert.
+      final upsertPayload = <String, dynamic>{
+        'id': userId,
+        if (_profile != null) ..._profile!,
+        ...payload,
+      };
+      // 민감/소유권 필드는 덮어쓰지 않도록 id 를 다시 확정.
+      upsertPayload['id'] = userId;
+
+      final upserted = await supabase
+          .from('profiles')
+          .upsert(upsertPayload)
+          .select();
+      final upsertRows = (upserted as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (upsertRows.length != 1) {
+        throw StateError('profiles upsert affected ${upsertRows.length} rows');
+      }
+      final row = upsertRows.first;
+      _validateGoogleLinkedProfileRow(row, userId: userId);
+      _profile = {...?_profile, ...row};
+      _logGoogleLink(
+        'profile_update',
+        'rows=1 via_upsert account_type_ok=true '
+            'email_present=${_profileHasEmail(row)} '
+            'linked_at_present=${row['linked_at'] != null}',
+      );
+      return row;
+    } catch (e) {
+      _logProfileUpdateFailure(e);
+      rethrow;
+    }
+  }
+
+  bool _profileHasEmail(Map<String, dynamic> row) {
+    final email = row['email']?.toString().trim();
+    return email != null && email.isNotEmpty;
+  }
+
+  void _validateGoogleLinkedProfileRow(
+    Map<String, dynamic> row, {
+    required String userId,
+  }) {
+    if (row['id']?.toString() != userId) {
+      throw StateError('profiles update id mismatch');
+    }
+    if (row['account_type']?.toString() != 'google') {
+      throw StateError('profiles account_type is not google');
+    }
+    if (row['linked_at'] == null) {
+      throw StateError('profiles linked_at is null');
+    }
+  }
+
+  void _logProfileUpdateFailure(Object e) {
+    if (e is PostgrestException) {
+      _logGoogleLink(
+        'profile_update',
+        'failed:code=${e.code},'
+            'message=${_sanitizeAuthErrorMessage(e.message)},'
+            'details=${_sanitizeAuthErrorMessage('${e.details}')},'
+            'hint=${_sanitizeAuthErrorMessage('${e.hint}')}',
+      );
+      return;
+    }
+    _logGoogleLink('profile_update', 'failed:${_summarizeGoogleLinkError(e)}');
   }
 
   /// AuthException 을 토큰 없이 supabase_link 실패 로그로 남긴다.
@@ -3744,31 +4029,41 @@ class _HomePageState extends State<HomePage>
         return;
       }
       _logGoogleLink('identity_verify', 'success');
+      _logGoogleLink('server_identity', 'provider=google');
       authLinkSucceeded = true;
+
+      // stale currentUser.identities 에 의존하지 않도록 서버 확인 결과를 State 에 저장.
+      _linkedAccountProvider = _LinkedAccountProvider.google;
+      _linkedAccountProviderReady = true;
+      _logGoogleLink('state_provider', 'google');
+      if (mounted) {
+        _safeSetState(() {
+          // 설정 버튼이 즉시 “연동 완료”로 보이도록 한다.
+          if (_hasAnyLinkedAccount()) {
+            _isAccountLinkPanelOpen = false;
+          }
+        });
+      }
 
       // Auth 연동 성공. 이후 profiles/refresh 실패는 연동 실패로 취급하지 않는다.
       _logGoogleLink('profile_update', 'start');
       try {
-        final googleEmail =
+        String? googleEmail;
+        try {
+          final identities = await supabase.auth.getUserIdentities();
+          googleEmail = _emailFromIdentities(identities, 'google');
+        } catch (_) {
+          googleEmail = null;
+        }
+        googleEmail ??=
             _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
             account.email.trim();
-        final linkedAt = DateTime.now().toIso8601String();
 
-        await supabase
-            .from('profiles')
-            .update({
-              'email': googleEmail.isEmpty ? null : googleEmail,
-              'account_type': 'google',
-              'linked_at': linkedAt,
-              'updated_at': linkedAt,
-            })
-            .eq('id', afterUserId);
-        _logGoogleLink('profile_update', 'success');
-      } catch (e) {
-        _logGoogleLink(
-          'profile_update',
-          'failed:${_summarizeGoogleLinkError(e)}',
+        await _persistGoogleLinkToProfile(
+          userId: afterUserId,
+          googleEmail: googleEmail,
         );
+      } catch (e) {
         try {
           await _syncLinkedProviderToProfileIfNeeded();
           _logGoogleLink('profile_update', 'resync_attempted');
@@ -3797,8 +4092,17 @@ class _HomePageState extends State<HomePage>
         }
       }
 
-      final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
+      // 최종 판정은 stale currentUser.identities 가 아니라 서버 identities.
+      final serverProvider = await _fetchLinkedAccountProviderFromServer();
+      _linkedAccountProvider = serverProvider;
+      _linkedAccountProviderReady = true;
+      final stillLinked = serverProvider == _LinkedAccountProvider.google;
       final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+      _logGoogleLink(
+        'post_check',
+        'server_linked=$stillLinked same_user=$stillSameUser',
+      );
+
       if (!stillLinked || !stillSameUser) {
         _logGoogleLink(
           'complete',
@@ -3809,7 +4113,7 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      _logGoogleLink('complete');
+      _logGoogleLink('complete', 'success');
       if (!mounted) return;
       await _finishGoogleAccountLinkSuccessUi();
     } catch (e, st) {
@@ -3818,13 +4122,21 @@ class _HomePageState extends State<HomePage>
       debugPrint('google_link:stack:$st');
 
       if (authLinkSucceeded) {
-        final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
-        final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
-        if (stillLinked && stillSameUser) {
-          _logGoogleLink('complete', 'auth_ok_despite_post_error');
-          if (!mounted) return;
-          await _finishGoogleAccountLinkSuccessUi();
-          return;
+        // Auth 는 이미 성공. 후속 동기화만 실패한 경우 서버 기준으로 재확인.
+        try {
+          final serverProvider = await _fetchLinkedAccountProviderFromServer();
+          _linkedAccountProvider = serverProvider;
+          _linkedAccountProviderReady = true;
+          final stillLinked = serverProvider == _LinkedAccountProvider.google;
+          final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+          if (stillLinked && stillSameUser) {
+            _logGoogleLink('complete', 'auth_ok_despite_post_error');
+            if (!mounted) return;
+            await _finishGoogleAccountLinkSuccessUi();
+            return;
+          }
+        } catch (_) {
+          // fall through to failure snack
         }
       }
 
@@ -5614,6 +5926,7 @@ class _HomePageState extends State<HomePage>
         _isLoggingMeal = false;
         _firstMealPopupShownThisSession = false;
         _clearUserScopedCaches();
+        _resetLinkedAccountProviderCache();
         _diaryVisibleMonth = _todayDiaryMonth();
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
@@ -16885,6 +17198,7 @@ class _HomePageState extends State<HomePage>
         _loadPushSettings(),
         _loadSoundSettings(),
       ]);
+      await _refreshLinkedAccountProviderFromServer();
       await _syncLinkedProviderToProfileIfNeeded();
     } catch (e) {
       debugPrint('prepare settings panel data failed: $e');
