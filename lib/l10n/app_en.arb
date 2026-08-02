@@ -334,5 +334,8 @@
   "mealFeedbackFatUp": "more healthy fats",
   "mealFeedbackFatDown": "less fat",
   "mealFeedbackDietaryFiberUp": "more dietary fiber",
-  "mealFeedbackDietaryFiberDown": "less dietary fiber"
+  "mealFeedbackDietaryFiberDown": "less dietary fiber",
+  "withdrawErrorNoticeTitle": "Withdrawal error",
+  "withdrawErrorNoticeBody": "An error occurred while deleting your account. Please try again.",
+  "withdrawErrorNoticeConfirm": "OK"
 }

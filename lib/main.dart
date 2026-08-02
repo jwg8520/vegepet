@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -184,6 +184,37 @@ class _MealVerificationAttemptState {
   static const empty = _MealVerificationAttemptState(failedCount: 0);
 }
 
+/// `delete-auth-user` Edge Function 응답 검증 결과 (민감 정보 미포함).
+class _DeleteAccountResult {
+  const _DeleteAccountResult({
+    required this.success,
+    this.errorCode,
+    this.storageDeletedCount,
+    this.storageRemainingCount,
+    this.databaseDeleted = false,
+    this.databaseRemainingCount,
+    this.authUserDeleted = false,
+  });
+
+  final bool success;
+  final String? errorCode;
+  final int? storageDeletedCount;
+  final int? storageRemainingCount;
+  final bool databaseDeleted;
+  final int? databaseRemainingCount;
+  final bool authUserDeleted;
+}
+
+int? _parseNullableInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) return null;
+
+  return int.tryParse(text);
+}
+
 /// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 페이드 퇴장 모션을 적용할 대상.
 enum _GameMenuSubOutsideDismissKind {
   none,
@@ -210,10 +241,7 @@ List<String> _normalizeMealFeedbackCodes(dynamic raw) {
   return out;
 }
 
-String _localizedMealFeedbackPhrase(
-  String code,
-  AppLocalizations l10n,
-) {
+String _localizedMealFeedbackPhrase(String code, AppLocalizations l10n) {
   switch (code) {
     case 'protein_up':
       return l10n.mealFeedbackProteinUp;
@@ -335,9 +363,7 @@ String _buildAiStatusMessage({
           final raw = feedbackText?.trim() ?? '';
           if (raw.isNotEmpty &&
               !_isDisallowedFallbackFeedback(raw, isEnglish: isEnglish)) {
-            feedback = isEnglish
-                ? _formatFeedbackForEnglishSentence(raw)
-                : raw;
+            feedback = isEnglish ? _formatFeedbackForEnglishSentence(raw) : raw;
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
@@ -360,9 +386,7 @@ String _buildAiStatusMessage({
           final raw = feedbackText?.trim() ?? '';
           if (raw.isNotEmpty &&
               !_isDisallowedFallbackFeedback(raw, isEnglish: isEnglish)) {
-            feedback = isEnglish
-                ? _formatFeedbackForEnglishSentence(raw)
-                : raw;
+            feedback = isEnglish ? _formatFeedbackForEnglishSentence(raw) : raw;
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
@@ -387,9 +411,7 @@ String? _normalizeMealEvaluateStatus(Map<String, dynamic> result) {
   }
   final resultType = result['result_type']?.toString();
   if (resultType == 'uncertain') return 'retry_allowed';
-  if (resultType == 'perfect' ||
-      resultType == 'good' ||
-      resultType == 'bad') {
+  if (resultType == 'perfect' || resultType == 'good' || resultType == 'bad') {
     return 'completed';
   }
   return null;
@@ -886,6 +908,9 @@ class _HomePageState extends State<HomePage>
 
   /// 설정 > 회원 탈퇴 2차 최종 확인 (240×116 · 마당 좌표계).
   bool _isWithdrawFinalConfirmOpen = false;
+
+  /// 회원 탈퇴 Edge Function 실패 안내 (240×116 · 마당 좌표계).
+  bool _isWithdrawErrorNoticeOpen = false;
 
   /// 첫 식단 인증 성공 직후 계정 연동 추천 (240×116 · 마당 좌표계).
   bool _isAccountLinkInviteNoticeOpen = false;
@@ -1588,6 +1613,7 @@ class _HomePageState extends State<HomePage>
 
       _isWithdrawConfirmOpen = false;
       _isWithdrawFinalConfirmOpen = false;
+      _isWithdrawErrorNoticeOpen = false;
 
       _isNamingDialogOpen = false;
       _isPetNamingPanelClosing = false;
@@ -5089,7 +5115,8 @@ class _HomePageState extends State<HomePage>
     String slot,
     Map<String, dynamic> result,
   ) {
-    final failedCount = (result['failed_count'] as num?)?.toInt() ??
+    final failedCount =
+        (result['failed_count'] as num?)?.toInt() ??
         _todayMealSlotFailedCount(slot);
     DateTime? blockedAt;
     final rawBlocked = result['blocked_at'];
@@ -5105,8 +5132,9 @@ class _HomePageState extends State<HomePage>
   }
 
   void _clearMealVerificationAttemptForSlot(String slot) {
-    _todayMealVerificationAttempts[slot] =
-        const _MealVerificationAttemptState(failedCount: 0);
+    _todayMealVerificationAttempts[slot] = const _MealVerificationAttemptState(
+      failedCount: 0,
+    );
   }
 
   /// 오늘 brunch/dinner 의 meal_verification_attempts 를 SELECT 만 한다.
@@ -5176,9 +5204,7 @@ class _HomePageState extends State<HomePage>
       );
     } catch (e) {
       // 조회 실패 시 기존 로컬 상태를 유지한다(차단을 임의로 풀지 않음).
-      debugPrint(
-        'meal_verify:attempts_fetch_failed type=${e.runtimeType}',
-      );
+      debugPrint('meal_verify:attempts_fetch_failed type=${e.runtimeType}');
     }
   }
 
@@ -9166,6 +9192,7 @@ class _HomePageState extends State<HomePage>
     _isShopNoticeOpen = false;
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
+    _isWithdrawErrorNoticeOpen = false;
     _isNameInterlockNoticeOpen = false;
     _isProfileSelectMissingNoticeOpen = false;
     _isAccountLinkInviteNoticeOpen = false;
@@ -9807,6 +9834,7 @@ class _HomePageState extends State<HomePage>
         _buildAccountLinkSuccessNoticeGlobalOverlay(),
         _buildMealRecognitionFailureNoticeGlobalOverlay(),
         _buildMealVerificationLimitNoticeGlobalOverlay(),
+        _buildWithdrawErrorNoticeGlobalOverlay(),
         _buildLinkedAccountAddressNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
@@ -10291,6 +10319,22 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildWithdrawErrorNoticeGlobalOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      VegePetNoticeConfig(
+        isOpen: _isWithdrawErrorNoticeOpen,
+        title: l10n.withdrawErrorNoticeTitle,
+        body: l10n.withdrawErrorNoticeBody,
+        primaryLabel: l10n.withdrawErrorNoticeConfirm,
+        onPrimaryTap: _closeWithdrawErrorNoticeOverlay,
+        outsideDismissible: false,
+        bodyMaxLines: 2,
+        bodyOverflow: TextOverflow.clip,
+      ),
+    );
+  }
+
   /// 계정 주소 알림창 — 연동 이메일만 표시한다(설명 문구 없음).
   ///
   /// 크기·위치·글래스 디자인·fade·버튼 스타일은 계정 연동 완료 알림창과 동일한
@@ -10471,6 +10515,7 @@ class _HomePageState extends State<HomePage>
       _isAccountLinkSuccessNoticeOpen = false;
       _isMealRecognitionFailureNoticeOpen = false;
       _isMealVerificationLimitNoticeOpen = false;
+      _isWithdrawErrorNoticeOpen = false;
       _isLinkedAccountAddressNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
       _isMaturityCompleteNoticeOpen = false;
@@ -10491,21 +10536,12 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _onWithdrawFinalConfirmDeleteTap() async {
     if (_isDeletingAccount) return;
-    _safeSetState(() => _isDeletingAccount = true);
     await _dismissYardConfirmOverlayAnimated(() {
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawConfirmOpen = false;
     });
     if (!mounted) return;
-    try {
-      await _withdrawAccount();
-    } finally {
-      if (mounted) {
-        _safeSetState(() => _isDeletingAccount = false);
-      } else {
-        _isDeletingAccount = false;
-      }
-    }
+    await _withdrawAccount();
   }
 
   Widget _buildRandomTicketUseConfirmGlobalOverlay() {
@@ -11594,6 +11630,7 @@ class _HomePageState extends State<HomePage>
         _isRandomTicketUseConfirmOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
+        _isWithdrawErrorNoticeOpen ||
         _isAccountLinkInviteNoticeOpen ||
         _isAccountLinkSuccessNoticeOpen ||
         _isMealRecognitionFailureNoticeOpen ||
@@ -16352,6 +16389,7 @@ class _HomePageState extends State<HomePage>
 
   /// 먹이주기 시트에서 "아점/저녁 식단 사진 올리기" 버튼을 눌렀을 때의 메인 엔트리.
   Future<void> _uploadMealPhotoAndEvaluate(String slot) async {
+    if (_isDeletingAccount) return;
     final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -18194,6 +18232,10 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
+    if (_isWithdrawErrorNoticeOpen) {
+      return;
+    }
+
     if (_isWithdrawFinalConfirmOpen) {
       _closeWithdrawFinalConfirmOverlay();
       return;
@@ -19522,37 +19564,126 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 회원 탈퇴: 사용자 데이터 삭제 후 익명 세션으로 재시작.
-  /// auth.users 행 완전 삭제는 클라이언트 단독으로 불가 → Edge Function `delete-auth-user` 필요.
-  Future<void> _deleteCurrentAuthUserByEdgeFunction() async {
+  Future<void> _showWithdrawErrorNotice() async {
+    await _showYardNotice(
+      isOpen: () => _isWithdrawErrorNoticeOpen,
+      markOpen: () => _isWithdrawErrorNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideWithdrawErrorNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isWithdrawErrorNoticeOpen,
+      markClosed: () => _isWithdrawErrorNoticeOpen = false,
+    );
+  }
+
+  void _closeWithdrawErrorNoticeOverlay() {
+    _requestHideYardNotice(
+      isOpen: () => _isWithdrawErrorNoticeOpen,
+      hide: _hideWithdrawErrorNotice,
+    );
+  }
+
+  /// 회원 탈퇴: Edge Function `delete-auth-user` 가 완전히 성공한 경우에만
+  /// fresh guest 로 초기화한다. Flutter 는 DB/Storage 를 직접 삭제하지 않는다.
+  Future<_DeleteAccountResult> _deleteCurrentAuthUserByEdgeFunction() async {
     try {
       final response = await supabase.functions.invoke(
         'delete-auth-user',
         method: HttpMethod.post,
       );
 
-      final data = response.data;
-      // 보안: 응답 body 전체(이메일/식별자 등 포함 가능)를 로그에 덤프하지 않고
-      //       상태 코드만 남긴다. 실패 시 상세는 아래 분기에서 최소 항목만 기록한다.
-      debugPrint('delete-auth-user: status=${response.status}');
-      if (data is Map) {
-        if (data['ok'] == false) {
-          debugPrint(
-            'delete auth user failed: ok=false error=${data['error']} '
-            'details=${data['details']}',
-          );
-        }
-      } else if (data != null) {
+      final status = response.status;
+      debugPrint('delete-auth-user: status=$status');
+      if (status < 200 || status >= 300) {
+        return _DeleteAccountResult(success: false, errorCode: 'http_$status');
+      }
+
+      final rawData = response.data;
+      if (rawData is! Map) {
         debugPrint(
-          'delete auth user: unexpected response type ${data.runtimeType}',
+          'delete-auth-user: unexpected response type '
+          '${rawData.runtimeType}',
+        );
+        return const _DeleteAccountResult(
+          success: false,
+          errorCode: 'unexpected_response_type',
         );
       }
+
+      final data = Map<String, dynamic>.from(rawData);
+      final ok = data['ok'] == true;
+      final storageDeletedCount = _parseNullableInt(
+        data['storage_deleted_count'],
+      );
+      final storageRemainingCount = _parseNullableInt(
+        data['storage_remaining_count'],
+      );
+      final databaseDeleted = data['database_deleted'] == true;
+      final databaseRemainingCount = _parseNullableInt(
+        data['database_remaining_count'],
+      );
+      final authUserDeleted = data['auth_user_deleted'] == true;
+      final rawErrorCode = data['error']?.toString().trim();
+      final errorCode = (rawErrorCode == null || rawErrorCode.isEmpty)
+          ? null
+          : rawErrorCode;
+
+      final success =
+          ok &&
+          storageDeletedCount != null &&
+          storageDeletedCount >= 0 &&
+          storageRemainingCount == 0 &&
+          databaseDeleted &&
+          databaseRemainingCount == 0 &&
+          authUserDeleted &&
+          errorCode == null;
+
+      if (success) {
+        return _DeleteAccountResult(
+          success: true,
+          storageDeletedCount: storageDeletedCount,
+          storageRemainingCount: storageRemainingCount,
+          databaseDeleted: databaseDeleted,
+          databaseRemainingCount: databaseRemainingCount,
+          authUserDeleted: authUserDeleted,
+        );
+      }
+
+      return _DeleteAccountResult(
+        success: false,
+        errorCode: errorCode ?? 'invalid_success_response',
+        storageDeletedCount: storageDeletedCount,
+        storageRemainingCount: storageRemainingCount,
+        databaseDeleted: databaseDeleted,
+        databaseRemainingCount: databaseRemainingCount,
+        authUserDeleted: authUserDeleted,
+      );
+    } on FunctionException catch (e, st) {
+      debugPrint(
+        'delete-auth-user function exception: '
+        'status=${e.status} type=${e.runtimeType}\n$st',
+      );
+      return const _DeleteAccountResult(
+        success: false,
+        errorCode: 'function_exception',
+      );
     } catch (e, st) {
-      debugPrint('delete auth user edge function failed: $e\n$st');
+      debugPrint(
+        'delete-auth-user unexpected exception: '
+        '${e.runtimeType}\n$st',
+      );
+      return const _DeleteAccountResult(
+        success: false,
+        errorCode: 'unexpected_exception',
+      );
     }
   }
 
   Future<void> _withdrawAccount() async {
+    if (_isDeletingAccount) return;
+
     _dismissFocus();
     await _waitForUiSettle();
     if (!mounted) return;
@@ -19568,80 +19699,64 @@ class _HomePageState extends State<HomePage>
     final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      _showSnack(l10n.snackWithdrawCannotLogin);
+      await _showWithdrawErrorNotice();
       return;
     }
 
-    final uid = user.id;
+    if (_isUploadingMeal) {
+      await _showWithdrawErrorNotice();
+      return;
+    }
 
-    // TODO(vegepet/security): 회원 탈퇴 시 클라이언트에서 user_id 필터로 다중 테이블을
-    //   직접 delete 한다. RLS(`auth.uid() = user_id`) 가 반드시 전제되어야 안전하며,
-    //   향후 단일 트랜잭션 처리를 위해 security definer RPC 로 이전하는 것을 권장한다.
-    //   (auth.users 행 삭제는 이미 Edge Function `delete-auth-user` 로 분리되어 있다.)
+    _safeSetState(() {
+      _isDeletingAccount = true;
+      _isWithdrawConfirmOpen = false;
+      _isWithdrawFinalConfirmOpen = false;
+      _isWithdrawErrorNoticeOpen = false;
+    });
+
     try {
-      await supabase.from('meal_logs').delete().eq('user_id', uid);
-      try {
-        await supabase.from('meal_diary_notes').delete().eq('user_id', uid);
-      } catch (e) {
-        debugPrint('meal_diary_notes delete skipped: $e');
-      }
-      await supabase.from('pokedex_entries').delete().eq('user_id', uid);
-      await supabase.from('user_items').delete().eq('user_id', uid);
-      await supabase.from('user_pets').delete().eq('user_id', uid);
+      final result = await _deleteCurrentAuthUserByEdgeFunction();
 
-      try {
-        final remains = await supabase
-            .from('pokedex_entries')
-            .select('id')
-            .eq('user_id', uid);
-        final remainList = remains as List;
-        if (remainList.isNotEmpty) {
-          debugPrint(
-            'withdraw warning: pokedex_entries still remain after delete (${remainList.length})',
-          );
-          await supabase.from('pokedex_entries').delete().eq('user_id', uid);
-        }
-      } catch (e) {
-        debugPrint('withdraw pokedex verify skipped/failed: $e');
+      if (!result.success) {
+        debugPrint(
+          'withdraw failed: '
+          'error=${result.errorCode} '
+          'storageRemaining=${result.storageRemainingCount} '
+          'databaseDeleted=${result.databaseDeleted} '
+          'databaseRemaining=${result.databaseRemainingCount} '
+          'authDeleted=${result.authUserDeleted}',
+        );
+        if (!mounted) return;
+        _safeSetState(() => _isDeletingAccount = false);
+        await _showWithdrawErrorNotice();
+        return;
       }
 
-      await supabase
-          .from('profiles')
-          .update({
-            'nickname': null,
-            'gender': null,
-            'age_range': null,
-            'diet_goal': null,
-            'target_weight_kg': null,
-            // profiles 만 guest 로 초기화해도 auth.users 이메일은 남을 수 있다.
-            // 같은 이메일 재사용까지 보장하려면 Edge Function 삭제가 성공해야 한다.
-            'email': null,
-            'account_type': 'guest',
-            'linked_at': null,
-            'active_session_id': null,
-            'active_session_updated_at': null,
-            'gold_balance': 1000,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', uid);
+      debugPrint(
+        'withdraw server cleanup success: '
+        'storageDeleted=${result.storageDeletedCount}',
+      );
 
-      await _deleteCurrentAuthUserByEdgeFunction();
-
-      debugPrint('withdraw success before reset');
-
-      // DB 삭제·auth user 삭제 후 세션/UI 초기화는 공통 fresh guest reset helper로
-      // 일원화한다. (UI 즉시 확정 → auth reset timeout 후속 처리)
       await _resetToFreshGuestAfterDeletedAccount();
 
       if (!mounted) return;
       _ensureFreshGuestProfileSetupVisible();
       _showSnack(l10n.snackWithdrawCompleted);
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint(
+        'withdraw account unexpected failure: '
+        '${e.runtimeType}\n$st',
+      );
       if (!mounted) return;
-      // 보안: 내부 오류 상세(PostgREST/RLS/SQL 메시지)는 사용자에게 노출하지 않는다.
-      //       원인 분석용 상세는 debugPrint 로만 남기고, 사용자에게는 일반 문구를 보여준다.
-      debugPrint('withdraw account failed: $e');
-      _showSnack(l10n.snackWithdrawErrorGeneric);
+      _safeSetState(() => _isDeletingAccount = false);
+      await _showWithdrawErrorNotice();
+    } finally {
+      if (mounted && _isDeletingAccount) {
+        _safeSetState(() => _isDeletingAccount = false);
+      } else {
+        _isDeletingAccount = false;
+      }
     }
   }
 

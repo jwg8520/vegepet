@@ -334,5 +334,8 @@
   "mealFeedbackFatUp": "지방 높이기",
   "mealFeedbackFatDown": "지방 줄이기",
   "mealFeedbackDietaryFiberUp": "식이섬유 높이기",
-  "mealFeedbackDietaryFiberDown": "식이섬유 줄이기"
+  "mealFeedbackDietaryFiberDown": "식이섬유 줄이기",
+  "withdrawErrorNoticeTitle": "탈퇴 오류",
+  "withdrawErrorNoticeBody": "회원 탈퇴 중 오류가 발생했습니다. 다시 시도해 주세요.",
+  "withdrawErrorNoticeConfirm": "확인"
 }

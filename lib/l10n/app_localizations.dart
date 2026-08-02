@@ -1849,6 +1849,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'식이섬유 줄이기'**
   String get mealFeedbackDietaryFiberDown;
+
+  /// No description provided for @withdrawErrorNoticeTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'탈퇴 오류'**
+  String get withdrawErrorNoticeTitle;
+
+  /// No description provided for @withdrawErrorNoticeBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'회원 탈퇴 중 오류가 발생했습니다. 다시 시도해 주세요.'**
+  String get withdrawErrorNoticeBody;
+
+  /// No description provided for @withdrawErrorNoticeConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get withdrawErrorNoticeConfirm;
 }
 
 class _AppLocalizationsDelegate

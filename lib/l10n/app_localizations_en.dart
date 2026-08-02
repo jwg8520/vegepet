@@ -977,4 +977,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealFeedbackDietaryFiberDown => 'less dietary fiber';
+
+  @override
+  String get withdrawErrorNoticeTitle => 'Withdrawal error';
+
+  @override
+  String get withdrawErrorNoticeBody =>
+      'An error occurred while deleting your account. Please try again.';
+
+  @override
+  String get withdrawErrorNoticeConfirm => 'OK';
 }

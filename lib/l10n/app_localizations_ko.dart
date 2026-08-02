@@ -939,4 +939,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get mealFeedbackDietaryFiberDown => '식이섬유 줄이기';
+
+  @override
+  String get withdrawErrorNoticeTitle => '탈퇴 오류';
+
+  @override
+  String get withdrawErrorNoticeBody => '회원 탈퇴 중 오류가 발생했습니다. 다시 시도해 주세요.';
+
+  @override
+  String get withdrawErrorNoticeConfirm => '확인';
 }
