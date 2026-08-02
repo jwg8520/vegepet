@@ -23,7 +23,7 @@
   "appleAccountLinkedLine": "Apple account linked",
   "signInWithApple": "Sign in with Apple",
   "signInWithGoogle": "Sign in with Google",
-  "accountLinkGuideOnlyOneProvider": "• Only one Apple or Google account can be linked.",
+  "accountLinkGuideOnlyOneProvider": "• Only one account can be linked.",
   "accountLinkGuideCannotChange": "• Linked accounts cannot be changed.",
   "appleAccountLinkComingSoon": "Apple account linking will be available in the next update.",
   "pushNoticeEvent": "Announcements & Events",

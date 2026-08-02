@@ -3368,11 +3368,104 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 사용자가 Google 계정 선택을 취소했는지 판정.
+  ///
+  /// `uiUnavailable` 은 취소가 아니라 인증 UI 를 띄울 수 없는 설정/환경
+  /// 오류일 수 있으므로 여기에 포함하지 않는다.
   bool _isGoogleSignInCanceled(Object e) {
     if (e is! GoogleSignInException) return false;
     return e.code == GoogleSignInExceptionCode.canceled ||
-        e.code == GoogleSignInExceptionCode.interrupted ||
-        e.code == GoogleSignInExceptionCode.uiUnavailable;
+        e.code == GoogleSignInExceptionCode.interrupted;
+  }
+
+  /// Google 연동 단계 로그. 토큰·이메일·이름 등 민감 값은 절대 넣지 않는다.
+  void _logGoogleLink(String step, [String? detail]) {
+    if (detail == null || detail.isEmpty) {
+      debugPrint('google_link:$step');
+    } else {
+      debugPrint('google_link:$step:$detail');
+    }
+  }
+
+  /// 예외를 민감 정보 없이 요약한다.
+  String _summarizeGoogleLinkError(Object e) {
+    if (e is GoogleSignInException) {
+      return 'GoogleSignInException(code=${e.code.name})';
+    }
+    if (e is AuthException) {
+      final code = e.code;
+      final status = e.statusCode;
+      final raw = e.message;
+      final safeMessage = _sanitizeAuthErrorMessage(raw);
+      return 'AuthException(statusCode=$status, code=$code, msg=$safeMessage)';
+    }
+    final type = e.runtimeType.toString();
+    final raw = e.toString();
+    final safe = _sanitizeAuthErrorMessage(raw);
+    return '$type($safe)';
+  }
+
+  /// 토큰·이메일 등 민감 조각이 로그에 섞이지 않도록 짧게 자른다.
+  String _sanitizeAuthErrorMessage(String raw) {
+    var msg = raw;
+    // JWT 형태 / 긴 base64 조각 제거
+    msg = msg.replaceAll(
+      RegExp(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}'),
+      '[redacted-jwt]',
+    );
+    msg = msg.replaceAll(
+      RegExp(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'),
+      '[redacted-email]',
+    );
+    if (msg.length > 180) {
+      msg = '${msg.substring(0, 180)}…';
+    }
+    return msg;
+  }
+
+  /// AuthException / 일반 예외 메시지를 보고 실패 유형을 추정한다.
+  String _classifyGoogleLinkFailure(Object e) {
+    if (e is GoogleSignInException) {
+      switch (e.code) {
+        case GoogleSignInExceptionCode.canceled:
+        case GoogleSignInExceptionCode.interrupted:
+          return 'user_canceled';
+        case GoogleSignInExceptionCode.uiUnavailable:
+          return 'auth_ui_unavailable';
+        default:
+          return 'google_sdk_${e.code.name}';
+      }
+    }
+
+    final msg = _formatAuthError(e).toLowerCase();
+    if (_isIdentityAlreadyLinkedError(e)) {
+      return 'identity_already_linked_elsewhere';
+    }
+    if (msg.contains('manual linking') ||
+        msg.contains('identity_linking') ||
+        msg.contains('linking is disabled') ||
+        msg.contains('linking_disabled')) {
+      return 'manual_linking_disabled';
+    }
+    if (msg.contains('audience') ||
+        msg.contains('client id') ||
+        msg.contains('client_id') ||
+        msg.contains('invalid_token') ||
+        msg.contains('token is invalid')) {
+      return 'audience_or_client_id_mismatch';
+    }
+    if (msg.contains('provider') &&
+        (msg.contains('not enabled') ||
+            msg.contains('disabled') ||
+            msg.contains('unsupported'))) {
+      return 'supabase_provider_misconfigured';
+    }
+    if (msg.contains('url scheme') || msg.contains('redirect_uri')) {
+      return 'url_scheme_or_redirect';
+    }
+    if (msg.contains('bundle')) {
+      return 'bundle_id_mismatch';
+    }
+    return 'unknown';
   }
 
   /// Apple 계정 연동. 이번 단계는 UI 배치만 하고 준비 중 안내만 표시한다.
@@ -3390,6 +3483,19 @@ class _HomePageState extends State<HomePage>
     }
 
     _showSnack(l10n.appleAccountLinkComingSoon);
+  }
+
+  /// Auth identity 연결이 성공한 뒤 UI 를 성공 상태로 닫는다.
+  Future<void> _finishGoogleAccountLinkSuccessUi() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    _dismissFocus();
+    _safeSetState(() {
+      _closeAccountLinkPanel();
+      _isAccountLinkInviteNoticeOpen = false;
+    });
+    _showSnack(l10n.snackAccountLinkCompleted);
+    await _showAccountLinkSuccessNotice();
   }
 
   /// 현재 anonymous guest 세션(UUID 유지)에 Google identity 를 추가한다.
@@ -3415,35 +3521,65 @@ class _HomePageState extends State<HomePage>
     final beforeUserId = beforeUser.id;
     _safeSetState(() => _isGoogleLinkBusy = true);
 
+    // Auth identity 가 연결된 뒤에는 profiles/refresh 실패를 "연동 실패"로
+    // 취급하지 않기 위해 플래그로 단계를 나눈다.
+    var authLinkSucceeded = false;
+
     try {
-      await _ensureGoogleSignInInitialized();
+      _logGoogleLink('init', 'start');
+      try {
+        await _ensureGoogleSignInInitialized();
+        _logGoogleLink('init', 'success');
+      } catch (e) {
+        _logGoogleLink(
+          'init',
+          'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+        );
+        rethrow;
+      }
 
       final GoogleSignInAccount account;
+      _logGoogleLink('authenticate', 'start');
       try {
         account = await GoogleSignIn.instance.authenticate();
+        _logGoogleLink('authenticate', 'success');
       } on GoogleSignInException catch (e) {
         if (_isGoogleSignInCanceled(e)) {
-          debugPrint('google account link canceled by user: ${e.code}');
+          _logGoogleLink('authenticate', 'canceled:${e.code.name}');
           return;
         }
+        _logGoogleLink(
+          'authenticate',
+          'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+        );
         rethrow;
       }
 
       final idToken = account.authentication.idToken;
       if (idToken == null || idToken.isEmpty) {
-        debugPrint('google account link failed: id token missing');
+        _logGoogleLink('id_token', 'missing');
+        // serverClientId / GIDServerClientID 미설정, Bundle ID 불일치 등이
+        // 흔하다. 토큰 값은 절대 출력하지 않는다.
+        if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
+      _logGoogleLink('id_token', 'present');
 
+      _logGoogleLink('supabase_link', 'start');
       try {
         await supabase.auth.linkIdentityWithIdToken(
           provider: OAuthProvider.google,
           idToken: idToken,
         );
+        _logGoogleLink('supabase_link', 'success');
       } catch (e) {
+        final kind = _classifyGoogleLinkFailure(e);
+        _logGoogleLink(
+          'supabase_link',
+          'failed:$kind:${_summarizeGoogleLinkError(e)}',
+        );
         if (_isIdentityAlreadyLinkedError(e)) {
-          debugPrint('google identity already linked to another user');
           await _signOutGoogleSdkQuietly();
           if (!mounted) return;
           await _showLinkedAccountInUseNotice();
@@ -3453,12 +3589,14 @@ class _HomePageState extends State<HomePage>
       }
 
       // 링크 직후 서버 기준으로 identities 를 다시 확인한다.
+      _logGoogleLink('identity_verify', 'start');
       final identities = await supabase.auth.getUserIdentities();
       final linkedGoogle = identities.any((i) => i.provider == 'google');
       final afterUserId = supabase.auth.currentUser?.id;
 
       if (!linkedGoogle) {
-        debugPrint('google account link failed: identity not found after link');
+        _logGoogleLink('identity_verify', 'failed:identity_not_found');
+        if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
@@ -3466,43 +3604,105 @@ class _HomePageState extends State<HomePage>
       if (afterUserId == null || afterUserId != beforeUserId) {
         // UUID 가 바뀌면 기존 guest 데이터 소유권이 끊어진다. 연동 성공으로
         // 처리하지 않고 profiles 도 변경하지 않는다.
+        _logGoogleLink('identity_verify', 'failed:uuid_changed');
         debugPrint(
-          'google account link aborted: user id changed '
-          '(before=$beforeUserId after=$afterUserId)',
+          'google_link:uuid_mismatch before_len=${beforeUserId.length} '
+          'after_len=${afterUserId?.length ?? 0} '
+          'same_prefix=${afterUserId != null && afterUserId.startsWith(beforeUserId.substring(0, 8))}',
         );
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logGoogleLink('identity_verify', 'success');
+      authLinkSucceeded = true;
+
+      // Auth 연동 성공. 이후 profiles/refresh 실패는 연동 실패로 취급하지 않는다.
+      _logGoogleLink('profile_update', 'start');
+      try {
+        final googleEmail =
+            _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
+            account.email.trim();
+        final linkedAt = DateTime.now().toIso8601String();
+
+        await supabase
+            .from('profiles')
+            .update({
+              'email': googleEmail.isEmpty ? null : googleEmail,
+              'account_type': 'google',
+              'linked_at': linkedAt,
+              'updated_at': linkedAt,
+            })
+            .eq('id', afterUserId);
+        _logGoogleLink('profile_update', 'success');
+      } catch (e) {
+        _logGoogleLink(
+          'profile_update',
+          'failed:${_summarizeGoogleLinkError(e)}',
+        );
+        // Auth identity 는 유지. 보정 헬퍼로 재동기화 시도.
+        try {
+          await _syncLinkedProviderToProfileIfNeeded();
+          _logGoogleLink('profile_update', 'resync_attempted');
+        } catch (syncErr) {
+          _logGoogleLink(
+            'profile_update',
+            'resync_failed:${_summarizeGoogleLinkError(syncErr)}',
+          );
+        }
+      }
+
+      _logGoogleLink('refresh', 'start');
+      try {
+        await _refreshAllUserDataAfterAuthChange();
+        _logGoogleLink('refresh', 'success');
+      } catch (e) {
+        _logGoogleLink('refresh', 'failed:${_summarizeGoogleLinkError(e)}');
+        // Auth 상태만 다시 확인해 성공 UI 는 유지한다.
+        try {
+          await _fetchProfile();
+          await _syncLinkedProviderToProfileIfNeeded();
+        } catch (syncErr) {
+          _logGoogleLink(
+            'refresh',
+            'fallback_sync_failed:${_summarizeGoogleLinkError(syncErr)}',
+          );
+        }
+      }
+
+      // 최종 안전망: Auth identity + UUID 가 유지됐는지 재확인.
+      final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
+      final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+      if (!stillLinked || !stillSameUser) {
+        _logGoogleLink(
+          'complete',
+          'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
+        );
+        if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
 
-      debugPrint('google account link ok: uuid preserved ($beforeUserId)');
-
-      final googleEmail =
-          _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
-          account.email.trim();
-      final linkedAt = DateTime.now().toIso8601String();
-
-      await supabase
-          .from('profiles')
-          .update({
-            'email': googleEmail.isEmpty ? null : googleEmail,
-            'account_type': 'google',
-            'linked_at': linkedAt,
-            'updated_at': linkedAt,
-          })
-          .eq('id', afterUserId);
-
-      await _refreshAllUserDataAfterAuthChange();
+      _logGoogleLink('complete');
       if (!mounted) return;
-
-      _dismissFocus();
-      _safeSetState(() {
-        _closeAccountLinkPanel();
-        _isAccountLinkInviteNoticeOpen = false;
-      });
-      _showSnack(l10n.snackAccountLinkCompleted);
-      await _showAccountLinkSuccessNotice();
+      await _finishGoogleAccountLinkSuccessUi();
     } catch (e, st) {
-      debugPrint('google account link failed: $e\n$st');
+      final kind = _classifyGoogleLinkFailure(e);
+      _logGoogleLink('failed', '$kind:${_summarizeGoogleLinkError(e)}');
+      debugPrint('google_link:stack:$st');
+
+      if (authLinkSucceeded) {
+        // Auth 는 이미 성공. 후속 동기화만 실패한 경우 성공 UI 를 유지한다.
+        final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
+        final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+        if (stillLinked && stillSameUser) {
+          _logGoogleLink('complete', 'auth_ok_despite_post_error');
+          if (!mounted) return;
+          await _finishGoogleAccountLinkSuccessUi();
+          return;
+        }
+      }
+
       if (!mounted) return;
       _showSnack(l10n.snackAccountLinkFailed);
     } finally {
@@ -9644,7 +9844,7 @@ class _HomePageState extends State<HomePage>
   /// 계정 연동 패널의 provider 버튼 (Apple / Google 공통 shell).
   Widget _buildAccountLinkProviderButton({
     required String label,
-    required IconData icon,
+    required Widget leading,
     required Color background,
     required Color foreground,
     required Color borderColor,
@@ -9688,7 +9888,7 @@ class _HomePageState extends State<HomePage>
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(icon, size: 15, color: foreground),
+                          leading,
                           const SizedBox(width: 6),
                           Flexible(
                             child: Text(
@@ -9762,7 +9962,7 @@ class _HomePageState extends State<HomePage>
               const SizedBox(height: 14),
               _buildAccountLinkProviderButton(
                 label: l10n.signInWithApple,
-                icon: Icons.apple,
+                leading: const Icon(Icons.apple, size: 15, color: Colors.white),
                 background: const Color(0xFF000000),
                 foreground: Colors.white,
                 borderColor: const Color(0xFF000000),
@@ -9772,10 +9972,17 @@ class _HomePageState extends State<HomePage>
               const SizedBox(height: 10),
               _buildAccountLinkProviderButton(
                 label: l10n.signInWithGoogle,
-                // TODO(vegepet): 공식 Google "G" 로고 asset 추가 후 교체한다.
-                // 브랜드 가이드상 G 로고를 임의로 그리면 안 되므로 임시로
-                // 일반 계정 아이콘을 사용한다.
-                icon: Icons.account_circle_outlined,
+                leading: Image.asset(
+                  'assets/images/auth/google_g_logo.png',
+                  width: 15,
+                  height: 15,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  errorBuilder: (context, error, stackTrace) {
+                    debugPrint('google_g_logo asset load failed: $error');
+                    return const SizedBox(width: 15, height: 15);
+                  },
+                ),
                 background: Colors.white,
                 foreground: const Color(0xFF1F1F1F),
                 borderColor: const Color(0xFFDADCE0),

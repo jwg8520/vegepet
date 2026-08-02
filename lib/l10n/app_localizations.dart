@@ -239,7 +239,7 @@ abstract class AppLocalizations {
   /// No description provided for @accountLinkGuideOnlyOneProvider.
   ///
   /// In ko, this message translates to:
-  /// **'• Apple 혹은 Google 중 1가지의 계정만 연동이 가능합니다.'**
+  /// **'• 1가지의 계정만 연동이 가능합니다.'**
   String get accountLinkGuideOnlyOneProvider;
 
   /// No description provided for @accountLinkGuideCannotChange.

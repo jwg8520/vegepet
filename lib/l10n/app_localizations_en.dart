@@ -79,7 +79,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get accountLinkGuideOnlyOneProvider =>
-      '• Only one Apple or Google account can be linked.';
+      '• Only one account can be linked.';
 
   @override
   String get accountLinkGuideCannotChange =>

@@ -78,8 +78,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get signInWithGoogle => 'Sign in with Google';
 
   @override
-  String get accountLinkGuideOnlyOneProvider =>
-      '• Apple 혹은 Google 중 1가지의 계정만 연동이 가능합니다.';
+  String get accountLinkGuideOnlyOneProvider => '• 1가지의 계정만 연동이 가능합니다.';
 
   @override
   String get accountLinkGuideCannotChange => '• 연동된 계정은 변경이 불가합니다.';

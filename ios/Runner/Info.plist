@@ -39,6 +39,8 @@
 	</array>
 	<key>GIDClientID</key>
 	<string>256004504301-fbgm6n2kfj9lgnrjjp1as1f40c3rm3lp.apps.googleusercontent.com</string>
+	<key>GIDServerClientID</key>
+	<string>256004504301-r54kqh865r0m14orroqnd1hut36t5m6l.apps.googleusercontent.com</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
