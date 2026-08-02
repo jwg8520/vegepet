@@ -1681,6 +1681,156 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'펫 정보를 불러올 수 없어요: {error}'**
   String snackPetFetchFailed(String error);
+
+  /// No description provided for @mealPerfectMessage1.
+  ///
+  /// In ko, this message translates to:
+  /// **'건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!'**
+  String get mealPerfectMessage1;
+
+  /// No description provided for @mealPerfectMessage2.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!'**
+  String get mealPerfectMessage2;
+
+  /// No description provided for @mealGoodFeedbackMessage1.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 반영한 음식을 줘보는 것이 어떨까?!'**
+  String mealGoodFeedbackMessage1(String feedback);
+
+  /// No description provided for @mealGoodFeedbackMessage2.
+  ///
+  /// In ko, this message translates to:
+  /// **'나름 기분이 좋아 보인다! 다음에는 {feedback}를 반영한 음식을 줘보자!'**
+  String mealGoodFeedbackMessage2(String feedback);
+
+  /// No description provided for @mealGoodFallbackMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보자!'**
+  String get mealGoodFallbackMessage;
+
+  /// No description provided for @mealBadFeedbackMessage1.
+  ///
+  /// In ko, this message translates to:
+  /// **'기운이 빠지는 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!'**
+  String mealBadFeedbackMessage1(String feedback);
+
+  /// No description provided for @mealBadFeedbackMessage2.
+  ///
+  /// In ko, this message translates to:
+  /// **'다소 만족스럽지 않은 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!'**
+  String mealBadFeedbackMessage2(String feedback);
+
+  /// No description provided for @mealBadFallbackMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보자!'**
+  String get mealBadFallbackMessage;
+
+  /// No description provided for @mealRecognitionRetryMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 인식을 실패했습니다. 다시 시도해주세요.'**
+  String get mealRecognitionRetryMessage;
+
+  /// No description provided for @mealResultPerfectLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'완벽'**
+  String get mealResultPerfectLabel;
+
+  /// No description provided for @mealResultGoodLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'좋음'**
+  String get mealResultGoodLabel;
+
+  /// No description provided for @mealResultBadLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'아쉬움'**
+  String get mealResultBadLabel;
+
+  /// No description provided for @mealResultUncertainLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'인식 실패'**
+  String get mealResultUncertainLabel;
+
+  /// No description provided for @mealVerificationLimitTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 횟수 초과'**
+  String get mealVerificationLimitTitle;
+
+  /// No description provided for @mealVerificationLimitBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'죄송해요. 인증 가능 횟수를 초과했어요. 다음 식단 인증을 이용해주세요!'**
+  String get mealVerificationLimitBody;
+
+  /// No description provided for @mealVerificationLimitConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get mealVerificationLimitConfirm;
+
+  /// No description provided for @mealVerificationUnavailable.
+  ///
+  /// In ko, this message translates to:
+  /// **'인증 불가'**
+  String get mealVerificationUnavailable;
+
+  /// No description provided for @mealFeedbackProteinUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'단백질 높이기'**
+  String get mealFeedbackProteinUp;
+
+  /// No description provided for @mealFeedbackProteinDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'단백질 줄이기'**
+  String get mealFeedbackProteinDown;
+
+  /// No description provided for @mealFeedbackCarbohydratesUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'탄수화물 높이기'**
+  String get mealFeedbackCarbohydratesUp;
+
+  /// No description provided for @mealFeedbackCarbohydratesDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'탄수화물 줄이기'**
+  String get mealFeedbackCarbohydratesDown;
+
+  /// No description provided for @mealFeedbackFatUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'지방 높이기'**
+  String get mealFeedbackFatUp;
+
+  /// No description provided for @mealFeedbackFatDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'지방 줄이기'**
+  String get mealFeedbackFatDown;
+
+  /// No description provided for @mealFeedbackDietaryFiberUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'식이섬유 높이기'**
+  String get mealFeedbackDietaryFiberUp;
+
+  /// No description provided for @mealFeedbackDietaryFiberDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'식이섬유 줄이기'**
+  String get mealFeedbackDietaryFiberDown;
 }
 
 class _AppLocalizationsDelegate

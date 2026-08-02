@@ -286,5 +286,50 @@
   "snackPlayedTodayAlready": "오늘은 이미 놀아줬어요.",
   "snackPettedTodayAlready": "오늘은 이미 쓰다듬었어요.",
   "snackPetFetchFailed": "펫 정보를 불러올 수 없어요: {error}",
-  "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}}
+  "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
+  "mealPerfectMessage1": "건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!",
+  "mealPerfectMessage2": "베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!",
+  "mealGoodFeedbackMessage1": "베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 반영한 음식을 줘보는 것이 어떨까?!",
+  "@mealGoodFeedbackMessage1": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealGoodFeedbackMessage2": "나름 기분이 좋아 보인다! 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "@mealGoodFeedbackMessage2": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealGoodFallbackMessage": "베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보자!",
+  "mealBadFeedbackMessage1": "기운이 빠지는 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "@mealBadFeedbackMessage1": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealBadFeedbackMessage2": "다소 만족스럽지 않은 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "@mealBadFeedbackMessage2": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealBadFallbackMessage": "베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보자!",
+  "mealRecognitionRetryMessage": "식단 인식을 실패했습니다. 다시 시도해주세요.",
+  "mealResultPerfectLabel": "완벽",
+  "mealResultGoodLabel": "좋음",
+  "mealResultBadLabel": "아쉬움",
+  "mealResultUncertainLabel": "인식 실패",
+  "mealVerificationLimitTitle": "인증 횟수 초과",
+  "mealVerificationLimitBody": "죄송해요. 인증 가능 횟수를 초과했어요. 다음 식단 인증을 이용해주세요!",
+  "mealVerificationLimitConfirm": "확인",
+  "mealVerificationUnavailable": "인증 불가",
+  "mealFeedbackProteinUp": "단백질 높이기",
+  "mealFeedbackProteinDown": "단백질 줄이기",
+  "mealFeedbackCarbohydratesUp": "탄수화물 높이기",
+  "mealFeedbackCarbohydratesDown": "탄수화물 줄이기",
+  "mealFeedbackFatUp": "지방 높이기",
+  "mealFeedbackFatDown": "지방 줄이기",
+  "mealFeedbackDietaryFiberUp": "식이섬유 높이기",
+  "mealFeedbackDietaryFiberDown": "식이섬유 줄이기"
 }

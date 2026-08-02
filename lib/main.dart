@@ -107,125 +107,82 @@ class _ExternalAuthCredential {
 }
 
 // ============================================================================
-// 식단 사진 업로드 + AI 판정 구조 (Edge Function 연동 준비)
+// 식단 사진 업로드 + AI 판정 (Edge Function `meal-evaluate`)
 // ----------------------------------------------------------------------------
-// 최종 아키텍처 (아직 구현 전, 이번 단계에서는 뼈대/주석만 잡는다):
-//   1) Flutter: 실시간 카메라로 식단 사진 촬영 (사진첩 업로드 금지)
-//   2) Flutter: Supabase Storage bucket `_kMealPhotoBucket`에 업로드
-//      경로 규약 예) `{user_id}/{meal_date}/{slot}-{timestamp}.jpg`
-//   3) Flutter: `supabase.functions.invoke(_kMealEvaluateFunction, ...)` 호출
-//   4) Edge Function(서버 측):
-//      - profiles.gender, profiles.age_range, profiles.diet_goal, meal_slot,
-//        업로드된 이미지 URL을 기반으로 OpenAI(vision)에 판정 요청
-//        (age_range까지 포함해 연령대별 영양 기준을 반영할 수 있도록 확장 가능)
-//      - 응답에서 result_type/affection_gain을 계산
-//      - meal_logs insert + user_pets.affection update까지 서버에서 수행
-//        (서비스 롤 키 사용, RLS bypass)
-//   5) Flutter: 결과를 받아 meal_logs / active pet을 재조회하고 UI에 반영
+// 1) Flutter: 실시간 카메라 촬영 (사진첩 금지)
+// 2) Flutter: Storage `meal-photos` 업로드 → `{user.id}/{timestamp}_{slot}.jpg`
+// 3) Flutter: Edge Function `meal-evaluate` 호출
+// 4) Edge Function: OpenAI 판정 + meal_logs / affection / 실패횟수 갱신
+// 5) Flutter: status(completed|retry_allowed|blocked) 기준으로 UI 분기
 //
-// 보안 원칙:
-//   - OpenAI API 키는 앱 코드에 절대 포함하지 않는다.
-//   - 키는 Edge Function 환경 변수(예: `OPENAI_API_KEY`)로만 보관한다.
-//   - 따라서 Flutter(main.dart)에서는 OpenAI를 직접 호출하지 않는다.
-//
-// Edge Function 요청 바디(JSON) 예시:
-//   {
-//     "user_pet_id": "<uuid>",
-//     "meal_slot": "brunch" | "dinner",
-//     "meal_date": "yyyy-MM-dd",
-//     "storage_path": "<step 2에서 얻은 storage 경로>"
-//   }
-//
-// Edge Function 응답(JSON) 예시:
-//   {
-//     "result_type": "good" | "supplement_needed" | "bad" | "uncertain",
-//     "affection_gain": 5 | 3 | 0
-//   }
+// OpenAI API 키는 Edge Function 환경변수에만 둔다. Flutter는 직접 호출하지 않는다.
 // ============================================================================
 
-// Supabase Storage 버킷명: 촬영한 식단 사진이 올라가는 곳.
 const String _kMealPhotoBucket = 'meal-photos';
-
-// Supabase Edge Function 이름: OpenAI를 호출해서 식단을 판정해준다.
 const String _kMealEvaluateFunction = 'meal-evaluate';
 
-// ignore: unused_element
+// ignore: unused_element — 서버 CHECK / 문서용 상수.
 const List<String> _kMealResultTypes = <String>[
+  'perfect',
   'good',
-  'supplement_needed',
   'bad',
   'uncertain',
 ];
 
 const Map<String, int> _kMealAffectionGainByResult = <String, int>{
-  'good': 5,
-  'supplement_needed': 3,
+  'perfect': 5,
+  'good': 3,
   'bad': 0,
   'uncertain': 0,
 };
 
-// ----------------------------------------------------------------------------
-// AI 판정 결과별 감성 메시지 세트.
-//
-// OpenAI(Edge Function)는 result_type 과 feedback_text 만 반환하고,
-// 최종 유저용 메시지는 Flutter가 이 상수들로 조합한다.
-// ----------------------------------------------------------------------------
+const Set<String> _kAllowedMealFeedbackCodes = <String>{
+  'protein_up',
+  'protein_down',
+  'carbohydrates_up',
+  'carbohydrates_down',
+  'fat_up',
+  'fat_down',
+  'dietary_fiber_up',
+  'dietary_fiber_down',
+};
 
-const List<String> _kGoodMessages = <String>[
-  '건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!',
-  '베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!',
-];
+const Set<String> _kDisallowedFeedbackFallbackKo = <String>{
+  '나트륨',
+  '잡곡',
+  '당류',
+  '채소',
+  '야채',
+  '식이섬유(채소)',
+  '비타민',
+  '미네랄',
+};
 
-// feedback_text가 있을 때 사용. `{feedback}` 부분에 Edge Function이 돌려준 문장이 들어간다.
-const List<String> _kSupplementMessagesWithFeedback = <String>[
-  '베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 반영한 음식을 줘보는 것이 어떨까?!',
-  '나름 기분이 좋아보인다! 다음에는 {feedback}를 반영한 음식을 줘보자!',
-];
-
-// feedback_text가 비어 있을 때 쓰는 기본 메시지.
-const List<String> _kSupplementMessagesFallback = <String>[
-  '베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보는 것이 좋을 것 같다!',
-];
-
-const List<String> _kBadMessagesWithFeedback = <String>[
-  '기운이 빠지는 식사인 것 같다.. 다음에는 {feedback}를 반영한 음식을 줘보자..!',
-  '다소 만족스럽지 않은 식사인 것 같다.. 다음에는 {feedback}를 반영한 음식을 줘보자..!',
-];
-
-const List<String> _kBadMessagesFallback = <String>[
-  '베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보는 것이 좋을 것 같다!',
-];
-
-// uncertain은 고정 문구 1개만 사용한다.
-const String _kUncertainMessage = '사진이 잘 보이지 않는 것 같아요. 다시 촬영해보세요!';
-
-const List<String> _kGoodMessagesEn = <String>[
-  'Looks like VegePet enjoyed the meal! The balance looks great.',
-  "VegePet looks happy after that meal! Let's keep that balance going.",
-];
-
-const List<String> _kSupplementMessagesWithFeedbackEn = <String>[
-  'Looks like VegePet enjoyed the meal! Next time, try adding {feedback}.',
-  'VegePet seems happy with this meal! Adding {feedback} next time could make it even better.',
-];
-
-const List<String> _kSupplementMessagesFallbackEn = <String>[
-  'VegePet enjoyed the meal! A little more balance next time would make it even better.',
-];
-
-const List<String> _kBadMessagesWithFeedbackEn = <String>[
-  'This meal could use a little more balance. Next time, try going with {feedback}.',
-  'VegePet ate the meal, but it could be better balanced. Next time, going with {feedback} may help.',
-];
-
-const List<String> _kBadMessagesFallbackEn = <String>[
-  'VegePet ate the meal, but a more balanced meal would be better next time.',
-];
-
-const String _kUncertainMessageEn =
-    'The photo is a little hard to read. Please try taking it again.';
+const Set<String> _kDisallowedFeedbackFallbackEn = <String>{
+  'sodium',
+  'whole grain',
+  'sugar',
+  'vegetable',
+  'vitamin',
+  'mineral',
+};
 
 final Random _mealMessageRandom = Random();
+
+/// 오늘 brunch/dinner 식단 인증 실패·차단 상태 (서버 meal_verification_attempts 기준).
+class _MealVerificationAttemptState {
+  const _MealVerificationAttemptState({
+    required this.failedCount,
+    this.blockedAt,
+  });
+
+  final int failedCount;
+  final DateTime? blockedAt;
+
+  bool get isBlocked => failedCount >= 4 || blockedAt != null;
+
+  static const empty = _MealVerificationAttemptState(failedCount: 0);
+}
 
 /// 게임 메뉴 하위 패널을 외부 탭으로 닫을 때 페이드 퇴장 모션을 적용할 대상.
 enum _GameMenuSubOutsideDismissKind {
@@ -239,6 +196,87 @@ enum _GameMenuSubOutsideDismissKind {
   help,
 }
 
+List<String> _normalizeMealFeedbackCodes(dynamic raw) {
+  if (raw is! List) return const <String>[];
+  final out = <String>[];
+  for (final item in raw) {
+    if (item is! String) continue;
+    final code = item.trim();
+    if (!_kAllowedMealFeedbackCodes.contains(code)) continue;
+    if (out.contains(code)) continue;
+    out.add(code);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+String _localizedMealFeedbackPhrase(
+  String code,
+  AppLocalizations l10n,
+) {
+  switch (code) {
+    case 'protein_up':
+      return l10n.mealFeedbackProteinUp;
+    case 'protein_down':
+      return l10n.mealFeedbackProteinDown;
+    case 'carbohydrates_up':
+      return l10n.mealFeedbackCarbohydratesUp;
+    case 'carbohydrates_down':
+      return l10n.mealFeedbackCarbohydratesDown;
+    case 'fat_up':
+      return l10n.mealFeedbackFatUp;
+    case 'fat_down':
+      return l10n.mealFeedbackFatDown;
+    case 'dietary_fiber_up':
+      return l10n.mealFeedbackDietaryFiberUp;
+    case 'dietary_fiber_down':
+      return l10n.mealFeedbackDietaryFiberDown;
+    default:
+      return '';
+  }
+}
+
+String _joinFeedbackPhrases(List<String> phrases, {required bool isEnglish}) {
+  final parts = phrases.where((p) => p.trim().isNotEmpty).toList();
+  if (parts.isEmpty) return '';
+  if (parts.length == 1) return parts.first;
+  if (!isEnglish) {
+    return parts.join(', ');
+  }
+  if (parts.length == 2) {
+    return '${parts[0]} and ${parts[1]}';
+  }
+  return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}';
+}
+
+String? _localizedMealFeedbackFromCodes(
+  List<String> codes,
+  AppLocalizations l10n, {
+  required bool isEnglish,
+}) {
+  final phrases = codes
+      .map((c) => _localizedMealFeedbackPhrase(c, l10n))
+      .where((p) => p.isNotEmpty)
+      .toList();
+  final joined = _joinFeedbackPhrases(phrases, isEnglish: isEnglish);
+  return joined.isEmpty ? null : joined;
+}
+
+bool _isDisallowedFallbackFeedback(String text, {required bool isEnglish}) {
+  final lower = text.toLowerCase();
+  final banned = isEnglish
+      ? _kDisallowedFeedbackFallbackEn
+      : _kDisallowedFeedbackFallbackKo;
+  for (final word in banned) {
+    if (isEnglish) {
+      if (lower.contains(word.toLowerCase())) return true;
+    } else if (text.contains(word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// English locale: comma-separated feedback phrases → natural "and" list.
 String _formatFeedbackForEnglishSentence(String feedback) {
   final cleaned = feedback
@@ -248,10 +286,7 @@ String _formatFeedbackForEnglishSentence(String feedback) {
       .replaceAll(RegExp(r'\band\s+and\b', caseSensitive: false), 'and');
 
   if (cleaned.isEmpty) return '';
-
-  if (!cleaned.contains(',')) {
-    return cleaned;
-  }
+  if (!cleaned.contains(',')) return cleaned;
 
   final parts = cleaned
       .split(',')
@@ -265,55 +300,99 @@ String _formatFeedbackForEnglishSentence(String feedback) {
       .toList();
 
   if (parts.length <= 1) return cleaned;
-  if (parts.length == 2) {
-    return '${parts[0]} and ${parts[1]}';
-  }
-
+  if (parts.length == 2) return '${parts[0]} and ${parts[1]}';
   return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}';
 }
 
-/// AI 판정 결과 + 피드백 문장 → 앱에 표시할 최종 감성 메시지 1개를 만든다.
-///
-/// feedback_text가 비어 있거나 null 이면 fallback 메시지 세트에서 선택한다.
-String _buildAiStatusMessage(
-  String? resultType,
-  String? feedbackText, {
-  String localeCode = 'ko',
-}) {
-  final isEn = localeCode == 'en';
-  final rawFeedback = feedbackText?.trim() ?? '';
-  final feedback = isEn
-      ? _formatFeedbackForEnglishSentence(rawFeedback)
-      : rawFeedback;
-  final hasFeedback = feedback.isNotEmpty;
+String _pickMealTemplate(List<String> templates) {
+  if (templates.isEmpty) return '';
+  return templates[_mealMessageRandom.nextInt(templates.length)];
+}
 
-  List<String> pickList;
+/// AI 판정 결과 + feedback_codes/feedback_text → 앱 표시용 감성 메시지.
+String _buildAiStatusMessage({
+  required String? resultType,
+  required List<String> feedbackCodes,
+  required String? feedbackText,
+  required AppLocalizations l10n,
+  required bool isEnglish,
+}) {
   switch (resultType) {
+    case 'perfect':
+      return _pickMealTemplate([
+        l10n.mealPerfectMessage1,
+        l10n.mealPerfectMessage2,
+      ]);
     case 'good':
-      pickList = isEn ? _kGoodMessagesEn : _kGoodMessages;
-      break;
-    case 'supplement_needed':
-      pickList = hasFeedback
-          ? (isEn
-                ? _kSupplementMessagesWithFeedbackEn
-                : _kSupplementMessagesWithFeedback)
-          : (isEn
-                ? _kSupplementMessagesFallbackEn
-                : _kSupplementMessagesFallback);
-      break;
+      {
+        final fromCodes = _localizedMealFeedbackFromCodes(
+          feedbackCodes,
+          l10n,
+          isEnglish: isEnglish,
+        );
+        var feedback = fromCodes;
+        if (feedback == null || feedback.isEmpty) {
+          final raw = feedbackText?.trim() ?? '';
+          if (raw.isNotEmpty &&
+              !_isDisallowedFallbackFeedback(raw, isEnglish: isEnglish)) {
+            feedback = isEnglish
+                ? _formatFeedbackForEnglishSentence(raw)
+                : raw;
+          }
+        }
+        if (feedback != null && feedback.isNotEmpty) {
+          return _pickMealTemplate([
+            l10n.mealGoodFeedbackMessage1(feedback),
+            l10n.mealGoodFeedbackMessage2(feedback),
+          ]);
+        }
+        return l10n.mealGoodFallbackMessage;
+      }
     case 'bad':
-      pickList = hasFeedback
-          ? (isEn ? _kBadMessagesWithFeedbackEn : _kBadMessagesWithFeedback)
-          : (isEn ? _kBadMessagesFallbackEn : _kBadMessagesFallback);
-      break;
+      {
+        final fromCodes = _localizedMealFeedbackFromCodes(
+          feedbackCodes,
+          l10n,
+          isEnglish: isEnglish,
+        );
+        var feedback = fromCodes;
+        if (feedback == null || feedback.isEmpty) {
+          final raw = feedbackText?.trim() ?? '';
+          if (raw.isNotEmpty &&
+              !_isDisallowedFallbackFeedback(raw, isEnglish: isEnglish)) {
+            feedback = isEnglish
+                ? _formatFeedbackForEnglishSentence(raw)
+                : raw;
+          }
+        }
+        if (feedback != null && feedback.isNotEmpty) {
+          return _pickMealTemplate([
+            l10n.mealBadFeedbackMessage1(feedback),
+            l10n.mealBadFeedbackMessage2(feedback),
+          ]);
+        }
+        return l10n.mealBadFallbackMessage;
+      }
     case 'uncertain':
     default:
-      return isEn ? _kUncertainMessageEn : _kUncertainMessage;
+      return l10n.mealRecognitionRetryMessage;
   }
+}
 
-  final template = pickList[_mealMessageRandom.nextInt(pickList.length)];
-  if (!hasFeedback) return template;
-  return template.replaceAll('{feedback}', feedback);
+/// Edge Function 응답의 status 를 정규화한다.
+String? _normalizeMealEvaluateStatus(Map<String, dynamic> result) {
+  final raw = result['status']?.toString().trim();
+  if (raw == 'completed' || raw == 'retry_allowed' || raw == 'blocked') {
+    return raw;
+  }
+  final resultType = result['result_type']?.toString();
+  if (resultType == 'uncertain') return 'retry_allowed';
+  if (resultType == 'perfect' ||
+      resultType == 'good' ||
+      resultType == 'bad') {
+    return 'completed';
+  }
+  return null;
 }
 
 void main() async {
@@ -548,6 +627,12 @@ class _HomePageState extends State<HomePage>
   bool _isAdopting = false;
 
   List<Map<String, dynamic>> _todayMealLogs = [];
+
+  /// 오늘 brunch/dinner 식단 인증 실패·차단 상태.
+  /// 키: brunch | dinner. 서버 meal_verification_attempts 조회 결과.
+  Map<String, _MealVerificationAttemptState> _todayMealVerificationAttempts =
+      {};
+
   // ignore: unused_field
   bool _isLoggingMeal = false; // 기존 _logMeal 경로 호환용 (현재 UI에서는 사용하지 않음)
   bool _firstMealPopupShownThisSession = false;
@@ -807,6 +892,9 @@ class _HomePageState extends State<HomePage>
 
   /// 계정 연동 성공 직후 안내 (240×116 · 마당 좌표계).
   bool _isAccountLinkSuccessNoticeOpen = false;
+
+  /// 식단 인증 횟수 초과 안내 (240×116 · 마당 좌표계).
+  bool _isMealVerificationLimitNoticeOpen = false;
 
   /// 설정 > 계정 행 탭 시 연동 계정 주소 안내 (240×116 · 마당 좌표계).
   bool _isLinkedAccountAddressNoticeOpen = false;
@@ -1246,7 +1334,33 @@ class _HomePageState extends State<HomePage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_checkAccountHealthOnResume());
+      // foreground 복귀 시 월별 식단일지 캐시 키를 비워 다음 오픈/표시가
+      // 오래된 meal_logs 스냅샷을 강제 유지하지 않게 한다.
+      unawaited(_onAppResumedMealDiaryCachePolicy());
+      unawaited(_fetchTodayMealVerificationAttempts());
     }
+  }
+
+  /// resumed: 캐시 키를 무효화하고, 식단일지가 열려 있으면 현재 월을 재조회한다.
+  Future<void> _onAppResumedMealDiaryCachePolicy() async {
+    final generation = _userDataGeneration;
+    final userId = supabase.auth.currentUser?.id;
+    final diaryWasOpen = _isDietDiaryPanelOpen;
+    _diaryLogsCachedMonthKey = null;
+    if (!diaryWasOpen) return;
+
+    debugPrint('meal_diary:refresh_start');
+    try {
+      await _fetchDiaryMonthLogs(_diaryVisibleMonth);
+    } catch (e) {
+      debugPrint('meal_diary:refresh_failed:${e.runtimeType}');
+      return;
+    }
+    if (!mounted) return;
+    if (generation != _userDataGeneration) return;
+    if (userId != supabase.auth.currentUser?.id) return;
+    _safeSetState(() {});
+    debugPrint('meal_diary:refresh_success');
   }
 
   bool _isProfileComplete() {
@@ -1347,6 +1461,7 @@ class _HomePageState extends State<HomePage>
     _activePet = null;
     _residentPets = [];
     _todayMealLogs = [];
+    _todayMealVerificationAttempts = {};
     _pokedexEntries = [];
     _pokedexPanelSelectedEntry = null;
     _diaryLogsByDate = {};
@@ -1377,6 +1492,7 @@ class _HomePageState extends State<HomePage>
       _fetchActivePet(syncYard: false),
       _fetchResidentPets(),
       _fetchTodayMealLogs(),
+      _fetchTodayMealVerificationAttempts(),
       _fetchRandomTicketCount(),
     ]);
     if (generation != _userDataGeneration) {
@@ -1447,6 +1563,7 @@ class _HomePageState extends State<HomePage>
       _activePet = null;
       _residentPets = [];
       _todayMealLogs = [];
+      _todayMealVerificationAttempts = {};
       _pokedexEntries = [];
       _pokedexPanelSelectedEntry = null;
       _diaryLogsByDate = {};
@@ -2593,6 +2710,7 @@ class _HomePageState extends State<HomePage>
         _residentPets = [];
         _activePet = null;
         _todayMealLogs = [];
+        _todayMealVerificationAttempts = {};
         _profile = null;
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
@@ -4943,11 +5061,190 @@ class _HomePageState extends State<HomePage>
     final today = _todayDateStr();
     final data = await supabase
         .from('meal_logs')
-        .select('id, meal_slot, result_type, affection_gain, created_at')
+        .select(
+          'id, meal_slot, result_type, affection_gain, image_path, '
+          'captured_at, created_at',
+        )
         .eq('user_id', user.id)
         .eq('meal_date', today);
 
     _todayMealLogs = List<Map<String, dynamic>>.from(data);
+  }
+
+  _MealVerificationAttemptState _attemptStateForSlot(String slot) {
+    return _todayMealVerificationAttempts[slot] ??
+        _MealVerificationAttemptState.empty;
+  }
+
+  bool _isTodayMealSlotBlocked(String slot) =>
+      _attemptStateForSlot(slot).isBlocked;
+
+  int _todayMealSlotFailedCount(String slot) =>
+      _attemptStateForSlot(slot).failedCount;
+
+  void _applyMealVerificationAttemptFromResponse(
+    String slot,
+    Map<String, dynamic> result,
+  ) {
+    final failedCount = (result['failed_count'] as num?)?.toInt() ??
+        _todayMealSlotFailedCount(slot);
+    DateTime? blockedAt;
+    final rawBlocked = result['blocked_at'];
+    if (rawBlocked != null) {
+      blockedAt = DateTime.tryParse(rawBlocked.toString());
+    } else if (result['is_blocked'] == true || failedCount >= 4) {
+      blockedAt = DateTime.now().toUtc();
+    }
+    _todayMealVerificationAttempts[slot] = _MealVerificationAttemptState(
+      failedCount: failedCount,
+      blockedAt: blockedAt,
+    );
+  }
+
+  void _clearMealVerificationAttemptForSlot(String slot) {
+    _todayMealVerificationAttempts[slot] =
+        const _MealVerificationAttemptState(failedCount: 0);
+  }
+
+  /// 오늘 brunch/dinner 의 meal_verification_attempts 를 SELECT 만 한다.
+  /// INSERT/UPDATE 는 Edge Function 전용이다.
+  Future<void> _fetchTodayMealVerificationAttempts() async {
+    final generation = _userDataGeneration;
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _todayMealVerificationAttempts = {};
+      if (mounted) _safeSetState(() {});
+      return;
+    }
+    final requestedUserId = user.id;
+    final requestedDate = _todayDateStr();
+
+    try {
+      final rows = await supabase
+          .from('meal_verification_attempts')
+          .select('meal_slot, failed_count, blocked_at')
+          .eq('user_id', requestedUserId)
+          .eq('meal_date', requestedDate);
+
+      if (generation != _userDataGeneration) {
+        debugPrint('stale meal verification attempts ignored (generation)');
+        return;
+      }
+      if (requestedUserId != supabase.auth.currentUser?.id) {
+        debugPrint('stale meal verification attempts ignored (user)');
+        return;
+      }
+      if (requestedDate != _todayDateStr()) {
+        debugPrint('stale meal verification attempts ignored (date)');
+        return;
+      }
+
+      final next = <String, _MealVerificationAttemptState>{
+        'brunch': _MealVerificationAttemptState.empty,
+        'dinner': _MealVerificationAttemptState.empty,
+      };
+
+      for (final raw in (rows as List)) {
+        if (raw is! Map) continue;
+        final row = Map<String, dynamic>.from(raw);
+        final slotRaw = row['meal_slot']?.toString();
+        if (slotRaw != 'brunch' && slotRaw != 'dinner') continue;
+        final slot = slotRaw!;
+        final failedCount = (row['failed_count'] as num?)?.toInt() ?? 0;
+        DateTime? blockedAt;
+        final blockedRaw = row['blocked_at'];
+        if (blockedRaw != null) {
+          blockedAt = DateTime.tryParse(blockedRaw.toString());
+        }
+        next[slot] = _MealVerificationAttemptState(
+          failedCount: failedCount,
+          blockedAt: blockedAt,
+        );
+      }
+
+      _todayMealVerificationAttempts = next;
+      if (mounted) _safeSetState(() {});
+      debugPrint(
+        'meal_verify:attempts_fetched '
+        'brunch_failed=${next['brunch']!.failedCount} '
+        'brunch_blocked=${next['brunch']!.isBlocked} '
+        'dinner_failed=${next['dinner']!.failedCount} '
+        'dinner_blocked=${next['dinner']!.isBlocked}',
+      );
+    } catch (e) {
+      // 조회 실패 시 기존 로컬 상태를 유지한다(차단을 임의로 풀지 않음).
+      debugPrint(
+        'meal_verify:attempts_fetch_failed type=${e.runtimeType}',
+      );
+    }
+  }
+
+  /// 식단 인증 직후 오늘 meal_logs 행을 다시 조회해 image_path 저장을 확인한다.
+  ///
+  /// 성공 시 해당 row 를 반환한다. image_path 가 없거나 행이 없으면 null.
+  Future<Map<String, dynamic>?> _verifyPersistedTodayMealLog({
+    required String slot,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return null;
+    final today = _todayDateStr();
+    try {
+      final rows = await supabase
+          .from('meal_logs')
+          .select('meal_slot, result_type, image_path, captured_at')
+          .eq('user_id', user.id)
+          .eq('meal_date', today)
+          .eq('meal_slot', slot)
+          .limit(1);
+      final list = (rows as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      if (list.isEmpty) {
+        debugPrint('meal_diary:image_path_present=false');
+        return null;
+      }
+      final row = list.first;
+      final imagePath = row['image_path']?.toString().trim() ?? '';
+      final present = imagePath.isNotEmpty;
+      debugPrint('meal_diary:image_path_present=$present');
+      if (!present) return null;
+      return row;
+    } catch (e) {
+      debugPrint('meal_log verify failed: ${e.runtimeType}');
+      debugPrint('meal_diary:image_path_present=false');
+      return null;
+    }
+  }
+
+  /// meal_logs 저장이 확인된 뒤에만 식단일지 월별 캐시를 비운다.
+  void _invalidateMealDiaryMonthCache() {
+    _diaryLogsByDate = {};
+    _diaryCurrentWeightByDate = {};
+    _diaryLogsCachedMonthKey = null;
+    debugPrint('meal_diary:cache_invalidated');
+  }
+
+  /// 식단 인증 성공 후: 캐시 무효화 + (열려 있으면) 현재 표시 월 재조회.
+  Future<void> _refreshMealDiaryAfterSuccessfulAuth() async {
+    final generation = _userDataGeneration;
+    final userId = supabase.auth.currentUser?.id;
+    _invalidateMealDiaryMonthCache();
+
+    if (!_isDietDiaryPanelOpen) return;
+
+    debugPrint('meal_diary:refresh_start');
+    try {
+      await _fetchDiaryMonthLogs(_diaryVisibleMonth);
+    } catch (e) {
+      debugPrint('meal_diary:refresh_failed:${e.runtimeType}');
+      return;
+    }
+    if (!mounted) return;
+    if (generation != _userDataGeneration) return;
+    if (userId != supabase.auth.currentUser?.id) return;
+    _safeSetState(() {});
+    debugPrint('meal_diary:refresh_success');
   }
 
   /// 가방에 쌓여 있는 랜덤 분양권(`random_adoption_ticket`)의 총 수량을 조회한다.
@@ -5632,7 +5929,7 @@ class _HomePageState extends State<HomePage>
         'user_pet_id': petId,
         'meal_date': today,
         'meal_slot': slot,
-        'result_type': 'good',
+        'result_type': 'perfect',
         'affection_gain': 5,
         'image_path': null,
         'memo': null,
@@ -5672,7 +5969,7 @@ class _HomePageState extends State<HomePage>
   // 사용 위치:
   //   - 놀아주기 / 쓰다듬기 성공 시 (_interactPet)
   //   - AI 식단 판정 후 affection 이 서버에서 올라갔을 때
-  //     (_applyMealEvaluationResult 에서 재조회 후 동기화)
+  //     (_applyCompletedMealEvaluationResult 에서 재조회 후 동기화)
   //   - 디버그 섹션의 애정도 조작 버튼
   //
   // 최초 adult 도달 시:
@@ -6372,6 +6669,7 @@ class _HomePageState extends State<HomePage>
         _residentPets = [];
         _selectedSpeciesId = null;
         _todayMealLogs = [];
+        _todayMealVerificationAttempts = {};
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
@@ -8869,6 +9167,7 @@ class _HomePageState extends State<HomePage>
     _isProfileSelectMissingNoticeOpen = false;
     _isAccountLinkInviteNoticeOpen = false;
     _isAccountLinkSuccessNoticeOpen = false;
+    _isMealVerificationLimitNoticeOpen = false;
     _isLinkedAccountAddressNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
     _isMaturityCompleteNoticeOpen = false;
@@ -9502,6 +9801,7 @@ class _HomePageState extends State<HomePage>
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildAccountLinkInviteNoticeGlobalOverlay(),
         _buildAccountLinkSuccessNoticeGlobalOverlay(),
+        _buildMealVerificationLimitNoticeGlobalOverlay(),
         _buildLinkedAccountAddressNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
@@ -9954,6 +10254,22 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildMealVerificationLimitNoticeGlobalOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      VegePetNoticeConfig(
+        isOpen: _isMealVerificationLimitNoticeOpen,
+        title: l10n.mealVerificationLimitTitle,
+        body: l10n.mealVerificationLimitBody,
+        primaryLabel: l10n.mealVerificationLimitConfirm,
+        onPrimaryTap: _closeMealVerificationLimitNoticeOverlay,
+        outsideDismissible: false,
+        bodyMaxLines: 3,
+        bodyOverflow: TextOverflow.clip,
+      ),
+    );
+  }
+
   /// 계정 주소 알림창 — 연동 이메일만 표시한다(설명 문구 없음).
   ///
   /// 크기·위치·글래스 디자인·fade·버튼 스타일은 계정 연동 완료 알림창과 동일한
@@ -10132,6 +10448,7 @@ class _HomePageState extends State<HomePage>
       _isNameInterlockNoticeOpen = false;
       _isAccountLinkInviteNoticeOpen = false;
       _isAccountLinkSuccessNoticeOpen = false;
+      _isMealVerificationLimitNoticeOpen = false;
       _isLinkedAccountAddressNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
       _isMaturityCompleteNoticeOpen = false;
@@ -11256,7 +11573,8 @@ class _HomePageState extends State<HomePage>
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
         _isAccountLinkInviteNoticeOpen ||
-        _isAccountLinkSuccessNoticeOpen;
+        _isAccountLinkSuccessNoticeOpen ||
+        _isMealVerificationLimitNoticeOpen;
   }
 
   double get _gameMenuYardExitFadeMultiplier {
@@ -14887,6 +15205,7 @@ class _HomePageState extends State<HomePage>
     required String label,
     required bool done,
     required bool uploading,
+    required bool blocked,
     required bool disabled,
     required VoidCallback onTap,
   }) {
@@ -14960,6 +15279,45 @@ class _HomePageState extends State<HomePage>
         ),
       );
     }
+    if (blocked) {
+      return Opacity(
+        opacity: 0.6,
+        child: Container(
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFF1F1F1), width: 0.8),
+          ),
+          child: Center(
+            child: Transform.translate(
+              offset: const Offset(-13, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.block_rounded, size: 18, color: Colors.grey[600]),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      '$label · ${l10n.mealVerificationUnavailable}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(16),
@@ -15016,6 +15374,8 @@ class _HomePageState extends State<HomePage>
     final l10n = AppLocalizations.of(context);
     final brunchDone = _todayMealLogs.any((m) => m['meal_slot'] == 'brunch');
     final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
+    final brunchBlocked = !brunchDone && _isTodayMealSlotBlocked('brunch');
+    final dinnerBlocked = !dinnerDone && _isTodayMealSlotBlocked('dinner');
     final uploading = _isUploadingMeal;
     final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
     final uploadingDinner = uploading && _uploadingSlot == 'dinner';
@@ -15109,6 +15469,7 @@ class _HomePageState extends State<HomePage>
                       label: l10n.mealPanelBrunchButton,
                       done: brunchDone,
                       uploading: uploadingBrunch,
+                      blocked: brunchBlocked,
                       disabled: uploading,
                       onTap: () =>
                           unawaited(_uploadMealPhotoAndEvaluate('brunch')),
@@ -15118,6 +15479,7 @@ class _HomePageState extends State<HomePage>
                       label: l10n.mealPanelDinnerButton,
                       done: dinnerDone,
                       uploading: uploadingDinner,
+                      blocked: dinnerBlocked,
                       disabled: uploading,
                       onTap: () =>
                           unawaited(_uploadMealPhotoAndEvaluate('dinner')),
@@ -15957,16 +16319,12 @@ class _HomePageState extends State<HomePage>
   }
 
   // --------------------------------------------------------------------------
-  // 식단 사진 업로드 + AI 판정 실제 연결
+  // 식단 사진 업로드 + AI 판정
   //
-  // 전체 흐름:
-  //   1) _pickMealPhoto               : image_picker로 실시간 카메라 촬영
-  //   2) _uploadPhotoToStorage        : Supabase Storage `meal-photos` 업로드
-  //   3) _invokeMealEvaluateFunction  : Supabase Edge Function `meal-evaluate` 호출
-  //   4) 응답에서 result_type/feedback_text/affection_gain/next_affection 파싱
-  //   5) _applyMealEvaluationResult   : meal_logs/active pet 재조회 + 감성 메시지 생성
-  //
-  // Flutter는 OpenAI를 직접 호출하지 않는다. 키는 Edge Function 환경변수에만 존재.
+  // status 우선 분기:
+  //   completed     → meal_logs 저장 확인 + 식단일지 갱신 + affection UI
+  //   retry_allowed → 인식 실패 재시도 (1~3회). meal_logs 없음
+  //   blocked       → 해당 슬롯 인증 불가. meal_logs 없음
   // --------------------------------------------------------------------------
 
   /// 먹이주기 시트에서 "아점/저녁 식단 사진 올리기" 버튼을 눌렀을 때의 메인 엔트리.
@@ -15988,7 +16346,16 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // 첫 식단 성공 후 이메일 연동 팝업을 띄우기 위해 업로드 전에 상태를 미리 본다.
+    // 카메라/업로드 전에 최신 차단 상태를 재확인한다.
+    try {
+      await _fetchTodayMealVerificationAttempts();
+    } catch (_) {}
+    if (_isTodayMealSlotBlocked(slot)) {
+      await _showMealVerificationLimitNotice();
+      return;
+    }
+
+    // 첫 식단 성공 후 계정 연동 팝업을 띄우기 위해 업로드 전에 상태를 미리 본다.
     bool wasFirstEver = false;
     try {
       final existing = await supabase
@@ -15998,84 +16365,109 @@ class _HomePageState extends State<HomePage>
           .limit(1);
       wasFirstEver = (existing as List).isEmpty;
     } catch (_) {
-      // 선제 조회가 실패해도 업로드 흐름 자체는 계속 진행한다.
       wasFirstEver = false;
     }
 
-    setState(() {
+    _safeSetState(() {
       _isUploadingMeal = true;
       _uploadingSlot = slot;
     });
 
+    final flowSw = Stopwatch()..start();
+
     try {
-      // 1) 실시간 카메라 촬영 (사진첩 업로드는 허용하지 않는다)
       final photo = await _pickMealPhoto();
       if (photo == null) {
-        if (!mounted) return;
-        setState(() {
-          _isUploadingMeal = false;
-          _uploadingSlot = null;
-        });
+        // 카메라 취소: 캐시/차단 상태를 건드리지 않는다.
         return;
       }
 
-      // 2) Supabase Storage 업로드
       final imagePath = await _uploadPhotoToStorage(slot: slot, file: photo);
       if (imagePath == null) {
         if (!mounted) return;
-        setState(() {
-          _isUploadingMeal = false;
-          _uploadingSlot = null;
-        });
         _showSnack(l10n.snackMealUploadFailed);
         return;
       }
 
       if (mounted) {
-        setState(() {
-          _lastImagePath = imagePath;
-        });
+        _safeSetState(() => _lastImagePath = imagePath);
       }
 
-      // 3) Edge Function 호출
       final result = await _invokeMealEvaluateFunction(
         slot: slot,
         imagePath: imagePath,
       );
-      if (result == null) {
+      if (result == null || result['ok'] != true) {
         if (!mounted) return;
-        setState(() {
-          _isUploadingMeal = false;
-          _uploadingSlot = null;
-        });
         _showSnack(l10n.snackMealAiFailed);
         return;
       }
 
-      // 4~5) 응답 반영 + meal_logs / active pet 재조회 + 상태메세지 생성
-      await _applyMealEvaluationResult(result);
+      // raw X 등 방어적 응답에서 failed_count 가 비어 있을 수 있으므로 서버 재조회.
+      if (result['failed_count'] == null &&
+          result['result_type']?.toString() == 'uncertain') {
+        await _fetchTodayMealVerificationAttempts();
+      }
+
+      final status = _normalizeMealEvaluateStatus(result);
+      final resultType = result['result_type']?.toString();
+      final completed =
+          status == 'completed' &&
+          const {'perfect', 'good', 'bad'}.contains(resultType);
+      final retryAllowed =
+          status == 'retry_allowed' && resultType == 'uncertain';
+      final blocked = status == 'blocked' && resultType == 'uncertain';
+
+      if (completed) {
+        final persisted = await _verifyPersistedTodayMealLog(slot: slot);
+        if (persisted == null) {
+          if (!mounted) return;
+          _showSnack(l10n.snackMealAiFailed);
+          return;
+        }
+        debugPrint('meal_photo:meal_log_refresh_success');
+        await _refreshMealDiaryAfterSuccessfulAuth();
+        await _applyCompletedMealEvaluationResult(result, slot: slot);
+        debugPrint(
+          'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
+        );
+        if (wasFirstEver) {
+          await _maybeShowAccountLinkInviteAfterFirstMeal();
+        }
+        return;
+      }
+
+      if (retryAllowed) {
+        await _applyRetryAllowedMealEvaluationResult(result, slot: slot);
+        debugPrint(
+          'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
+        );
+        return;
+      }
+
+      if (blocked) {
+        await _applyBlockedMealEvaluationResult(result, slot: slot);
+        debugPrint(
+          'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
+        );
+        return;
+      }
 
       if (!mounted) return;
-      setState(() {
-        _isUploadingMeal = false;
-        _uploadingSlot = null;
-      });
-
-      // 첫 식단 성공 시(단, uncertain은 보통 meal_logs에 기록되지 않으므로 제외) 이메일 유도 팝업.
-      final resultType = result['ok'] == true
-          ? result['result_type']?.toString()
-          : null;
-      final wasLogged = resultType != null && resultType != 'uncertain';
-      if (wasFirstEver && wasLogged) {
-        await _maybeShowAccountLinkInviteAfterFirstMeal();
-      }
+      _showSnack(l10n.snackMealAiFailed);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
+      _showSnack(l10n.snackMealUnknownError(e.toString()));
+    } finally {
+      if (mounted) {
+        _safeSetState(() {
+          _isUploadingMeal = false;
+          _uploadingSlot = null;
+        });
+      } else {
         _isUploadingMeal = false;
         _uploadingSlot = null;
-      });
-      _showSnack(l10n.snackMealUnknownError(e.toString()));
+      }
     }
   }
 
@@ -16119,6 +16511,9 @@ class _HomePageState extends State<HomePage>
   ///
   /// 경로 규약: `{user.id}/{timestamp}_{slot}.jpg`
   /// 성공 시 업로드된 storage path 를 반환한다. 실패 시 null.
+  ///
+  /// Dashboard 목록 갱신 지연과 실제 `uploadBinary` 완료를 혼동하지 않도록
+  /// 업로드 시작/완료 시점과 경과 시간을 로그로 남긴다.
   Future<String?> _uploadPhotoToStorage({
     required String slot,
     required XFile file,
@@ -16128,6 +16523,8 @@ class _HomePageState extends State<HomePage>
 
     final ts = DateTime.now().millisecondsSinceEpoch;
     final imagePath = '${user.id}/${ts}_$slot.jpg';
+    final sw = Stopwatch()..start();
+    debugPrint('meal_photo:storage_upload_start');
 
     try {
       final bytes = await File(file.path).readAsBytes();
@@ -16141,40 +16538,30 @@ class _HomePageState extends State<HomePage>
               upsert: false,
             ),
           );
+      debugPrint(
+        'meal_photo:storage_upload_success '
+        'elapsed_ms=${sw.elapsedMilliseconds}',
+      );
       return imagePath;
     } catch (e) {
-      debugPrint('meal-photos upload failed: $e');
+      debugPrint(
+        'meal_photo:storage_upload_failed '
+        'elapsed_ms=${sw.elapsedMilliseconds} type=${e.runtimeType}',
+      );
       return null;
     }
   }
 
   /// Supabase Edge Function `meal-evaluate` 를 호출한다.
   ///
-  /// 요청 바디:
-  /// ```json
-  /// {
-  ///   "slot": "brunch|dinner",
-  ///   "imagePath": "<storage path>",
-  ///   "locale_code": "ko|en"
-  /// }
-  /// ```
-  ///
-  /// 응답(성공 시) 예시:
-  /// ```json
-  /// {
-  ///   "ok": true,
-  ///   "meal_date": "2026-04-19",
-  ///   "meal_slot": "brunch",
-  ///   "result_type": "good|supplement_needed|bad|uncertain",
-  ///   "feedback_text": "문자열 또는 null",
-  ///   "affection_gain": 5,
-  ///   "next_affection": 23
-  /// }
-  /// ```
+  /// 응답 status: completed | retry_allowed | blocked
+  /// result_type: perfect | good | bad | uncertain
   Future<Map<String, dynamic>?> _invokeMealEvaluateFunction({
     required String slot,
     required String imagePath,
   }) async {
+    final sw = Stopwatch()..start();
+    debugPrint('meal_photo:edge_function_start');
     try {
       final res = await supabase.functions.invoke(
         _kMealEvaluateFunction,
@@ -16186,69 +16573,169 @@ class _HomePageState extends State<HomePage>
       );
       final data = res.data;
       if (data is Map) {
+        debugPrint(
+          'meal_photo:edge_function_success '
+          'elapsed_ms=${sw.elapsedMilliseconds}',
+        );
         return Map<String, dynamic>.from(data);
       }
-      debugPrint('meal-evaluate unexpected response: $data');
+      // 방어: Map 이 아니라 raw "X" 문자열이 온 경우.
+      if (data is String && data.trim().toUpperCase() == 'X') {
+        debugPrint(
+          'meal_photo:edge_function_success '
+          'elapsed_ms=${sw.elapsedMilliseconds} raw=X',
+        );
+        return <String, dynamic>{
+          'ok': true,
+          'status': 'retry_allowed',
+          'result_type': 'uncertain',
+          'feedback_text': null,
+          'feedback_codes': const <String>[],
+          'affection_gain': 0,
+        };
+      }
+      debugPrint(
+        'meal_photo:edge_function_failed '
+        'elapsed_ms=${sw.elapsedMilliseconds} reason=unexpected_response',
+      );
       return null;
     } catch (e) {
-      debugPrint('meal-evaluate invoke failed: $e');
+      debugPrint(
+        'meal_photo:edge_function_failed '
+        'elapsed_ms=${sw.elapsedMilliseconds} type=${e.runtimeType}',
+      );
       return null;
     }
   }
 
-  /// Edge Function 응답을 UI에 반영한다.
-  /// - meal_logs insert / user_pets.affection update 는 서버에서 처리됐다고 가정한다.
-  /// - 여기서는 로컬 데이터를 재조회하고 감성 메시지만 만들어 보여준다.
-  Future<void> _applyMealEvaluationResult(Map<String, dynamic> result) async {
-    final ok = result['ok'] == true;
+  Future<void> _applyCompletedMealEvaluationResult(
+    Map<String, dynamic> result, {
+    required String slot,
+  }) async {
+    final l10n = AppLocalizations.of(context);
     final resultType = result['result_type']?.toString();
+    final feedbackCodes = resultType == 'perfect' || resultType == 'uncertain'
+        ? const <String>[]
+        : _normalizeMealFeedbackCodes(result['feedback_codes']);
     final feedbackText = result['feedback_text']?.toString();
     final gain =
         (result['affection_gain'] as num?)?.toInt() ??
         _kMealAffectionGainByResult[resultType] ??
         0;
 
-    final localeCode = _isEnglishLocale ? 'en' : 'ko';
-    final statusMessage = ok
-        ? _buildAiStatusMessage(
-            resultType,
-            feedbackText,
-            localeCode: localeCode,
-          )
-        : (_isEnglishLocale
-              ? "We couldn't load the meal result. Please try again later."
-              : '판정 결과를 가져오지 못했어요. 잠시 후 다시 시도해주세요.');
+    _clearMealVerificationAttemptForSlot(slot);
+    _applyMealVerificationAttemptFromResponse(slot, {
+      ...result,
+      'failed_count': 0,
+      'is_blocked': false,
+      'blocked_at': null,
+    });
 
-    // 서버에서 affection 이 갱신되기 전의 단계를 기억해 둔다.
+    final statusMessage = _buildAiStatusMessage(
+      resultType: resultType,
+      feedbackCodes: feedbackCodes,
+      feedbackText: feedbackText,
+      l10n: l10n,
+      isEnglish: _isEnglishLocale,
+    );
+
     final beforeStage = _activePet?['stage']?.toString();
-
-    await Future.wait([_fetchTodayMealLogs(), _fetchActivePet()]);
+    await Future.wait([
+      _fetchTodayMealLogs(),
+      _fetchActivePet(),
+      _fetchTodayMealVerificationAttempts(),
+    ]);
 
     if (!mounted) return;
-    setState(() {
+    _safeSetState(() {
       _lastResultType = resultType;
       _lastFeedbackText = feedbackText;
       _lastAffectionGain = gain;
       _lastStatusMessage = statusMessage;
     });
-
     _showSnack(statusMessage);
 
-    // 서버(Edge Function)가 affection 만 올리고 stage 는 갱신하지 않을 수 있으므로,
-    // 클라이언트에서 affection 기준으로 stage 를 동기화한다.
-    if (ok && gain > 0 && !_isCurrentPetMature()) {
+    if (gain > 0 && !_isCurrentPetMature()) {
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     }
-
-    if (ok && (gain == 3 || gain == 5)) {
+    if (gain == 3 || gain == 5) {
       _triggerPetKneadingIfApplicable(gain);
     }
+  }
+
+  Future<void> _applyRetryAllowedMealEvaluationResult(
+    Map<String, dynamic> result, {
+    required String slot,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    _applyMealVerificationAttemptFromResponse(slot, result);
+    await _fetchTodayMealVerificationAttempts();
+
+    if (!mounted) return;
+    _safeSetState(() {
+      _lastResultType = 'uncertain';
+      _lastFeedbackText = null;
+      _lastAffectionGain = 0;
+      _lastImagePath = null;
+      _lastStatusMessage = l10n.mealRecognitionRetryMessage;
+    });
+    _showSnack(l10n.mealRecognitionRetryMessage);
+  }
+
+  Future<void> _applyBlockedMealEvaluationResult(
+    Map<String, dynamic> result, {
+    required String slot,
+  }) async {
+    _applyMealVerificationAttemptFromResponse(slot, {
+      ...result,
+      'failed_count': (result['failed_count'] as num?)?.toInt() ?? 4,
+      'is_blocked': true,
+    });
+    await _fetchTodayMealVerificationAttempts();
+
+    if (!mounted) return;
+    _safeSetState(() {
+      _lastResultType = 'uncertain';
+      _lastFeedbackText = null;
+      _lastAffectionGain = 0;
+      _lastImagePath = null;
+      _lastStatusMessage = null;
+    });
+    await _showMealVerificationLimitNotice();
+  }
+
+  Future<void> _showMealVerificationLimitNotice() async {
+    await _showYardNotice(
+      isOpen: () => _isMealVerificationLimitNoticeOpen,
+      markOpen: () => _isMealVerificationLimitNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideMealVerificationLimitNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isMealVerificationLimitNoticeOpen,
+      markClosed: () => _isMealVerificationLimitNoticeOpen = false,
+    );
+  }
+
+  void _closeMealVerificationLimitNoticeOverlay() {
+    _requestHideYardNotice(
+      isOpen: () => _isMealVerificationLimitNoticeOpen,
+      hide: _hideMealVerificationLimitNotice,
+    );
   }
 
   Future<void> _openMealSheet({bool fromPetBanner = false}) async {
     if (!await _guardAccountAliveBeforeUserAction('open meal panel')) return;
     if (_activePet == null) return;
     if (_handleMaturePetBlockedInteraction()) return;
+
+    // 차단 상태 갱신 실패로 패널 오픈이 막히지 않도록 별도 처리.
+    try {
+      await _fetchTodayMealVerificationAttempts();
+    } catch (e) {
+      debugPrint('meal verify refresh on open failed: ${e.runtimeType}');
+    }
 
     await _waitForUiSettle();
     if (!mounted) return;
@@ -17635,6 +18122,10 @@ class _HomePageState extends State<HomePage>
     }
 
     if (_isAccountLinkSuccessNoticeOpen) {
+      return;
+    }
+
+    if (_isMealVerificationLimitNoticeOpen) {
       return;
     }
 
@@ -19422,6 +19913,7 @@ class _HomePageState extends State<HomePage>
   // 보이는 월의 meal_logs / meal_diary_notes 를 가져와 캐시를 갱신한다.
   // 도장: meal_logs 존재 / ★: current_weight ≤ target_weight.
   Future<void> _fetchDiaryMonthLogs(DateTime month) async {
+    final generation = _userDataGeneration;
     final user = supabase.auth.currentUser;
     if (user == null) {
       _diaryLogsByDate = {};
@@ -19429,6 +19921,7 @@ class _HomePageState extends State<HomePage>
       _diaryLogsCachedMonthKey = null;
       return;
     }
+    final requestedUserId = user.id;
     final start = _dateKey(_monthStart(month));
     final end = _dateKey(_monthEnd(month));
     try {
@@ -19438,16 +19931,25 @@ class _HomePageState extends State<HomePage>
             .select(
               'id, user_id, user_pet_id, meal_date, meal_slot, result_type, affection_gain, image_path, memo, captured_at, created_at',
             )
-            .eq('user_id', user.id)
+            .eq('user_id', requestedUserId)
             .gte('meal_date', start)
             .lte('meal_date', end),
         supabase
             .from('meal_diary_notes')
             .select('diary_date, current_weight_kg')
-            .eq('user_id', user.id)
+            .eq('user_id', requestedUserId)
             .gte('diary_date', start)
             .lte('diary_date', end),
       ]);
+
+      if (generation != _userDataGeneration) {
+        debugPrint('stale _fetchDiaryMonthLogs ignored (generation)');
+        return;
+      }
+      if (requestedUserId != supabase.auth.currentUser?.id) {
+        debugPrint('stale _fetchDiaryMonthLogs ignored (user changed)');
+        return;
+      }
 
       final logRows = (results[0] as List)
           .whereType<Map>()
@@ -19478,6 +19980,8 @@ class _HomePageState extends State<HomePage>
           '${month.year}-${month.month.toString().padLeft(2, '0')}';
     } catch (e) {
       debugPrint('fetch diary month logs failed: $e');
+      if (generation != _userDataGeneration) return;
+      if (requestedUserId != supabase.auth.currentUser?.id) return;
       _diaryLogsByDate = {};
       _diaryCurrentWeightByDate = {};
       _diaryLogsCachedMonthKey = null;

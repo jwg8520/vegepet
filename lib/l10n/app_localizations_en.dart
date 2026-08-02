@@ -878,4 +878,93 @@ class AppLocalizationsEn extends AppLocalizations {
   String snackPetFetchFailed(String error) {
     return 'Failed to load pet info: $error';
   }
+
+  @override
+  String get mealPerfectMessage1 =>
+      'VegePet looks happy after such a healthy meal!';
+
+  @override
+  String get mealPerfectMessage2 =>
+      'VegePet enjoyed a well-balanced meal! Let’s keep it up.';
+
+  @override
+  String mealGoodFeedbackMessage1(String feedback) {
+    return 'VegePet enjoyed the meal! Next time, try adjusting it with $feedback in mind.';
+  }
+
+  @override
+  String mealGoodFeedbackMessage2(String feedback) {
+    return 'VegePet seems happy! A meal with $feedback in mind could be even better next time.';
+  }
+
+  @override
+  String get mealGoodFallbackMessage =>
+      'VegePet enjoyed the meal! A little more balance next time would make it even better.';
+
+  @override
+  String mealBadFeedbackMessage1(String feedback) {
+    return 'This meal seems a little unbalanced. Next time, try adjusting it with $feedback in mind.';
+  }
+
+  @override
+  String mealBadFeedbackMessage2(String feedback) {
+    return 'VegePet ate the meal, but it could be better balanced. Keep $feedback in mind next time.';
+  }
+
+  @override
+  String get mealBadFallbackMessage =>
+      'VegePet ate the meal, but a more balanced meal would be better next time.';
+
+  @override
+  String get mealRecognitionRetryMessage =>
+      'We couldn’t recognize the meal. Please try again.';
+
+  @override
+  String get mealResultPerfectLabel => 'Perfect';
+
+  @override
+  String get mealResultGoodLabel => 'Good';
+
+  @override
+  String get mealResultBadLabel => 'Needs improvement';
+
+  @override
+  String get mealResultUncertainLabel => 'Recognition failed';
+
+  @override
+  String get mealVerificationLimitTitle => 'Verification limit reached';
+
+  @override
+  String get mealVerificationLimitBody =>
+      'Sorry, you’ve reached the maximum number of attempts for this meal. Please try again at the next meal.';
+
+  @override
+  String get mealVerificationLimitConfirm => 'OK';
+
+  @override
+  String get mealVerificationUnavailable => 'Unavailable';
+
+  @override
+  String get mealFeedbackProteinUp => 'more protein';
+
+  @override
+  String get mealFeedbackProteinDown => 'less protein';
+
+  @override
+  String get mealFeedbackCarbohydratesUp => 'more carbohydrates';
+
+  @override
+  String get mealFeedbackCarbohydratesDown => 'a smaller carbohydrate portion';
+
+  @override
+  String get mealFeedbackFatUp => 'more healthy fats';
+
+  @override
+  String get mealFeedbackFatDown => 'less fat';
+
+  @override
+  String get mealFeedbackDietaryFiberUp => 'more dietary fiber';
+
+  @override
+  String get mealFeedbackDietaryFiberDown => 'less dietary fiber';
 }

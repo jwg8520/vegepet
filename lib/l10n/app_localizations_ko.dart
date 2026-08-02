@@ -845,4 +845,89 @@ class AppLocalizationsKo extends AppLocalizations {
   String snackPetFetchFailed(String error) {
     return '펫 정보를 불러올 수 없어요: $error';
   }
+
+  @override
+  String get mealPerfectMessage1 => '건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!';
+
+  @override
+  String get mealPerfectMessage2 => '베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!';
+
+  @override
+  String mealGoodFeedbackMessage1(String feedback) {
+    return '베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 $feedback를 반영한 음식을 줘보는 것이 어떨까?!';
+  }
+
+  @override
+  String mealGoodFeedbackMessage2(String feedback) {
+    return '나름 기분이 좋아 보인다! 다음에는 $feedback를 반영한 음식을 줘보자!';
+  }
+
+  @override
+  String get mealGoodFallbackMessage =>
+      '베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보자!';
+
+  @override
+  String mealBadFeedbackMessage1(String feedback) {
+    return '기운이 빠지는 식사인 것 같다. 다음에는 $feedback를 반영한 음식을 줘보자!';
+  }
+
+  @override
+  String mealBadFeedbackMessage2(String feedback) {
+    return '다소 만족스럽지 않은 식사인 것 같다. 다음에는 $feedback를 반영한 음식을 줘보자!';
+  }
+
+  @override
+  String get mealBadFallbackMessage => '베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보자!';
+
+  @override
+  String get mealRecognitionRetryMessage => '식단 인식을 실패했습니다. 다시 시도해주세요.';
+
+  @override
+  String get mealResultPerfectLabel => '완벽';
+
+  @override
+  String get mealResultGoodLabel => '좋음';
+
+  @override
+  String get mealResultBadLabel => '아쉬움';
+
+  @override
+  String get mealResultUncertainLabel => '인식 실패';
+
+  @override
+  String get mealVerificationLimitTitle => '인증 횟수 초과';
+
+  @override
+  String get mealVerificationLimitBody =>
+      '죄송해요. 인증 가능 횟수를 초과했어요. 다음 식단 인증을 이용해주세요!';
+
+  @override
+  String get mealVerificationLimitConfirm => '확인';
+
+  @override
+  String get mealVerificationUnavailable => '인증 불가';
+
+  @override
+  String get mealFeedbackProteinUp => '단백질 높이기';
+
+  @override
+  String get mealFeedbackProteinDown => '단백질 줄이기';
+
+  @override
+  String get mealFeedbackCarbohydratesUp => '탄수화물 높이기';
+
+  @override
+  String get mealFeedbackCarbohydratesDown => '탄수화물 줄이기';
+
+  @override
+  String get mealFeedbackFatUp => '지방 높이기';
+
+  @override
+  String get mealFeedbackFatDown => '지방 줄이기';
+
+  @override
+  String get mealFeedbackDietaryFiberUp => '식이섬유 높이기';
+
+  @override
+  String get mealFeedbackDietaryFiberDown => '식이섬유 줄이기';
 }

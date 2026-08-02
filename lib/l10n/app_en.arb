@@ -286,5 +286,50 @@
   "snackPlayedTodayAlready": "You already played with your VegePet today.",
   "snackPettedTodayAlready": "You already petted your VegePet today.",
   "snackPetFetchFailed": "Failed to load pet info: {error}",
-  "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}}
+  "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
+  "mealPerfectMessage1": "VegePet looks happy after such a healthy meal!",
+  "mealPerfectMessage2": "VegePet enjoyed a well-balanced meal! Let’s keep it up.",
+  "mealGoodFeedbackMessage1": "VegePet enjoyed the meal! Next time, try adjusting it with {feedback} in mind.",
+  "@mealGoodFeedbackMessage1": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealGoodFeedbackMessage2": "VegePet seems happy! A meal with {feedback} in mind could be even better next time.",
+  "@mealGoodFeedbackMessage2": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealGoodFallbackMessage": "VegePet enjoyed the meal! A little more balance next time would make it even better.",
+  "mealBadFeedbackMessage1": "This meal seems a little unbalanced. Next time, try adjusting it with {feedback} in mind.",
+  "@mealBadFeedbackMessage1": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealBadFeedbackMessage2": "VegePet ate the meal, but it could be better balanced. Keep {feedback} in mind next time.",
+  "@mealBadFeedbackMessage2": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealBadFallbackMessage": "VegePet ate the meal, but a more balanced meal would be better next time.",
+  "mealRecognitionRetryMessage": "We couldn’t recognize the meal. Please try again.",
+  "mealResultPerfectLabel": "Perfect",
+  "mealResultGoodLabel": "Good",
+  "mealResultBadLabel": "Needs improvement",
+  "mealResultUncertainLabel": "Recognition failed",
+  "mealVerificationLimitTitle": "Verification limit reached",
+  "mealVerificationLimitBody": "Sorry, you’ve reached the maximum number of attempts for this meal. Please try again at the next meal.",
+  "mealVerificationLimitConfirm": "OK",
+  "mealVerificationUnavailable": "Unavailable",
+  "mealFeedbackProteinUp": "more protein",
+  "mealFeedbackProteinDown": "less protein",
+  "mealFeedbackCarbohydratesUp": "more carbohydrates",
+  "mealFeedbackCarbohydratesDown": "a smaller carbohydrate portion",
+  "mealFeedbackFatUp": "more healthy fats",
+  "mealFeedbackFatDown": "less fat",
+  "mealFeedbackDietaryFiberUp": "more dietary fiber",
+  "mealFeedbackDietaryFiberDown": "less dietary fiber"
 }
