@@ -896,6 +896,9 @@ class _HomePageState extends State<HomePage>
   /// 식단 인증 횟수 초과 안내 (240×116 · 마당 좌표계).
   bool _isMealVerificationLimitNoticeOpen = false;
 
+  /// 식단 인식 실패(retry_allowed) 안내 (240×116 · 마당 좌표계).
+  bool _isMealRecognitionFailureNoticeOpen = false;
+
   /// 설정 > 계정 행 탭 시 연동 계정 주소 안내 (240×116 · 마당 좌표계).
   bool _isLinkedAccountAddressNoticeOpen = false;
 
@@ -9167,6 +9170,7 @@ class _HomePageState extends State<HomePage>
     _isProfileSelectMissingNoticeOpen = false;
     _isAccountLinkInviteNoticeOpen = false;
     _isAccountLinkSuccessNoticeOpen = false;
+    _isMealRecognitionFailureNoticeOpen = false;
     _isMealVerificationLimitNoticeOpen = false;
     _isLinkedAccountAddressNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
@@ -9801,6 +9805,7 @@ class _HomePageState extends State<HomePage>
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildAccountLinkInviteNoticeGlobalOverlay(),
         _buildAccountLinkSuccessNoticeGlobalOverlay(),
+        _buildMealRecognitionFailureNoticeGlobalOverlay(),
         _buildMealVerificationLimitNoticeGlobalOverlay(),
         _buildLinkedAccountAddressNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
@@ -10254,6 +10259,22 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildMealRecognitionFailureNoticeGlobalOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      VegePetNoticeConfig(
+        isOpen: _isMealRecognitionFailureNoticeOpen,
+        title: l10n.mealRecognitionFailureTitle,
+        body: l10n.mealRecognitionFailureBody,
+        primaryLabel: l10n.mealRecognitionFailureConfirm,
+        onPrimaryTap: _closeMealRecognitionFailureNoticeOverlay,
+        outsideDismissible: false,
+        bodyMaxLines: 2,
+        bodyOverflow: TextOverflow.clip,
+      ),
+    );
+  }
+
   Widget _buildMealVerificationLimitNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
     return _buildVegePetOneButtonNoticeOverlay(
@@ -10448,6 +10469,7 @@ class _HomePageState extends State<HomePage>
       _isNameInterlockNoticeOpen = false;
       _isAccountLinkInviteNoticeOpen = false;
       _isAccountLinkSuccessNoticeOpen = false;
+      _isMealRecognitionFailureNoticeOpen = false;
       _isMealVerificationLimitNoticeOpen = false;
       _isLinkedAccountAddressNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
@@ -11574,6 +11596,7 @@ class _HomePageState extends State<HomePage>
         _isWithdrawFinalConfirmOpen ||
         _isAccountLinkInviteNoticeOpen ||
         _isAccountLinkSuccessNoticeOpen ||
+        _isMealRecognitionFailureNoticeOpen ||
         _isMealVerificationLimitNoticeOpen;
   }
 
@@ -16439,6 +16462,14 @@ class _HomePageState extends State<HomePage>
 
       if (retryAllowed) {
         await _applyRetryAllowedMealEvaluationResult(result, slot: slot);
+        if (mounted) {
+          // 알림 표시 전에 busy 해제 → 확인 후 즉시 재촬영 가능.
+          _safeSetState(() {
+            _isUploadingMeal = false;
+            _uploadingSlot = null;
+          });
+          await _showMealRecognitionFailureNotice();
+        }
         debugPrint(
           'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
         );
@@ -16446,7 +16477,16 @@ class _HomePageState extends State<HomePage>
       }
 
       if (blocked) {
+        // 인식 실패 알림과 인증 횟수 초과 알림을 동시에 띄우지 않는다.
+        _isMealRecognitionFailureNoticeOpen = false;
         await _applyBlockedMealEvaluationResult(result, slot: slot);
+        if (mounted) {
+          _safeSetState(() {
+            _isUploadingMeal = false;
+            _uploadingSlot = null;
+          });
+          await _showMealVerificationLimitNotice();
+        }
         debugPrint(
           'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
         );
@@ -16677,9 +16717,9 @@ class _HomePageState extends State<HomePage>
       _lastFeedbackText = null;
       _lastAffectionGain = 0;
       _lastImagePath = null;
-      _lastStatusMessage = l10n.mealRecognitionRetryMessage;
+      _lastStatusMessage = l10n.mealRecognitionFailureBody;
     });
-    _showSnack(l10n.mealRecognitionRetryMessage);
+    // SnackBar 대신 공통 알림창은 호출부에서 표시한다.
   }
 
   Future<void> _applyBlockedMealEvaluationResult(
@@ -16701,7 +16741,28 @@ class _HomePageState extends State<HomePage>
       _lastImagePath = null;
       _lastStatusMessage = null;
     });
-    await _showMealVerificationLimitNotice();
+    // 인증 횟수 초과 알림은 호출부에서만 표시한다(인식 실패 알림과 중복 방지).
+  }
+
+  Future<void> _showMealRecognitionFailureNotice() async {
+    await _showYardNotice(
+      isOpen: () => _isMealRecognitionFailureNoticeOpen,
+      markOpen: () => _isMealRecognitionFailureNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideMealRecognitionFailureNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isMealRecognitionFailureNoticeOpen,
+      markClosed: () => _isMealRecognitionFailureNoticeOpen = false,
+    );
+  }
+
+  void _closeMealRecognitionFailureNoticeOverlay() {
+    _requestHideYardNotice(
+      isOpen: () => _isMealRecognitionFailureNoticeOpen,
+      hide: _hideMealRecognitionFailureNotice,
+    );
   }
 
   Future<void> _showMealVerificationLimitNotice() async {
@@ -18122,6 +18183,10 @@ class _HomePageState extends State<HomePage>
     }
 
     if (_isAccountLinkSuccessNoticeOpen) {
+      return;
+    }
+
+    if (_isMealRecognitionFailureNoticeOpen) {
       return;
     }
 

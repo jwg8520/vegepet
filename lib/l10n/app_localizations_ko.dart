@@ -883,6 +883,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get mealRecognitionRetryMessage => '식단 인식을 실패했습니다. 다시 시도해주세요.';
 
   @override
+  String get mealRecognitionFailureTitle => '인식 실패';
+
+  @override
+  String get mealRecognitionFailureBody => '식단 인식을 실패했습니다. 다시 시도해주세요.';
+
+  @override
+  String get mealRecognitionFailureConfirm => '확인';
+
+  @override
   String get mealResultPerfectLabel => '완벽';
 
   @override

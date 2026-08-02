@@ -1736,6 +1736,24 @@ abstract class AppLocalizations {
   /// **'식단 인식을 실패했습니다. 다시 시도해주세요.'**
   String get mealRecognitionRetryMessage;
 
+  /// No description provided for @mealRecognitionFailureTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'인식 실패'**
+  String get mealRecognitionFailureTitle;
+
+  /// No description provided for @mealRecognitionFailureBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 인식을 실패했습니다. 다시 시도해주세요.'**
+  String get mealRecognitionFailureBody;
+
+  /// No description provided for @mealRecognitionFailureConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'확인'**
+  String get mealRecognitionFailureConfirm;
+
   /// No description provided for @mealResultPerfectLabel.
   ///
   /// In ko, this message translates to:

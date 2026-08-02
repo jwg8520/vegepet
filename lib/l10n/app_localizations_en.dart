@@ -920,6 +920,16 @@ class AppLocalizationsEn extends AppLocalizations {
       'We couldn’t recognize the meal. Please try again.';
 
   @override
+  String get mealRecognitionFailureTitle => 'Recognition failed';
+
+  @override
+  String get mealRecognitionFailureBody =>
+      'We couldn’t recognize the meal. Please try again.';
+
+  @override
+  String get mealRecognitionFailureConfirm => 'OK';
+
+  @override
   String get mealResultPerfectLabel => 'Perfect';
 
   @override
