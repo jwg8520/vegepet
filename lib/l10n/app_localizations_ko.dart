@@ -626,21 +626,20 @@ class AppLocalizationsKo extends AppLocalizations {
   String get accountLinkSuccessConfirm => '확인';
 
   @override
-  String get linkedAccountInUseTitle => '이미 사용 중인 계정이에요';
+  String get accountAddressTitle => '계정 주소';
 
   @override
-  String get linkedAccountInUseBody =>
-      '이 Google 계정은 이미 다른 베지펫 계정에 연동되어 있어요. 기존 계정 불러오기는 별도 로그인 화면에서 진행해주세요.';
+  String get accountAddressUnavailable => '이메일 주소를 확인할 수 없어요.';
 
   @override
-  String get linkedAccountInUseConfirm => '확인';
+  String get accountAddressConfirm => '확인';
 
   @override
-  String get remoteAccountLinkedLogoutTitle => '⚠️계정 연동 감지';
+  String get remoteAccountLinkedLogoutTitle => '계정 로그인 감지';
 
   @override
   String get remoteAccountLinkedLogoutBody =>
-      '사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.';
+      '다른 기기에서 계정 로그인이 감지되었어요. 이 기기에서는 로그아웃됩니다.';
 
   @override
   String get remoteAccountLinkedLogoutConfirm => '확인';

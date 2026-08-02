@@ -651,22 +651,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get accountLinkSuccessConfirm => 'OK';
 
   @override
-  String get linkedAccountInUseTitle => 'Account already in use';
+  String get accountAddressTitle => 'Account address';
 
   @override
-  String get linkedAccountInUseBody =>
-      'This Google account is already linked to another VegePet account. Use the account recovery sign-in flow to load that account.';
+  String get accountAddressUnavailable => 'Email address unavailable.';
 
   @override
-  String get linkedAccountInUseConfirm => 'OK';
+  String get accountAddressConfirm => 'OK';
 
   @override
-  String get remoteAccountLinkedLogoutTitle =>
-      '⚠️ Account Linked on Another Device';
+  String get remoteAccountLinkedLogoutTitle => 'Account sign-in detected';
 
   @override
   String get remoteAccountLinkedLogoutBody =>
-      'Your account was linked on another device. This app will sign out and restart in Guest Mode.';
+      'A sign-in was detected on another device. You’ll be signed out on this device.';
 
   @override
   String get remoteAccountLinkedLogoutConfirm => 'OK';

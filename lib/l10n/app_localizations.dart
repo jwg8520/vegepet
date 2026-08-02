@@ -1310,34 +1310,34 @@ abstract class AppLocalizations {
   /// **'확인'**
   String get accountLinkSuccessConfirm;
 
-  /// No description provided for @linkedAccountInUseTitle.
+  /// No description provided for @accountAddressTitle.
   ///
   /// In ko, this message translates to:
-  /// **'이미 사용 중인 계정이에요'**
-  String get linkedAccountInUseTitle;
+  /// **'계정 주소'**
+  String get accountAddressTitle;
 
-  /// No description provided for @linkedAccountInUseBody.
+  /// No description provided for @accountAddressUnavailable.
   ///
   /// In ko, this message translates to:
-  /// **'이 Google 계정은 이미 다른 베지펫 계정에 연동되어 있어요. 기존 계정 불러오기는 별도 로그인 화면에서 진행해주세요.'**
-  String get linkedAccountInUseBody;
+  /// **'이메일 주소를 확인할 수 없어요.'**
+  String get accountAddressUnavailable;
 
-  /// No description provided for @linkedAccountInUseConfirm.
+  /// No description provided for @accountAddressConfirm.
   ///
   /// In ko, this message translates to:
   /// **'확인'**
-  String get linkedAccountInUseConfirm;
+  String get accountAddressConfirm;
 
   /// No description provided for @remoteAccountLinkedLogoutTitle.
   ///
   /// In ko, this message translates to:
-  /// **'⚠️계정 연동 감지'**
+  /// **'계정 로그인 감지'**
   String get remoteAccountLinkedLogoutTitle;
 
   /// No description provided for @remoteAccountLinkedLogoutBody.
   ///
   /// In ko, this message translates to:
-  /// **'사용자의 계정이 다른 기기에 연동 되었습니다. 로그아웃을 진행합니다.'**
+  /// **'다른 기기에서 계정 로그인이 감지되었어요. 이 기기에서는 로그아웃됩니다.'**
   String get remoteAccountLinkedLogoutBody;
 
   /// No description provided for @remoteAccountLinkedLogoutConfirm.

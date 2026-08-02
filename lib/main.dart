@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -78,6 +78,33 @@ const List<String> _kGoogleAuthScopes = <String>['openid', 'email', 'profile'];
 /// `profiles.account_type` 은 표시용 상태이고, 실제 판정은 Auth identities 를
 /// 우선 기준으로 삼는다.
 enum _LinkedAccountProvider { none, google, apple }
+
+/// Google/Apple 네이티브 인증 결과의 공통 표현.
+///
+/// Google 은 [accessToken] 을, Apple 은 [rawNonce] 를 함께 전달한다.
+/// [idToken] / [accessToken] / [rawNonce] / [email] 원문은 로그로 남기지 않는다.
+class _ExternalAuthCredential {
+  const _ExternalAuthCredential({
+    required this.provider,
+    required this.idToken,
+    this.accessToken,
+    this.rawNonce,
+    this.email,
+  });
+
+  final _LinkedAccountProvider provider;
+  final String idToken;
+  final String? accessToken;
+  final String? rawNonce;
+  final String? email;
+
+  bool get isApple => provider == _LinkedAccountProvider.apple;
+
+  String get providerKey => isApple ? 'apple' : 'google';
+
+  OAuthProvider get oauthProvider =>
+      isApple ? OAuthProvider.apple : OAuthProvider.google;
+}
 
 // ============================================================================
 // 식단 사진 업로드 + AI 판정 구조 (Edge Function 연동 준비)
@@ -345,6 +372,13 @@ final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 const String _kLocalePrefKey = 'vegepet_locale_code';
+
+/// 앱 설치 단위 기기 식별자(진단·확장용). 사용자 UUID/이메일을 담지 않는다.
+const String _kDeviceIdPrefKey = 'vegepet_device_id';
+
+/// 이 기기의 현재 활성 로그인 세션 식별자. 단일 활성 기기 판정 기준값이다.
+/// 토큰·사용자 UUID 를 사용하지 않는 순수 랜덤 값이다.
+const String _kActiveSessionIdPrefKey = 'vegepet_active_session_id';
 
 class VegePetApp extends StatefulWidget {
   const VegePetApp({super.key});
@@ -774,8 +808,11 @@ class _HomePageState extends State<HomePage>
   /// 계정 연동 성공 직후 안내 (240×116 · 마당 좌표계).
   bool _isAccountLinkSuccessNoticeOpen = false;
 
-  /// 선택한 Google 계정이 이미 다른 베지펫 계정에 연동된 경우 (240×116).
-  bool _isLinkedAccountInUseNoticeOpen = false;
+  /// 설정 > 계정 행 탭 시 연동 계정 주소 안내 (240×116 · 마당 좌표계).
+  bool _isLinkedAccountAddressNoticeOpen = false;
+
+  /// 계정 주소 알림창에 표시할 연동 이메일 캐시. 전체 값은 로그로 남기지 않는다.
+  String? _linkedAccountEmail;
 
   /// 도감 등록 펫과 동일한 이름으로 분양 펫 이름 저장 시도 시 (240×116 · 마당 좌표계).
   bool _isDuplicatePetNameNoticeOpen = false;
@@ -786,9 +823,16 @@ class _HomePageState extends State<HomePage>
   /// 도감 완성 후 랜덤 분양권 사용 안내 (240×116 · 마당 좌표계).
   bool _isPokedexCompleteTicketNoticeOpen = false;
 
-  /// 다른 기기에서 동일 계정 연동 시 기존 기기 로그아웃 안내 (240×116).
+  /// 같은 계정이 다른 기기에서 로그인되었을 때의 강제 로그아웃 안내 (240×116).
   bool _isRemoteAccountLinkedLogoutNoticeOpen = false;
   bool _isResettingToGuestAfterRemoteLogout = false;
+
+  /// 이 기기의 활성 로그인 세션 식별자 (SharedPreferences 캐시).
+  String? _localActiveSessionId;
+
+  /// profiles.active_session_id 를 이 기기 값으로 쓰는 중.
+  /// 자기 자신의 갱신을 "다른 기기 로그인"으로 오인하지 않도록 감지를 멈춘다.
+  bool _isRegisteringActiveSession = false;
 
   /// 다른 기기에서의 회원탈퇴/Auth user 삭제로 인해 현재 기기 세션이
   /// stale 상태가 되었을 때, 새 게스트로 안전하게 초기화하는 흐름의 재진입을
@@ -961,10 +1005,9 @@ class _HomePageState extends State<HomePage>
   static const double _kSettingsGrayRowW = 212;
   static const double _kSettingsGrayRowH = 22;
 
-  /// 계정 연동(Google/Apple) 글래스 패널 (844×390 마당 기준).
+  /// Google/Apple 계정 인증 패널 좌표 (844×390 마당 기준).
   ///
-  /// 기존 이메일 OTP 패널과 같은 left/top/width 를 유지하고, 높이만 새 콘텐츠
-  /// (버튼 2개 + 안내 문구 2줄) 기준 최소 범위로 조정한다.
+  /// 높이는 콘텐츠(버튼 2개 + 안내 문구 2줄) 기준 최소 범위로 맞춘다.
   static const double _kAccountLinkPanelLeft = 567;
   static const double _kAccountLinkPanelTop = 88;
   static const double _kAccountLinkPanelW = 230;
@@ -1015,8 +1058,8 @@ class _HomePageState extends State<HomePage>
         ),
       ],
     );
-    // 계정 연동은 Google/Apple 네이티브 SDK 로만 진행하므로 이메일/인증코드
-    // 입력 필드와 keyboard accessory binding 은 더 이상 필요하지 않다.
+    // 계정 인증은 Google/Apple 네이티브 SDK 로만 진행한다.
+    // 텍스트 입력이 없으므로 계정 패널용 keyboard accessory binding 도 없다.
     _petToySwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -1202,7 +1245,7 @@ class _HomePageState extends State<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_checkDeletedAccountAndResetIfNeeded('app resumed'));
+      unawaited(_checkAccountHealthOnResume());
     }
   }
 
@@ -1252,10 +1295,10 @@ class _HomePageState extends State<HomePage>
   /// 프로필 form controller/select 값을 [_profile] 기준으로 동기화한다.
   ///
   /// 일반 bootstrap/일반 reload 흐름에서는 [force]=false 로 호출하여 사용자가
-  /// 입력 중인 값을 덮어쓰지 않게 한다. 다만 중복 이메일 인증 완료 등으로
-  /// Auth 세션 자체가 다른 계정으로 전환된 직후에는 반드시 [force]=true 로
-  /// 호출해 이전 guest 단계에서 입력된 값(텅 비어 있지는 않지만 stale 한 값)을
-  /// 새 계정 profile 값으로 강제 덮어써야 한다.
+  /// 입력 중인 값을 덮어쓰지 않게 한다. 다만 기존 계정 로그인 등으로 Auth 세션
+  /// 자체가 다른 계정으로 전환된 직후에는 반드시 [force]=true 로 호출해 이전
+  /// guest 단계에서 입력된 값(텅 비어 있지는 않지만 stale 한 값)을 새 계정
+  /// profile 값으로 강제 덮어써야 한다.
   void _syncProfileFormFromFetched({bool force = false}) {
     final p = _profile;
     if (p == null) return;
@@ -1388,7 +1431,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 회원탈퇴·stale session reset 직후 새 anonymous guest 프로필 입력창을 즉시 확정한다.
-  /// (이메일 복구·기존 계정 reload 흐름에서는 사용하지 않는다.)
+  /// (기존 계정 로그인 후 데이터 reload 흐름에서는 사용하지 않는다.)
   void _forceFreshGuestProfileSetupState() {
     _instantCloseYardConfirmOverlays();
     _invalidateUserScopedAsyncWork(reason: 'forceFreshGuestProfileSetup');
@@ -1513,6 +1556,7 @@ class _HomePageState extends State<HomePage>
   /// 실패해도 throw하지 않으며, UI fresh guest 상태는 유지한다.
   Future<void> _ensureAnonymousSessionAfterFreshGuestReset() async {
     try {
+      await _clearLocalActiveSessionId();
       try {
         await supabase.auth.signOut().timeout(const Duration(seconds: 5));
       } catch (e) {
@@ -2163,6 +2207,7 @@ class _HomePageState extends State<HomePage>
       _applyPostFetchUiState();
       _ensureFreshGuestProfileSetupVisible();
       _syncAccountDeletionWatchForCurrentSession();
+      unawaited(_checkRemoteActiveSessionOwnership('bootstrap'));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(_bootstrapOptionalServices());
@@ -2323,6 +2368,8 @@ class _HomePageState extends State<HomePage>
   void _resetLinkedAccountProviderCache() {
     _linkedAccountProvider = _LinkedAccountProvider.none;
     _linkedAccountProviderReady = false;
+    _linkedAccountEmail = null;
+    _isLinkedAccountAddressNoticeOpen = false;
   }
 
   /// 실제 연동 provider.
@@ -2382,8 +2429,10 @@ class _HomePageState extends State<HomePage>
     return e.toString();
   }
 
-  /// 선택한 provider identity 가 이미 다른 Supabase 사용자에게 연결된 경우.
-  bool _isIdentityAlreadyLinkedError(Object e) {
+  /// 선택한 provider identity 가 이미 다른 Supabase 사용자 소유인 경우.
+  ///
+  /// 실패가 아니라 "기존 계정 로그인"(`signInWithIdToken`) 분기 신호로 쓴다.
+  bool _isIdentityOwnedByExistingUserError(Object e) {
     final message = _formatAuthError(e).toLowerCase();
     return message.contains('already') ||
         message.contains('exists') ||
@@ -2393,27 +2442,77 @@ class _HomePageState extends State<HomePage>
         message.contains('unique');
   }
 
-  Future<void> _showLinkedAccountInUseNotice() async {
-    // 계정 연동 흐름 중: 다른 yard 알림을 닫지 않는다.
+  /// 설정 > 계정 행 탭 시 연동 이메일을 확인하고 계정 주소 알림창을 연다.
+  Future<void> _openLinkedAccountAddressNotice() async {
+    if (_isLinkedAccountAddressNoticeOpen) return;
+    if (_isRemoteAccountLinkedLogoutNoticeOpen) return;
+    if (!_hasAnyLinkedAccount()) return;
+
+    final email = await _resolveLinkedAccountEmailForDisplay();
+    if (!mounted) return;
+    _linkedAccountEmail = email;
+    debugPrint(
+      'account_address_notice:shown account_email:present=${email != null}',
+    );
     await _showYardNotice(
-      isOpen: () => _isLinkedAccountInUseNoticeOpen,
-      markOpen: () => _isLinkedAccountInUseNoticeOpen = true,
-      instantCloseOtherYardNotices: false,
+      isOpen: () => _isLinkedAccountAddressNoticeOpen,
+      markOpen: () => _isLinkedAccountAddressNoticeOpen = true,
+      beforeOpenSync: () {
+        // 다른 설정 패널과 중첩되지 않도록 먼저 닫는다.
+        _closeAccountLinkPanel();
+        _isCustomerCenterPanelOpen = false;
+      },
     );
   }
 
-  Future<void> _hideLinkedAccountInUseNotice() async {
+  Future<void> _hideLinkedAccountAddressNotice() async {
     await _hideYardNotice(
-      isOpen: () => _isLinkedAccountInUseNoticeOpen,
-      markClosed: () => _isLinkedAccountInUseNoticeOpen = false,
+      isOpen: () => _isLinkedAccountAddressNoticeOpen,
+      markClosed: () => _isLinkedAccountAddressNoticeOpen = false,
+    );
+    debugPrint('account_address_notice:closed');
+  }
+
+  void _closeLinkedAccountAddressNoticeOverlay() {
+    _requestHideYardNotice(
+      isOpen: () => _isLinkedAccountAddressNoticeOpen,
+      hide: _hideLinkedAccountAddressNotice,
     );
   }
 
-  void _closeLinkedAccountInUseNoticeOverlay() {
-    _requestHideYardNotice(
-      isOpen: () => _isLinkedAccountInUseNoticeOpen,
-      hide: _hideLinkedAccountInUseNotice,
+  /// 연동 계정 이메일 조회 우선순위:
+  /// profiles.email → provider identity email → currentUser.email.
+  ///
+  /// Apple 비공개 릴레이(`@privaterelay.appleid.com`) 주소도 그대로 사용한다.
+  Future<String?> _resolveLinkedAccountEmailForDisplay() async {
+    final stored = _profile?['email']?.toString().trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+
+    final providerKey = _linkedAccountProviderKey(
+      _currentLinkedAccountProvider(),
     );
+    if (providerKey != null) {
+      try {
+        final identities = await supabase.auth.getUserIdentities();
+        final fromIdentity = _emailFromIdentities(identities, providerKey);
+        if (fromIdentity != null && fromIdentity.isNotEmpty) {
+          return fromIdentity;
+        }
+      } catch (e) {
+        debugPrint(
+          'account_address_notice:identity_lookup_failed:'
+          '${_summarizeGoogleLinkError(e)}',
+        );
+      }
+    }
+
+    final authEmail = supabase.auth.currentUser?.email?.trim();
+    if (authEmail != null && authEmail.isNotEmpty) return authEmail;
+
+    // 인증 직후에만 유효한 네이티브 credential email fallback.
+    final cached = _linkedAccountEmail?.trim();
+    if (cached != null && cached.isNotEmpty) return cached;
+    return null;
   }
 
   Future<void> _showRemoteAccountLinkedLogoutNotice() async {
@@ -2423,10 +2522,18 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 추후 백엔드/DB 감지 로직에서 호출할 hook.
+  /// Realtime / health check / resumed 검사에서 다른 기기 로그인을 감지했을 때.
   Future<void> _handleRemoteAccountLinkedDetected() async {
     if (_isRemoteAccountLinkedLogoutNoticeOpen) return;
     if (_isResettingToGuestAfterRemoteLogout) return;
+    if (_isResettingDeletedAccountSession) return;
+    if (_isDeletingAccount) return;
+
+    // 원격 로그인 안내가 다른 알림보다 우선한다.
+    if (_isLinkedAccountAddressNoticeOpen) {
+      _isLinkedAccountAddressNoticeOpen = false;
+    }
+    debugPrint('account_auth:remote_logout_notice:shown');
     await _showRemoteAccountLinkedLogoutNotice();
   }
 
@@ -2438,15 +2545,26 @@ class _HomePageState extends State<HomePage>
     try {
       _dismissFocus();
       _instantCloseYardConfirmOverlays();
+      _unsubscribeProfileDeletionWatch();
 
-      try {
-        await supabase.auth.signOut();
-      } catch (e) {
-        debugPrint('remote logout signOut failed: $e');
-      }
-
+      // Google SDK 는 로컬 signOut 만 한다. disconnect/revokeAccess 금지.
       _resetAccountLinkPanelBusy();
       await _signOutGoogleSdkQuietly();
+
+      // 반드시 local scope. 새로 로그인한 기기의 세션을 끊으면 안 된다.
+      try {
+        await supabase.auth.signOut(scope: SignOutScope.local);
+        debugPrint('account_auth:remote_logout:local_signout');
+      } catch (e) {
+        debugPrint('remote logout local signOut failed: $e');
+      }
+
+      _invalidateUserScopedAsyncWork(reason: 'remoteAccountLogout');
+      _clearUserScopedCaches();
+      _resetLinkedAccountProviderCache();
+      _linkedAccountEmail = null;
+      // 서버 active_session_id 는 새 기기 값이므로 절대 지우지 않는다.
+      await _clearLocalActiveSessionId();
 
       if (!mounted) return;
       _safeSetState(() {
@@ -2511,6 +2629,7 @@ class _HomePageState extends State<HomePage>
         _storyPanelSwapInProgress = false;
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
         _isRemoteAccountLinkedLogoutNoticeOpen = false;
+        _isLinkedAccountAddressNoticeOpen = false;
 
         _selectedSpeciesId = null;
         _clearProfileFormState();
@@ -2533,6 +2652,7 @@ class _HomePageState extends State<HomePage>
       _gameMenuSubOutsideDismissController.value = 0;
 
       await supabase.auth.signInAnonymously();
+      debugPrint('account_auth:fresh_guest:created');
 
       if (!mounted) return;
       _safeSetState(() => _isResettingToGuestAfterRemoteLogout = false);
@@ -2663,17 +2783,202 @@ class _HomePageState extends State<HomePage>
     return !resetStarted;
   }
 
+  /// 회원탈퇴(=Auth user 삭제)와 다른 기기 로그인(=active_session_id 불일치)을
+  /// 순서대로 구분해서 검사한다. 두 상황을 같은 예외로 처리하지 않는다.
+  Future<void> _checkAccountHealth(String reason) async {
+    final resetStarted = await _checkDeletedAccountAndResetIfNeeded(reason);
+    if (resetStarted) return;
+    await _checkRemoteActiveSessionOwnership(reason);
+  }
+
+  Future<void> _checkAccountHealthOnResume() async {
+    await _checkAccountHealth('app resumed');
+  }
+
   void _startAccountHealthCheckTimer() {
     _accountHealthCheckTimer?.cancel();
 
     _accountHealthCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!mounted) return;
       if (_isResettingDeletedAccountSession) return;
+      if (_isResettingToGuestAfterRemoteLogout) return;
+      if (_isRemoteAccountLinkedLogoutNoticeOpen) return;
       if (!_isCurrentPermanentAuthSession()) return;
-      unawaited(
-        _checkDeletedAccountAndResetIfNeeded('periodic account health check'),
-      );
+      unawaited(_checkAccountHealth('periodic account health check'));
     });
+  }
+
+  // --------------------------------------------------------------------------
+  // 단일 활성 기기 (profiles.active_session_id)
+  // --------------------------------------------------------------------------
+
+  /// 토큰·UUID 를 포함하지 않는 랜덤 세션 식별자.
+  String _generateRandomIdentifier([int length = 18]) {
+    final random = Random.secure();
+    final values = List<int>.generate(length, (_) => random.nextInt(256));
+    return base64Url.encode(values).replaceAll('=', '');
+  }
+
+  /// 로그·디버깅용 축약. 전체 식별자는 절대 출력하지 않는다.
+  String _shortIdHint(String? value) {
+    if (value == null || value.isEmpty) return 'none';
+    return '${value.substring(0, value.length < 4 ? value.length : 4)}…';
+  }
+
+  /// 설치 단위 기기 식별자. 없으면 생성해 SharedPreferences 에 유지한다.
+  Future<String> _ensureLocalDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kDeviceIdPrefKey);
+    if (saved != null && saved.isNotEmpty) return saved;
+    final generated = _generateRandomIdentifier();
+    await prefs.setString(_kDeviceIdPrefKey, generated);
+    return generated;
+  }
+
+  Future<String?> _loadLocalActiveSessionId() async {
+    if (_localActiveSessionId != null) return _localActiveSessionId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_kActiveSessionIdPrefKey);
+      if (saved != null && saved.isNotEmpty) {
+        _localActiveSessionId = saved;
+      }
+    } catch (e) {
+      debugPrint('load local active session id failed: $e');
+    }
+    return _localActiveSessionId;
+  }
+
+  Future<void> _clearLocalActiveSessionId() async {
+    _localActiveSessionId = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kActiveSessionIdPrefKey);
+    } catch (e) {
+      debugPrint('clear local active session id failed: $e');
+    }
+  }
+
+  /// 이 기기를 계정의 활성 기기로 등록한다.
+  ///
+  /// 등록 실패는 Auth 로그인 실패로 되돌리지 않고 별도 로그만 남긴다.
+  Future<bool> _registerActiveSessionForCurrentUser({
+    required String logProvider,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    debugPrint('account_auth:active_session:register_start');
+    _isRegisteringActiveSession = true;
+    final sessionId = _generateRandomIdentifier();
+
+    try {
+      // device_id 는 진단·확장용으로만 유지한다(활성 기기 판정에는 쓰지 않음).
+      await _ensureLocalDeviceId();
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      final updated = await supabase
+          .from('profiles')
+          .update({
+            'active_session_id': sessionId,
+            'active_session_updated_at': now,
+            'updated_at': now,
+          })
+          .eq('id', user.id)
+          .select();
+
+      final rows = (updated as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (rows.length != 1) {
+        throw StateError('active session update affected ${rows.length} rows');
+      }
+      final row = rows.first;
+      if (row['id']?.toString() != user.id) {
+        throw StateError('active session update id mismatch');
+      }
+      if (row['active_session_id']?.toString() != sessionId) {
+        throw StateError('active session id not persisted');
+      }
+
+      _localActiveSessionId = sessionId;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kActiveSessionIdPrefKey, sessionId);
+      _profile = {...?_profile, ...row};
+
+      debugPrint(
+        'account_auth:active_session:registered '
+        'provider=$logProvider session=${_shortIdHint(sessionId)}',
+      );
+      return true;
+    } catch (e) {
+      debugPrint(
+        'account_auth:active_session:register_failed:'
+        '${_summarizeGoogleLinkError(e)}',
+      );
+      return false;
+    } finally {
+      _isRegisteringActiveSession = false;
+    }
+  }
+
+  /// 서버 active_session_id 가 이 기기 값인지 확인한다.
+  ///
+  /// 불일치하면 다른 기기 로그인으로 판단하고 강제 안내창을 띄운다.
+  /// 회원탈퇴(=row 없음)는 여기서 처리하지 않는다.
+  Future<bool> _checkRemoteActiveSessionOwnership(String reason) async {
+    if (!mounted) return false;
+    if (_isRegisteringActiveSession) return false;
+    if (_isResettingToGuestAfterRemoteLogout) return false;
+    if (_isResettingDeletedAccountSession) return false;
+    if (_isDeletingAccount) return false;
+    if (_isRemoteAccountLinkedLogoutNoticeOpen) return false;
+
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+    if (!_isCurrentPermanentAuthSession()) return false;
+
+    final localSessionId = await _loadLocalActiveSessionId();
+    if (localSessionId == null || localSessionId.isEmpty) {
+      // 이미 연동된 계정인데 이 기기에 세션 식별자가 없다 → 활성 기기로 등록.
+      await _registerActiveSessionForCurrentUser(
+        logProvider:
+            _linkedAccountProviderKey(_currentLinkedAccountProvider()) ??
+            'unknown',
+      );
+      return false;
+    }
+
+    Map<String, dynamic>? row;
+    try {
+      final result = await supabase
+          .from('profiles')
+          .select('active_session_id')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (result != null) row = Map<String, dynamic>.from(result);
+    } catch (e) {
+      debugPrint(
+        'active session ownership check failed ($reason): '
+        '${_summarizeGoogleLinkError(e)}',
+      );
+      return false;
+    }
+
+    // profiles row 자체가 없으면 회원탈퇴 감지 경로가 담당한다.
+    if (row == null) return false;
+
+    final remoteSessionId = row['active_session_id']?.toString();
+    if (remoteSessionId == null || remoteSessionId.isEmpty) return false;
+    if (remoteSessionId == localSessionId) return false;
+
+    debugPrint(
+      'account_auth:active_session:mismatch_detected reason=$reason '
+      'local=${_shortIdHint(localSessionId)} '
+      'remote=${_shortIdHint(remoteSessionId)}',
+    );
+    await _handleRemoteAccountLinkedDetected();
+    return true;
   }
 
   void _syncAccountDeletionWatchForCurrentSession() {
@@ -2714,10 +3019,34 @@ class _HomePageState extends State<HomePage>
           value: user.id,
         ),
         callback: (payload) {
-          debugPrint(
-            'profile delete detected by realtime: ${payload.oldRecord}',
-          );
+          debugPrint('profile delete detected by realtime');
           unawaited(_resetToFreshGuestAfterDeletedAccount());
+        },
+      );
+
+      // 같은 채널에서 active_session_id 변경(=다른 기기 로그인)도 감시한다.
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.update,
+        schema: 'public',
+        table: 'profiles',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'id',
+          value: user.id,
+        ),
+        callback: (payload) {
+          final remoteSessionId = payload.newRecord['active_session_id']
+              ?.toString();
+          if (remoteSessionId == null || remoteSessionId.isEmpty) return;
+          if (_isRegisteringActiveSession) return;
+          final localSessionId = _localActiveSessionId;
+          if (localSessionId == null || localSessionId.isEmpty) return;
+          if (remoteSessionId == localSessionId) return;
+          debugPrint(
+            'account_auth:active_session:mismatch_detected reason=realtime '
+            'remote=${_shortIdHint(remoteSessionId)}',
+          );
+          unawaited(_handleRemoteAccountLinkedDetected());
         },
       );
 
@@ -3512,18 +3841,6 @@ class _HomePageState extends State<HomePage>
     return null;
   }
 
-  /// 연결된 provider identity 의 이메일. 전체 값을 로그로 남기지 않는다.
-  String? _linkedIdentityEmail(User? user, String provider) {
-    final fromIdentities = _emailFromIdentities(
-      user?.identities ?? const <UserIdentity>[],
-      provider,
-    );
-    if (fromIdentities != null) return fromIdentities;
-    final authEmail = user?.email?.trim();
-    if (authEmail != null && authEmail.isNotEmpty) return authEmail;
-    return null;
-  }
-
   /// Google 네이티브 SDK 초기화. 앱 생애주기당 정확히 한 번만 수행한다.
   Future<void> _ensureGoogleSignInInitialized() async {
     if (_googleSignInInitialized) return;
@@ -3609,8 +3926,8 @@ class _HomePageState extends State<HomePage>
     }
 
     final msg = _formatAuthError(e).toLowerCase();
-    if (_isIdentityAlreadyLinkedError(e)) {
-      return 'identity_already_linked_elsewhere';
+    if (_isIdentityOwnedByExistingUserError(e)) {
+      return 'identity_owned_by_existing_user';
     }
     if (msg.contains('manual linking') ||
         msg.contains('identity_linking') ||
@@ -3669,7 +3986,7 @@ class _HomePageState extends State<HomePage>
         e.code == AuthorizationErrorCode.canceled;
   }
 
-  /// Apple 계정 연동: anonymous guest 에 Apple identity 를 연결한다.
+  /// Apple 계정 인증 → 신규 identity 연결 또는 기존 계정 로그인.
   Future<void> _linkAppleAccount() async {
     if (_isAppleLinkBusy || _isGoogleLinkBusy) return;
 
@@ -3684,187 +4001,19 @@ class _HomePageState extends State<HomePage>
       _safeSetState(_closeAccountLinkPanel);
       return;
     }
-    if (!_isCurrentUserAnonymous() &&
-        !_hasAnyLinkedAccountIdentity(beforeUser) &&
-        beforeUser.isAnonymous != true) {
-      // anonymous 가 아닌데 연동도 없는 비정상 세션은 막는다.
-      _showSnack(l10n.snackAccountLinkFailed);
-      return;
-    }
 
-    final beforeUserId = beforeUser.id;
     _safeSetState(() => _isAppleLinkBusy = true);
-    var authLinkSucceeded = false;
 
     try {
-      _logAccountLink('apple', 'start');
-
-      final rawNonce = _generateSecureRawNonce();
-      final hashedNonce = _sha256OfString(rawNonce);
-      _logAccountLink('apple', 'nonce', 'generated');
-
-      _logAccountLink('apple', 'credential', 'start');
-      final AuthorizationCredentialAppleID credential;
-      try {
-        credential = await SignInWithApple.getAppleIDCredential(
-          scopes: const [
-            AppleIDAuthorizationScopes.email,
-            AppleIDAuthorizationScopes.fullName,
-          ],
-          nonce: hashedNonce,
-        );
-        _logAccountLink('apple', 'credential', 'success');
-      } on SignInWithAppleAuthorizationException catch (e) {
-        if (_isAppleSignInCanceled(e)) {
-          _logAccountLink('apple', 'credential', 'canceled');
-          return;
-        }
-        _logAccountLink(
-          'apple',
-          'credential',
-          'failed:type=SignInWithAppleAuthorizationException,'
-              'code=${e.code.name},'
-              'message=${_sanitizeAuthErrorMessage(e.message)}',
-        );
-        rethrow;
-      }
-
-      final identityToken = credential.identityToken;
-      if (identityToken == null || identityToken.isEmpty) {
-        _logAccountLink('apple', 'identity_token', 'missing');
+      final outcome = await _obtainAppleExternalCredential();
+      if (outcome.canceled) return;
+      final credential = outcome.credential;
+      if (credential == null) {
         if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
-      _logAccountLink('apple', 'identity_token', 'present');
-
-      _logAccountLink('apple', 'supabase_link', 'start');
-      try {
-        await supabase.auth.linkIdentityWithIdToken(
-          provider: OAuthProvider.apple,
-          idToken: identityToken,
-          nonce: rawNonce,
-        );
-        _logAccountLink('apple', 'supabase_link', 'success');
-      } catch (e) {
-        _logSupabaseLinkAuthFailure(e, provider: 'apple');
-        if (_isIdentityAlreadyLinkedError(e)) {
-          if (!mounted) return;
-          await _showLinkedAccountInUseNotice();
-          return;
-        }
-        rethrow;
-      }
-
-      _logAccountLink('apple', 'identity_verify', 'start');
-      final linkedApple = await _waitForProviderIdentityLinked(
-        'apple',
-        logProvider: 'apple',
-      );
-      final afterUserId = supabase.auth.currentUser?.id;
-
-      if (!linkedApple) {
-        _logAccountLink(
-          'apple',
-          'identity_verify',
-          'failed:identity_not_found',
-        );
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-      _logAccountLink('apple', 'identity_verify', 'success');
-
-      if (afterUserId == null || afterUserId != beforeUserId) {
-        _logAccountLink('apple', 'uuid_check', 'failed');
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-      _logAccountLink('apple', 'uuid_check', 'success');
-      authLinkSucceeded = true;
-
-      _linkedAccountProvider = _LinkedAccountProvider.apple;
-      _linkedAccountProviderReady = true;
-      if (mounted) {
-        _safeSetState(() {
-          if (_hasAnyLinkedAccount()) {
-            _isAccountLinkPanelOpen = false;
-          }
-        });
-      }
-
-      _logAccountLink('apple', 'profile_update', 'start');
-      try {
-        final appleEmail = await _resolveAppleLinkEmail(
-          credentialEmail: credential.email,
-        );
-        await _persistLinkedProviderToProfile(
-          userId: afterUserId,
-          provider: _LinkedAccountProvider.apple,
-          email: appleEmail,
-          logProvider: 'apple',
-        );
-      } catch (e) {
-        try {
-          await _syncLinkedProviderToProfileIfNeeded();
-          _logAccountLink('apple', 'profile_update', 'resync_attempted');
-        } catch (syncErr) {
-          _logAccountLink(
-            'apple',
-            'profile_update',
-            'resync_failed:${_summarizeGoogleLinkError(syncErr)}',
-          );
-        }
-      }
-
-      _logAccountLink('apple', 'refresh', 'start');
-      try {
-        await _refreshAllUserDataAfterAuthChange();
-        _logAccountLink('apple', 'refresh', 'success');
-      } catch (e) {
-        _logAccountLink(
-          'apple',
-          'refresh',
-          'failed:${_summarizeGoogleLinkError(e)}',
-        );
-        try {
-          await _fetchProfile();
-          await _syncLinkedProviderToProfileIfNeeded();
-        } catch (syncErr) {
-          _logAccountLink(
-            'apple',
-            'refresh',
-            'fallback_sync_failed:${_summarizeGoogleLinkError(syncErr)}',
-          );
-        }
-      }
-
-      final serverProvider = await _fetchLinkedAccountProviderFromServer();
-      _linkedAccountProvider = serverProvider;
-      _linkedAccountProviderReady = true;
-      final stillLinked = serverProvider == _LinkedAccountProvider.apple;
-      final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
-      _logAccountLink(
-        'apple',
-        'post_check',
-        'server_linked=$stillLinked same_user=$stillSameUser',
-      );
-
-      if (!stillLinked || !stillSameUser) {
-        _logAccountLink(
-          'apple',
-          'complete',
-          'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
-        );
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-
-      _logAccountLink('apple', 'complete', 'success');
-      if (!mounted) return;
-      await _finishAccountLinkSuccessUi(_LinkedAccountProvider.apple);
+      await _runExternalAccountAuthFlow(credential);
     } catch (e, st) {
       if (_isAppleSignInCanceled(e)) {
         _logAccountLink('apple', 'credential', 'canceled');
@@ -3876,23 +4025,6 @@ class _HomePageState extends State<HomePage>
         '${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
       );
       debugPrint('apple_link:stack:$st');
-
-      if (authLinkSucceeded) {
-        try {
-          final serverProvider = await _fetchLinkedAccountProviderFromServer();
-          _linkedAccountProvider = serverProvider;
-          _linkedAccountProviderReady = true;
-          final stillLinked = serverProvider == _LinkedAccountProvider.apple;
-          final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
-          if (stillLinked && stillSameUser) {
-            _logAccountLink('apple', 'complete', 'auth_ok_despite_post_error');
-            if (!mounted) return;
-            await _finishAccountLinkSuccessUi(_LinkedAccountProvider.apple);
-            return;
-          }
-        } catch (_) {}
-      }
-
       if (!mounted) return;
       _showSnack(l10n.snackAccountLinkFailed);
     } finally {
@@ -3904,18 +4036,379 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  /// Apple 연동 이메일 우선순위:
-  /// credential → identityData → currentUser.email → 기존 profiles.email
-  Future<String?> _resolveAppleLinkEmail({String? credentialEmail}) async {
-    final fromCredential = credentialEmail?.trim();
+  /// Apple 네이티브 인증 결과를 공통 credential 로 변환한다.
+  ///
+  /// nonce 규칙은 바꾸지 않는다: Apple SDK 에는 SHA-256 hashed nonce,
+  /// Supabase 에는 raw nonce 를 전달한다.
+  Future<({_ExternalAuthCredential? credential, bool canceled})>
+  _obtainAppleExternalCredential() async {
+    final rawNonce = _generateSecureRawNonce();
+    final hashedNonce = _sha256OfString(rawNonce);
+    _logAccountLink('apple', 'nonce', 'generated');
+
+    _logAccountLink('apple', 'credential', 'start');
+    final AuthorizationCredentialAppleID appleCredential;
+    try {
+      appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: hashedNonce,
+      );
+      _logAccountLink('apple', 'credential', 'success');
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (_isAppleSignInCanceled(e)) {
+        _logAccountLink('apple', 'credential', 'canceled');
+        return (credential: null, canceled: true);
+      }
+      _logAccountLink(
+        'apple',
+        'credential',
+        'failed:type=SignInWithAppleAuthorizationException,'
+            'code=${e.code.name},'
+            'message=${_sanitizeAuthErrorMessage(e.message)}',
+      );
+      rethrow;
+    }
+
+    final identityToken = appleCredential.identityToken;
+    if (identityToken == null || identityToken.isEmpty) {
+      _logAccountLink('apple', 'identity_token', 'missing');
+      return (credential: null, canceled: false);
+    }
+    _logAccountLink('apple', 'identity_token', 'present');
+
+    return (
+      credential: _ExternalAuthCredential(
+        provider: _LinkedAccountProvider.apple,
+        idToken: identityToken,
+        rawNonce: rawNonce,
+        // Apple 은 최초 승인에서만 email 을 돌려줄 수 있다(없어도 실패 아님).
+        email: appleCredential.email,
+      ),
+      canceled: false,
+    );
+  }
+
+  /// Google/Apple 공통 계정 인증 후처리.
+  ///
+  /// 1) 아직 아무 사용자에게도 연결되지 않은 identity 는
+  ///    `linkIdentityWithIdToken()` 으로 현재 guest 에 붙인다(UUID·데이터 유지).
+  /// 2) 이미 다른 Supabase 사용자 소유인 identity 는 실패가 아니라
+  ///    `signInWithIdToken()` 기존 계정 로그인으로 전환한다. 이때 새 기기의
+  ///    임시 guest 데이터는 기존 계정에 병합하지 않고 버린다.
+  Future<void> _runExternalAccountAuthFlow(
+    _ExternalAuthCredential credential,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+    final provider = credential.provider;
+    final providerKey = credential.providerKey;
+    final beforeUserId = supabase.auth.currentUser?.id;
+
+    debugPrint('account_auth:start provider=$providerKey');
+
+    var authSucceeded = false;
+    var signedInExistingUser = false;
+
+    try {
+      _logAccountLink(providerKey, 'supabase_link', 'start');
+      try {
+        await supabase.auth.linkIdentityWithIdToken(
+          provider: credential.oauthProvider,
+          idToken: credential.idToken,
+          accessToken: credential.accessToken,
+          nonce: credential.rawNonce,
+        );
+        _logAccountLink(providerKey, 'supabase_link', 'success');
+        debugPrint('account_auth:mode=link_new_identity');
+      } catch (e) {
+        _logSupabaseLinkAuthFailure(e, provider: providerKey);
+        if (!_isIdentityOwnedByExistingUserError(e)) rethrow;
+
+        debugPrint('account_auth:mode=sign_in_existing_user');
+        await _signInWithExistingExternalAccount(credential);
+        signedInExistingUser = true;
+        debugPrint('account_auth:sign_in_existing:success');
+      }
+
+      _logAccountLink(providerKey, 'identity_verify', 'start');
+      final identityLinked = await _waitForProviderIdentityLinked(
+        providerKey,
+        logProvider: providerKey,
+      );
+      if (!identityLinked) {
+        _logAccountLink(
+          providerKey,
+          'identity_verify',
+          'failed:identity_not_found',
+        );
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logAccountLink(providerKey, 'identity_verify', 'success');
+
+      final afterUserId = supabase.auth.currentUser?.id;
+      if (afterUserId == null || afterUserId.isEmpty) {
+        _logAccountLink(providerKey, 'uuid_check', 'failed:no_user');
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      if (!signedInExistingUser && afterUserId != beforeUserId) {
+        // 신규 연결은 guest UUID 를 반드시 유지해야 한다.
+        _logAccountLink(providerKey, 'uuid_check', 'failed:user_changed');
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logAccountLink(providerKey, 'uuid_check', 'success');
+
+      final userSwitched = afterUserId != beforeUserId;
+      debugPrint('account_auth:user_switched=$userSwitched');
+      authSucceeded = true;
+
+      _linkedAccountProvider = provider;
+      _linkedAccountProviderReady = true;
+      if (mounted) {
+        _safeSetState(() {
+          if (_hasAnyLinkedAccount()) {
+            _isAccountLinkPanelOpen = false;
+          }
+        });
+      }
+
+      if (userSwitched) {
+        // 이전 guest 의 캐시·입력값·Flame 펫이 새 계정으로 새어나가지 않게 한다.
+        // 서버의 guest 데이터는 병합하지도, 삭제하지도 않는다.
+        _invalidateUserScopedAsyncWork(reason: 'existingAccountSignIn');
+        _clearUserScopedCaches();
+        _clearProfileFormState();
+        _bagPanelDetailItem = null;
+        await _clearLocalActiveSessionId();
+        unawaited(_yardGame.removeActivePetComponent());
+      }
+
+      // 신규 연결만 여기서 profiles 를 확정한다. 기존 계정은 데이터를 다시
+      // 불러온 뒤에 동기화해야 저장된 linked_at 을 덮어쓰지 않는다.
+      if (!signedInExistingUser) {
+        _logAccountLink(providerKey, 'profile_update', 'start');
+        try {
+          final email = await _resolveExternalAuthEmail(credential);
+          _linkedAccountEmail = email;
+          debugPrint('account_auth:email_present=${email != null}');
+          await _persistLinkedProviderToProfile(
+            userId: afterUserId,
+            provider: provider,
+            email: email,
+            logProvider: providerKey,
+          );
+        } catch (e) {
+          try {
+            await _syncLinkedProviderToProfileIfNeeded();
+            _logAccountLink(providerKey, 'profile_update', 'resync_attempted');
+          } catch (syncErr) {
+            _logAccountLink(
+              providerKey,
+              'profile_update',
+              'resync_failed:${_summarizeGoogleLinkError(syncErr)}',
+            );
+          }
+        }
+      }
+
+      debugPrint('account_auth:data_refresh:start');
+      _logAccountLink(providerKey, 'refresh', 'start');
+      try {
+        await _refreshAllUserDataAfterAuthChange(
+          forceProfileFormSync: userSwitched,
+        );
+        _logAccountLink(providerKey, 'refresh', 'success');
+        debugPrint('account_auth:data_refresh:success');
+      } catch (e) {
+        _logAccountLink(
+          providerKey,
+          'refresh',
+          'failed:${_summarizeGoogleLinkError(e)}',
+        );
+        try {
+          await _fetchProfile();
+          await _syncLinkedProviderToProfileIfNeeded();
+        } catch (syncErr) {
+          _logAccountLink(
+            providerKey,
+            'refresh',
+            'fallback_sync_failed:${_summarizeGoogleLinkError(syncErr)}',
+          );
+        }
+      }
+
+      if (signedInExistingUser) {
+        // 기존 계정: 저장된 profiles 를 읽은 뒤 provider/email 만 맞춘다.
+        _logAccountLink(providerKey, 'profile_update', 'start');
+        try {
+          await _syncLinkedProviderToProfileIfNeeded();
+          _linkedAccountEmail = _profile?['email']?.toString().trim();
+          debugPrint(
+            'account_auth:email_present='
+            '${_linkedAccountEmail != null && _linkedAccountEmail!.isNotEmpty}',
+          );
+        } catch (e) {
+          _logAccountLink(
+            providerKey,
+            'profile_update',
+            'existing_sync_failed:${_summarizeGoogleLinkError(e)}',
+          );
+        }
+      }
+
+      // 이 기기를 활성 기기로 등록. 실패해도 로그인 자체는 되돌리지 않는다.
+      await _registerActiveSessionForCurrentUser(logProvider: providerKey);
+
+      // 최종 판정은 stale currentUser.identities 가 아니라 서버 identities.
+      final serverProvider = await _fetchLinkedAccountProviderFromServer();
+      _linkedAccountProvider = serverProvider;
+      _linkedAccountProviderReady = true;
+      final stillLinked = serverProvider == provider;
+      final stillSameUser = supabase.auth.currentUser?.id == afterUserId;
+      _logAccountLink(
+        providerKey,
+        'post_check',
+        'server_linked=$stillLinked same_user=$stillSameUser',
+      );
+
+      if (!stillLinked || !stillSameUser) {
+        _logAccountLink(
+          providerKey,
+          'complete',
+          'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
+        );
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
+      _logAccountLink(providerKey, 'complete', 'success');
+      if (!mounted) return;
+      await _finishAccountLinkSuccessUi(provider);
+    } catch (e, st) {
+      _logAccountLink(
+        providerKey,
+        'failed',
+        '${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+      );
+      debugPrint('${providerKey}_link:stack:$st');
+
+      if (authSucceeded) {
+        // Auth 는 이미 성공. 후속 동기화만 실패한 경우 서버 기준으로 재확인한다.
+        // 기존 계정 로그인 후에는 guest 세션으로 임의 복귀하지 않는다.
+        try {
+          final serverProvider = await _fetchLinkedAccountProviderFromServer();
+          _linkedAccountProvider = serverProvider;
+          _linkedAccountProviderReady = true;
+          if (serverProvider == provider && supabase.auth.currentUser != null) {
+            _logAccountLink(
+              providerKey,
+              'complete',
+              'auth_ok_despite_post_error',
+            );
+            if (!mounted) return;
+            await _finishAccountLinkSuccessUi(provider);
+            return;
+          }
+        } catch (_) {
+          // fall through to failure snack
+        }
+      }
+
+      if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
+    }
+  }
+
+  /// 이미 다른 Supabase 사용자 소유인 identity → 기존 계정 로그인.
+  ///
+  /// 성공 조건은 non-anonymous user · provider identity 존재 · 정상 session.
+  /// 실패 시 예외를 던지며 이 함수는 guest 캐시/화면을 건드리지 않는다.
+  Future<void> _signInWithExistingExternalAccount(
+    _ExternalAuthCredential credential,
+  ) async {
+    final providerKey = credential.providerKey;
+    _logAccountLink(providerKey, 'sign_in_existing', 'start');
+
+    final response = await supabase.auth.signInWithIdToken(
+      provider: credential.oauthProvider,
+      idToken: credential.idToken,
+      accessToken: credential.accessToken,
+      nonce: credential.rawNonce,
+    );
+
+    final user = response.user ?? supabase.auth.currentUser;
+    if (user == null || user.id.isEmpty) {
+      throw StateError('existing account sign-in returned no user');
+    }
+    if (user.isAnonymous == true) {
+      throw StateError('existing account sign-in returned anonymous user');
+    }
+    if (supabase.auth.currentSession == null) {
+      throw StateError('existing account sign-in produced no session');
+    }
+
+    final identities = await supabase.auth.getUserIdentities();
+    if (!_identitiesContainProvider(identities, providerKey)) {
+      throw StateError('existing account has no $providerKey identity');
+    }
+
+    // profiles row 는 진단용으로만 확인한다. 없으면 프로필 입력 흐름이 담당한다.
+    var profileExists = false;
+    try {
+      final row = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+      profileExists = row != null;
+    } catch (e) {
+      _logAccountLink(
+        providerKey,
+        'sign_in_existing',
+        'profile_lookup_failed:${_summarizeGoogleLinkError(e)}',
+      );
+    }
+
+    _logAccountLink(
+      providerKey,
+      'sign_in_existing',
+      'verified profile_exists=$profileExists',
+    );
+  }
+
+  /// 연동 직후 profiles 에 저장할 이메일.
+  ///
+  /// 서버 identity → 네이티브 credential → currentUser.email → 기존 profiles.email.
+  /// Apple 비공개 릴레이(`@privaterelay.appleid.com`) 주소도 정상 저장한다.
+  Future<String?> _resolveExternalAuthEmail(
+    _ExternalAuthCredential credential,
+  ) async {
+    try {
+      final identities = await supabase.auth.getUserIdentities();
+      final fromIdentity = _emailFromIdentities(
+        identities,
+        credential.providerKey,
+      );
+      if (fromIdentity != null && fromIdentity.isNotEmpty) return fromIdentity;
+    } catch (e) {
+      debugPrint(
+        'account_auth:identity_email_lookup_failed:'
+        '${_summarizeGoogleLinkError(e)}',
+      );
+    }
+
+    final fromCredential = credential.email?.trim();
     if (fromCredential != null && fromCredential.isNotEmpty) {
       return fromCredential;
     }
-    try {
-      final identities = await supabase.auth.getUserIdentities();
-      final fromIdentity = _emailFromIdentities(identities, 'apple');
-      if (fromIdentity != null && fromIdentity.isNotEmpty) return fromIdentity;
-    } catch (_) {}
     final authEmail = supabase.auth.currentUser?.email?.trim();
     if (authEmail != null && authEmail.isNotEmpty) return authEmail;
     final stored = _profile?['email']?.toString().trim();
@@ -4215,13 +4708,11 @@ class _HomePageState extends State<HomePage>
     return (token: accessToken, canceled: false);
   }
 
-  /// 현재 anonymous guest 세션(UUID 유지)에 Google identity 를 추가한다.
+  /// Google 계정 인증 → 신규 identity 연결 또는 기존 계정 로그인.
   ///
-  /// `signInWithIdToken()` 은 기존 Google 계정 **로그인** API 이므로 사용하지
-  /// 않는다. guest UUID 를 유지해야 하므로 Supabase Manual Linking 의
-  /// `linkIdentityWithIdToken()` 한 가지 경로만 사용한다.
-  ///
-  /// Google 네이티브 인증은 idToken 과 accessToken 을 함께 전달한다.
+  /// 처음 사용하는 계정은 Manual Linking 의 `linkIdentityWithIdToken()` 으로
+  /// 현재 guest UUID 에 붙이고, 이미 다른 사용자 소유인 계정만
+  /// `signInWithIdToken()` 으로 기존 계정 로그인한다.
   Future<void> _linkGoogleAccount() async {
     if (_isGoogleLinkBusy || _isAppleLinkBusy) return;
 
@@ -4237,227 +4728,25 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final beforeUserId = beforeUser.id;
     _safeSetState(() => _isGoogleLinkBusy = true);
 
-    // Auth identity 가 연결된 뒤에는 profiles/refresh 실패를 "연동 실패"로
-    // 취급하지 않기 위해 플래그로 단계를 나눈다.
-    var authLinkSucceeded = false;
-
     try {
-      _logGoogleLink('init', 'start');
-      try {
-        await _ensureGoogleSignInInitialized();
-        _logGoogleLink('init', 'success');
-      } catch (e) {
-        _logGoogleLink(
-          'init',
-          'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
-        );
-        rethrow;
-      }
-
-      final GoogleSignInAccount account;
-      _logGoogleLink('authenticate', 'start');
-      try {
-        account = await GoogleSignIn.instance.authenticate(
-          scopeHint: _kGoogleAuthScopes,
-        );
-        _logGoogleLink('authenticate', 'success');
-      } on GoogleSignInException catch (e) {
-        if (_isGoogleSignInCanceled(e)) {
-          _logGoogleLink('authenticate', 'canceled:${e.code.name}');
-          return;
-        }
-        _logGoogleLink(
-          'authenticate',
-          'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
-        );
-        rethrow;
-      }
-
-      final idToken = account.authentication.idToken;
-      if (idToken == null || idToken.isEmpty) {
-        _logGoogleLink('id_token', 'missing');
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-      _logGoogleLink('id_token', 'present');
-
-      final accessOutcome = await _obtainGoogleAccessToken(account);
-      if (accessOutcome.canceled) {
+      final outcome = await _obtainGoogleExternalCredential();
+      if (outcome.canceled) {
         // 사용자 취소: 실패 문구 없이 계정 연동 패널 유지.
         return;
       }
-      final accessToken = accessOutcome.token;
-      if (accessToken == null || accessToken.isEmpty) {
+      final credential = outcome.credential;
+      if (credential == null) {
         if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
-
-      _logGoogleLink('supabase_link', 'start');
-      try {
-        await supabase.auth.linkIdentityWithIdToken(
-          provider: OAuthProvider.google,
-          idToken: idToken,
-          accessToken: accessToken,
-        );
-        _logGoogleLink('supabase_link', 'success');
-      } catch (e) {
-        _logSupabaseLinkAuthFailure(e);
-        if (_isIdentityAlreadyLinkedError(e)) {
-          await _signOutGoogleSdkQuietly();
-          if (!mounted) return;
-          await _showLinkedAccountInUseNotice();
-          return;
-        }
-        rethrow;
-      }
-
-      // 링크 직후 서버 기준으로 identities 를 다시 확인한다(최대 3회).
-      _logGoogleLink('identity_verify', 'start');
-      final linkedGoogle = await _waitForProviderIdentityLinked(
-        'google',
-        logProvider: 'google',
-      );
-      final afterUserId = supabase.auth.currentUser?.id;
-
-      if (!linkedGoogle) {
-        _logGoogleLink('identity_verify', 'failed:identity_not_found');
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-
-      if (afterUserId == null || afterUserId != beforeUserId) {
-        // UUID 가 바뀌면 기존 guest 데이터 소유권이 끊어진다. 연동 성공으로
-        // 처리하지 않고 profiles 도 변경하지 않는다.
-        _logGoogleLink('identity_verify', 'failed:uuid_changed');
-        debugPrint(
-          'google_link:uuid_mismatch before_len=${beforeUserId.length} '
-          'after_len=${afterUserId?.length ?? 0} '
-          'same_prefix=${afterUserId != null && afterUserId.startsWith(beforeUserId.substring(0, 8))}',
-        );
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-      _logGoogleLink('identity_verify', 'success');
-      _logGoogleLink('server_identity', 'provider=google');
-      authLinkSucceeded = true;
-
-      // stale currentUser.identities 에 의존하지 않도록 서버 확인 결과를 State 에 저장.
-      _linkedAccountProvider = _LinkedAccountProvider.google;
-      _linkedAccountProviderReady = true;
-      _logGoogleLink('state_provider', 'google');
-      if (mounted) {
-        _safeSetState(() {
-          // 설정 버튼이 즉시 “연동 완료”로 보이도록 한다.
-          if (_hasAnyLinkedAccount()) {
-            _isAccountLinkPanelOpen = false;
-          }
-        });
-      }
-
-      // Auth 연동 성공. 이후 profiles/refresh 실패는 연동 실패로 취급하지 않는다.
-      _logGoogleLink('profile_update', 'start');
-      try {
-        String? googleEmail;
-        try {
-          final identities = await supabase.auth.getUserIdentities();
-          googleEmail = _emailFromIdentities(identities, 'google');
-        } catch (_) {
-          googleEmail = null;
-        }
-        googleEmail ??=
-            _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
-            account.email.trim();
-
-        await _persistLinkedProviderToProfile(
-          userId: afterUserId,
-          provider: _LinkedAccountProvider.google,
-          email: googleEmail,
-          logProvider: 'google',
-        );
-      } catch (e) {
-        try {
-          await _syncLinkedProviderToProfileIfNeeded();
-          _logGoogleLink('profile_update', 'resync_attempted');
-        } catch (syncErr) {
-          _logGoogleLink(
-            'profile_update',
-            'resync_failed:${_summarizeGoogleLinkError(syncErr)}',
-          );
-        }
-      }
-
-      _logGoogleLink('refresh', 'start');
-      try {
-        await _refreshAllUserDataAfterAuthChange();
-        _logGoogleLink('refresh', 'success');
-      } catch (e) {
-        _logGoogleLink('refresh', 'failed:${_summarizeGoogleLinkError(e)}');
-        try {
-          await _fetchProfile();
-          await _syncLinkedProviderToProfileIfNeeded();
-        } catch (syncErr) {
-          _logGoogleLink(
-            'refresh',
-            'fallback_sync_failed:${_summarizeGoogleLinkError(syncErr)}',
-          );
-        }
-      }
-
-      // 최종 판정은 stale currentUser.identities 가 아니라 서버 identities.
-      final serverProvider = await _fetchLinkedAccountProviderFromServer();
-      _linkedAccountProvider = serverProvider;
-      _linkedAccountProviderReady = true;
-      final stillLinked = serverProvider == _LinkedAccountProvider.google;
-      final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
-      _logGoogleLink(
-        'post_check',
-        'server_linked=$stillLinked same_user=$stillSameUser',
-      );
-
-      if (!stillLinked || !stillSameUser) {
-        _logGoogleLink(
-          'complete',
-          'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
-        );
-        if (!mounted) return;
-        _showSnack(l10n.snackAccountLinkFailed);
-        return;
-      }
-
-      _logGoogleLink('complete', 'success');
-      if (!mounted) return;
-      await _finishAccountLinkSuccessUi(_LinkedAccountProvider.google);
+      await _runExternalAccountAuthFlow(credential);
     } catch (e, st) {
       final kind = _classifyGoogleLinkFailure(e);
       _logGoogleLink('failed', '$kind:${_summarizeGoogleLinkError(e)}');
       debugPrint('google_link:stack:$st');
-
-      if (authLinkSucceeded) {
-        // Auth 는 이미 성공. 후속 동기화만 실패한 경우 서버 기준으로 재확인.
-        try {
-          final serverProvider = await _fetchLinkedAccountProviderFromServer();
-          _linkedAccountProvider = serverProvider;
-          _linkedAccountProviderReady = true;
-          final stillLinked = serverProvider == _LinkedAccountProvider.google;
-          final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
-          if (stillLinked && stillSameUser) {
-            _logGoogleLink('complete', 'auth_ok_despite_post_error');
-            if (!mounted) return;
-            await _finishAccountLinkSuccessUi(_LinkedAccountProvider.google);
-            return;
-          }
-        } catch (_) {
-          // fall through to failure snack
-        }
-      }
-
       if (!mounted) return;
       _showSnack(l10n.snackAccountLinkFailed);
     } finally {
@@ -4467,6 +4756,69 @@ class _HomePageState extends State<HomePage>
         _isGoogleLinkBusy = false;
       }
     }
+  }
+
+  /// Google 네이티브 인증 결과를 공통 credential 로 변환한다.
+  ///
+  /// Google 은 idToken 과 accessToken 을 함께 전달해야 한다.
+  Future<({_ExternalAuthCredential? credential, bool canceled})>
+  _obtainGoogleExternalCredential() async {
+    _logGoogleLink('init', 'start');
+    try {
+      await _ensureGoogleSignInInitialized();
+      _logGoogleLink('init', 'success');
+    } catch (e) {
+      _logGoogleLink(
+        'init',
+        'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+      );
+      rethrow;
+    }
+
+    final GoogleSignInAccount account;
+    _logGoogleLink('authenticate', 'start');
+    try {
+      account = await GoogleSignIn.instance.authenticate(
+        scopeHint: _kGoogleAuthScopes,
+      );
+      _logGoogleLink('authenticate', 'success');
+    } on GoogleSignInException catch (e) {
+      if (_isGoogleSignInCanceled(e)) {
+        _logGoogleLink('authenticate', 'canceled:${e.code.name}');
+        return (credential: null, canceled: true);
+      }
+      _logGoogleLink(
+        'authenticate',
+        'failed:${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+      );
+      rethrow;
+    }
+
+    final idToken = account.authentication.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      _logGoogleLink('id_token', 'missing');
+      return (credential: null, canceled: false);
+    }
+    _logGoogleLink('id_token', 'present');
+
+    final accessOutcome = await _obtainGoogleAccessToken(account);
+    if (accessOutcome.canceled) {
+      return (credential: null, canceled: true);
+    }
+    final accessToken = accessOutcome.token;
+    if (accessToken == null || accessToken.isEmpty) {
+      return (credential: null, canceled: false);
+    }
+
+    return (
+      credential: _ExternalAuthCredential(
+        provider: _LinkedAccountProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+        email: account.email.trim(),
+      ),
+      canceled: false,
+    );
   }
 
   Future<void> _fetchPetSpecies() async {
@@ -8517,7 +8869,7 @@ class _HomePageState extends State<HomePage>
     _isProfileSelectMissingNoticeOpen = false;
     _isAccountLinkInviteNoticeOpen = false;
     _isAccountLinkSuccessNoticeOpen = false;
-    _isLinkedAccountInUseNoticeOpen = false;
+    _isLinkedAccountAddressNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
     _isMaturityCompleteNoticeOpen = false;
     _isPokedexCompleteTicketNoticeOpen = false;
@@ -9150,7 +9502,7 @@ class _HomePageState extends State<HomePage>
         _buildWithdrawFinalConfirmGlobalOverlay(),
         _buildAccountLinkInviteNoticeGlobalOverlay(),
         _buildAccountLinkSuccessNoticeGlobalOverlay(),
-        _buildLinkedAccountInUseNoticeGlobalOverlay(),
+        _buildLinkedAccountAddressNoticeGlobalOverlay(),
         _buildDuplicatePetNameNoticeGlobalOverlay(),
         _buildNameInterlockNoticeGlobalOverlay(),
         _buildProfileSelectMissingNoticeGlobalOverlay(),
@@ -9602,23 +9954,24 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildLinkedAccountInUseNoticeGlobalOverlay() {
+  /// 계정 주소 알림창 — 연동 이메일만 표시한다(설명 문구 없음).
+  ///
+  /// 크기·위치·글래스 디자인·fade·버튼 스타일은 계정 연동 완료 알림창과 동일한
+  /// 공통 confirm dialog 구조를 그대로 재사용한다.
+  Widget _buildLinkedAccountAddressNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    final isEn = _isEnglishLocale;
+    final email = _linkedAccountEmail?.trim();
+    final hasEmail = email != null && email.isNotEmpty;
     return _buildVegePetOneButtonNoticeOverlay(
       VegePetNoticeConfig(
-        isOpen: _isLinkedAccountInUseNoticeOpen,
-        title: l10n.linkedAccountInUseTitle,
-        body: l10n.linkedAccountInUseBody,
-        primaryLabel: l10n.linkedAccountInUseConfirm,
-        onPrimaryTap: _closeLinkedAccountInUseNoticeOverlay,
+        isOpen: _isLinkedAccountAddressNoticeOpen,
+        title: l10n.accountAddressTitle,
+        body: hasEmail ? email : l10n.accountAddressUnavailable,
+        primaryLabel: l10n.accountAddressConfirm,
+        onPrimaryTap: _closeLinkedAccountAddressNoticeOverlay,
         outsideDismissible: false,
-        titleBlockTranslateYOffset: isEn ? -2 : 0,
-        bodyFontSizeEn: 9,
-        bodyMaxLinesEn: 4,
-        bodyMaxLinesKo: 3,
-        bodyOverflow: TextOverflow.visible,
-        blockDialogPointerWithGestureDetector: false,
+        bodyMaxLines: 2,
+        bodyOverflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -9779,7 +10132,7 @@ class _HomePageState extends State<HomePage>
       _isNameInterlockNoticeOpen = false;
       _isAccountLinkInviteNoticeOpen = false;
       _isAccountLinkSuccessNoticeOpen = false;
-      _isLinkedAccountInUseNoticeOpen = false;
+      _isLinkedAccountAddressNoticeOpen = false;
       _isDuplicatePetNameNoticeOpen = false;
       _isMaturityCompleteNoticeOpen = false;
       _isPokedexCompleteTicketNoticeOpen = false;
@@ -10673,8 +11026,7 @@ class _HomePageState extends State<HomePage>
 
   /// 계정 연동 글래스 패널.
   ///
-  /// 기존 이메일 OTP 패널의 위치/폭/blur/글래스/borderRadius/외부 탭 닫기를
-  /// 유지하고, 내부만 Apple(위) · Google(아래) 버튼 + 정책 안내 2줄로 교체한다.
+  /// Apple(위) · Google(아래) 네이티브 인증 버튼 + 정책 안내 2줄로 구성한다.
   Widget _buildAccountLinkGlassPanel() {
     final l10n = AppLocalizations.of(context);
     final anyBusy = _isGoogleLinkBusy || _isAppleLinkBusy;
@@ -17269,7 +17621,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    if (_isLinkedAccountInUseNoticeOpen) {
+    if (_isLinkedAccountAddressNoticeOpen) {
       return;
     }
 
@@ -18392,6 +18744,12 @@ class _HomePageState extends State<HomePage>
                               sectionTitle(l10n.settingsSectionAccountBullet),
                               const SizedBox(height: 6),
                               _buildSettingsGrayRow(
+                                // 연동 후에는 이 행 전체가 계정 주소 알림창 hit area.
+                                onTap: linked
+                                    ? () => unawaited(
+                                        _openLinkedAccountAddressNotice(),
+                                      )
+                                    : null,
                                 child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
@@ -18704,6 +19062,8 @@ class _HomePageState extends State<HomePage>
             'email': null,
             'account_type': 'guest',
             'linked_at': null,
+            'active_session_id': null,
+            'active_session_updated_at': null,
             'gold_balance': 1000,
             'updated_at': DateTime.now().toIso8601String(),
           })
