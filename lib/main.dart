@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -62,6 +62,13 @@ const _kGoogleIosClientId =
     '256004504301-fbgm6n2kfj9lgnrjjp1as1f40c3rm3lp.apps.googleusercontent.com';
 const _kGoogleWebClientId =
     '256004504301-tc68osd09lkv8g085p70ckljhjviaidd.apps.googleusercontent.com';
+
+/// Google 계정 연동에 필요한 최소 OIDC scope.
+///
+/// Drive / Calendar / Contacts / Gmail 등 추가 API 권한은 포함하지 않는다.
+/// `authenticate(scopeHint:)` 힌트와 `authorizationClient` accessToken 요청에
+/// 동일하게 사용한다.
+const List<String> _kGoogleAuthScopes = <String>['openid', 'email', 'profile'];
 
 /// 현재 Supabase Auth 사용자에 연결된 영구 계정 provider.
 ///
@@ -3498,11 +3505,125 @@ class _HomePageState extends State<HomePage>
     await _showAccountLinkSuccessNotice();
   }
 
+  /// Google identity 가 서버에 반영될 때까지 짧게 재조회한다.
+  ///
+  /// 즉시 → 300ms → 추가 500ms, 총 최대 3회. 무한 재시도는 하지 않는다.
+  Future<bool> _waitForGoogleIdentityLinked() async {
+    const delays = <Duration>[
+      Duration.zero,
+      Duration(milliseconds: 300),
+      Duration(milliseconds: 500),
+    ];
+
+    for (var i = 0; i < delays.length; i++) {
+      final delay = delays[i];
+      if (delay > Duration.zero) {
+        await Future<void>.delayed(delay);
+      }
+      try {
+        final identities = await supabase.auth.getUserIdentities();
+        final linked = identities.any(
+          (identity) => identity.provider == 'google',
+        );
+        _logGoogleLink('identity_verify', 'attempt=${i + 1} linked=$linked');
+        if (linked) return true;
+      } catch (e) {
+        _logGoogleLink(
+          'identity_verify',
+          'attempt=${i + 1}_error:${_summarizeGoogleLinkError(e)}',
+        );
+      }
+    }
+    return false;
+  }
+
+  /// AuthException 을 토큰 없이 supabase_link 실패 로그로 남긴다.
+  void _logSupabaseLinkAuthFailure(Object e) {
+    if (e is AuthException) {
+      _logGoogleLink(
+        'supabase_link',
+        'failed:type=AuthException,'
+            'status=${e.statusCode},'
+            'code=${e.code},'
+            'message=${_sanitizeAuthErrorMessage(e.message)}',
+      );
+      return;
+    }
+    _logGoogleLink(
+      'supabase_link',
+      'failed:type=${e.runtimeType},${_summarizeGoogleLinkError(e)}',
+    );
+  }
+
+  /// google_sign_in 7.x 에서 accessToken 을 획득한다.
+  ///
+  /// [GoogleSignInAuthentication] 에는 idToken 만 있으므로
+  /// [GoogleSignInAuthorizationClient] 로 accessToken 을 별도 요청한다.
+  ///
+  /// 반환:
+  /// - `(token: '...', canceled: false)` 성공
+  /// - `(token: null, canceled: true)` 사용자 취소 → 실패 SnackBar 금지
+  /// - `(token: null, canceled: false)` 토큰 누락 → 실패 SnackBar
+  Future<({String? token, bool canceled})> _obtainGoogleAccessToken(
+    GoogleSignInAccount account,
+  ) async {
+    _logGoogleLink('authorization', 'start');
+
+    GoogleSignInClientAuthorization? authorization;
+    try {
+      authorization = await account.authorizationClient.authorizationForScopes(
+        _kGoogleAuthScopes,
+      );
+    } on GoogleSignInException catch (e) {
+      if (_isGoogleSignInCanceled(e)) {
+        _logGoogleLink('authorization', 'canceled:${e.code.name}');
+        return (token: null, canceled: true);
+      }
+      _logGoogleLink(
+        'authorization',
+        'silent_failed:${_summarizeGoogleLinkError(e)}',
+      );
+      rethrow;
+    }
+
+    if (authorization != null) {
+      _logGoogleLink('authorization', 'silent_success');
+    } else {
+      _logGoogleLink('authorization', 'interactive_start');
+      try {
+        authorization = await account.authorizationClient.authorizeScopes(
+          _kGoogleAuthScopes,
+        );
+        _logGoogleLink('authorization', 'interactive_success');
+      } on GoogleSignInException catch (e) {
+        if (_isGoogleSignInCanceled(e)) {
+          _logGoogleLink('authorization', 'canceled:${e.code.name}');
+          return (token: null, canceled: true);
+        }
+        _logGoogleLink(
+          'authorization',
+          'interactive_failed:${_summarizeGoogleLinkError(e)}',
+        );
+        rethrow;
+      }
+    }
+
+    final accessToken = authorization.accessToken.trim();
+    if (accessToken.isEmpty) {
+      _logGoogleLink('access_token', 'missing');
+      return (token: null, canceled: false);
+    }
+    _logGoogleLink('access_token', 'present');
+    return (token: accessToken, canceled: false);
+  }
+
   /// 현재 anonymous guest 세션(UUID 유지)에 Google identity 를 추가한다.
   ///
   /// `signInWithIdToken()` 은 기존 Google 계정 **로그인** API 이므로 사용하지
   /// 않는다. guest UUID 를 유지해야 하므로 Supabase Manual Linking 의
   /// `linkIdentityWithIdToken()` 한 가지 경로만 사용한다.
+  ///
+  /// Google 네이티브 인증은 idToken 과 accessToken 을 함께 전달한다.
   Future<void> _linkGoogleAccount() async {
     if (_isGoogleLinkBusy || _isAppleLinkBusy) return;
 
@@ -3541,7 +3662,9 @@ class _HomePageState extends State<HomePage>
       final GoogleSignInAccount account;
       _logGoogleLink('authenticate', 'start');
       try {
-        account = await GoogleSignIn.instance.authenticate();
+        account = await GoogleSignIn.instance.authenticate(
+          scopeHint: _kGoogleAuthScopes,
+        );
         _logGoogleLink('authenticate', 'success');
       } on GoogleSignInException catch (e) {
         if (_isGoogleSignInCanceled(e)) {
@@ -3558,27 +3681,34 @@ class _HomePageState extends State<HomePage>
       final idToken = account.authentication.idToken;
       if (idToken == null || idToken.isEmpty) {
         _logGoogleLink('id_token', 'missing');
-        // serverClientId / GIDServerClientID 미설정, Bundle ID 불일치 등이
-        // 흔하다. 토큰 값은 절대 출력하지 않는다.
         if (!mounted) return;
         _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       _logGoogleLink('id_token', 'present');
 
+      final accessOutcome = await _obtainGoogleAccessToken(account);
+      if (accessOutcome.canceled) {
+        // 사용자 취소: 실패 문구 없이 계정 연동 패널 유지.
+        return;
+      }
+      final accessToken = accessOutcome.token;
+      if (accessToken == null || accessToken.isEmpty) {
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
       _logGoogleLink('supabase_link', 'start');
       try {
         await supabase.auth.linkIdentityWithIdToken(
           provider: OAuthProvider.google,
           idToken: idToken,
+          accessToken: accessToken,
         );
         _logGoogleLink('supabase_link', 'success');
       } catch (e) {
-        final kind = _classifyGoogleLinkFailure(e);
-        _logGoogleLink(
-          'supabase_link',
-          'failed:$kind:${_summarizeGoogleLinkError(e)}',
-        );
+        _logSupabaseLinkAuthFailure(e);
         if (_isIdentityAlreadyLinkedError(e)) {
           await _signOutGoogleSdkQuietly();
           if (!mounted) return;
@@ -3588,10 +3718,9 @@ class _HomePageState extends State<HomePage>
         rethrow;
       }
 
-      // 링크 직후 서버 기준으로 identities 를 다시 확인한다.
+      // 링크 직후 서버 기준으로 identities 를 다시 확인한다(최대 3회).
       _logGoogleLink('identity_verify', 'start');
-      final identities = await supabase.auth.getUserIdentities();
-      final linkedGoogle = identities.any((i) => i.provider == 'google');
+      final linkedGoogle = await _waitForGoogleIdentityLinked();
       final afterUserId = supabase.auth.currentUser?.id;
 
       if (!linkedGoogle) {
@@ -3640,7 +3769,6 @@ class _HomePageState extends State<HomePage>
           'profile_update',
           'failed:${_summarizeGoogleLinkError(e)}',
         );
-        // Auth identity 는 유지. 보정 헬퍼로 재동기화 시도.
         try {
           await _syncLinkedProviderToProfileIfNeeded();
           _logGoogleLink('profile_update', 'resync_attempted');
@@ -3658,7 +3786,6 @@ class _HomePageState extends State<HomePage>
         _logGoogleLink('refresh', 'success');
       } catch (e) {
         _logGoogleLink('refresh', 'failed:${_summarizeGoogleLinkError(e)}');
-        // Auth 상태만 다시 확인해 성공 UI 는 유지한다.
         try {
           await _fetchProfile();
           await _syncLinkedProviderToProfileIfNeeded();
@@ -3670,7 +3797,6 @@ class _HomePageState extends State<HomePage>
         }
       }
 
-      // 최종 안전망: Auth identity + UUID 가 유지됐는지 재확인.
       final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
       final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
       if (!stillLinked || !stillSameUser) {
@@ -3692,7 +3818,6 @@ class _HomePageState extends State<HomePage>
       debugPrint('google_link:stack:$st');
 
       if (authLinkSucceeded) {
-        // Auth 는 이미 성공. 후속 동기화만 실패한 경우 성공 UI 를 유지한다.
         final stillLinked = _hasGoogleIdentity(supabase.auth.currentUser);
         final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
         if (stillLinked && stillSameUser) {
