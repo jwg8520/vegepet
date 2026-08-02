@@ -96,17 +96,18 @@ Widget buildVegePetOneButtonNoticeDialog(
   required bool isEnglishLocale,
 }) {
   final isEn = isEnglishLocale;
-  final bodyFontSize =
-      config.bodyFontSizeEn != null && isEn ? config.bodyFontSizeEn! : 10.0;
+  final bodyFontSize = config.bodyFontSizeEn != null && isEn
+      ? config.bodyFontSizeEn!
+      : 10.0;
   final int resolvedBodyMaxLines;
   if (config.bodyMaxLinesEn != null || config.bodyMaxLinesKo != null) {
     resolvedBodyMaxLines = isEn
         ? (config.bodyMaxLinesEn ??
-            config.bodyMaxLinesKo ??
-            kVegePetNoticeBodyDefaultMaxLines)
+              config.bodyMaxLinesKo ??
+              kVegePetNoticeBodyDefaultMaxLines)
         : (config.bodyMaxLinesKo ??
-            config.bodyMaxLinesEn ??
-            kVegePetNoticeBodyDefaultMaxLines);
+              config.bodyMaxLinesEn ??
+              kVegePetNoticeBodyDefaultMaxLines);
   } else {
     resolvedBodyMaxLines =
         config.bodyMaxLines ?? kVegePetNoticeBodyDefaultMaxLines;
@@ -171,10 +172,7 @@ Widget buildVegePetOneButtonNoticeDialog(
               kVegePetNoticeHorizontalPadding,
               0,
             ),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: titleBodyColumn,
-            ),
+            child: Align(alignment: Alignment.topLeft, child: titleBodyColumn),
           ),
         ),
         const SizedBox(height: 2),

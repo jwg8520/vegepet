@@ -54,29 +54,38 @@ class CatScoBabyAssets {
       'CatScoBabyAssets.load start (flame prefix: $kCatScoBabyFlamePrefix)',
     );
     try {
-      final idleImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/idle_sheet.png');
-      final walkImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/walk_sheet.png');
-      final runImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/run_sheet.png');
-      final lieDownImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/lie_down_sheet.png');
+      final idleImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/idle_sheet.png',
+      );
+      final walkImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/walk_sheet.png',
+      );
+      final runImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/run_sheet.png',
+      );
+      final lieDownImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/lie_down_sheet.png',
+      );
       final lyingIdleImage = await _loadImage(
         game,
         '$kCatScoBabyFlamePrefix/lying_idle_sheet.png',
       );
-      final kneadingImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/kneading_sheet.png');
-      final playImage =
-          await _loadImage(game, '$kCatScoBabyFlamePrefix/play_sheet.png');
+      final kneadingImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/kneading_sheet.png',
+      );
+      final playImage = await _loadImage(
+        game,
+        '$kCatScoBabyFlamePrefix/play_sheet.png',
+      );
 
       final lieDownFrames = _framesFromSheet(lieDownImage);
 
-      SpriteAnimation sheetAnim(
-        Image image, {
-        required bool loop,
-      }) {
+      SpriteAnimation sheetAnim(Image image, {required bool loop}) {
         return SpriteAnimation.fromFrameData(
           image,
           SpriteAnimationData.sequenced(

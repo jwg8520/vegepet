@@ -77,10 +77,7 @@ class PettingHeartEffectComponent extends PositionComponent {
     }
 
     final eased = _easeOutCubic(rawT);
-    position.setValues(
-      _startX,
-      _startY - _tune.riseDistance * eased,
-    );
+    position.setValues(_startX, _startY - _tune.riseDistance * eased);
     _currentScale =
         _tune.scaleStart + (_tune.scaleEnd - _tune.scaleStart) * eased;
     _currentOpacity = _tune.opacity * (1.0 - eased);

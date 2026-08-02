@@ -105,7 +105,9 @@ Widget buildProfileSelectOptionsList({
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.left,
               style: TextStyle(
-                fontSize: isEnglishLocale && optionLabelBuilder != null ? 10 : 11,
+                fontSize: isEnglishLocale && optionLabelBuilder != null
+                    ? 10
+                    : 11,
                 fontWeight: FontWeight.w600,
                 color: const Color(0xFF4A4A4A),
               ),

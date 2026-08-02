@@ -56,7 +56,8 @@ List<Widget> buildGameSubPanelHeader({
   bool useProfileTitleInset = false,
   TextStyle? titleStyle,
 }) {
-  final effectiveTitleStyle = titleStyle ??
+  final effectiveTitleStyle =
+      titleStyle ??
       const TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w700,
@@ -105,12 +106,7 @@ List<Widget> buildGameSubPanelHeader({
         ),
       )
     else
-      Positioned(
-        left: 37,
-        top: titleTop,
-        right: 8,
-        child: titleWidget,
-      ),
+      Positioned(left: 37, top: titleTop, right: 8, child: titleWidget),
   ];
 }
 

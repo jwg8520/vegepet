@@ -410,12 +410,14 @@ class YardGame extends FlameGame {
       return true;
     }
 
-    final px = (point.x / gameWidth * _collisionMaskWidth)
-        .floor()
-        .clamp(0, _collisionMaskWidth - 1);
-    final py = (point.y / gameHeight * _collisionMaskHeight)
-        .floor()
-        .clamp(0, _collisionMaskHeight - 1);
+    final px = (point.x / gameWidth * _collisionMaskWidth).floor().clamp(
+      0,
+      _collisionMaskWidth - 1,
+    );
+    final py = (point.y / gameHeight * _collisionMaskHeight).floor().clamp(
+      0,
+      _collisionMaskHeight - 1,
+    );
 
     final index = (py * _collisionMaskWidth + px) * 4;
     if (index < 0 || index + 3 >= bytes.lengthInBytes) return false;
@@ -456,10 +458,10 @@ class YardGame extends FlameGame {
     List<Vector2> currentPoints,
     List<Vector2> nextPoints,
   ) {
-    final currentMaskBlockedCount =
-        currentPoints.where(isInsideCollisionMask).length;
-    final nextMaskBlockedCount =
-        nextPoints.where(isInsideCollisionMask).length;
+    final currentMaskBlockedCount = currentPoints
+        .where(isInsideCollisionMask)
+        .length;
+    final nextMaskBlockedCount = nextPoints.where(isInsideCollisionMask).length;
 
     if (nextMaskBlockedCount > 0) {
       if (currentMaskBlockedCount > 0 &&

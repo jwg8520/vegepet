@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -61,7 +61,7 @@ const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
 const _kGoogleIosClientId =
     '256004504301-fbgm6n2kfj9lgnrjjp1as1f40c3rm3lp.apps.googleusercontent.com';
 const _kGoogleWebClientId =
-    '256004504301-r54kqh865r0m14orroqnd1hut36t5m6l.apps.googleusercontent.com';
+    '256004504301-tc68osd09lkv8g085p70ckljhjviaidd.apps.googleusercontent.com';
 
 /// 현재 Supabase Auth 사용자에 연결된 영구 계정 provider.
 ///

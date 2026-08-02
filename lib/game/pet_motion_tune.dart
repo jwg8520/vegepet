@@ -21,7 +21,10 @@ const Map<PetMotion, PetMotionTuneConfig> kPetMotionDefaultTunings = {
   PetMotion.walk: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
   PetMotion.run: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
   PetMotion.lieDown: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.lyingIdle: PetMotionTuneConfig(speedMultiplier: 0.7, repeatCount: 1),
+  PetMotion.lyingIdle: PetMotionTuneConfig(
+    speedMultiplier: 0.7,
+    repeatCount: 1,
+  ),
   PetMotion.standUp: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
   PetMotion.kneading: PetMotionTuneConfig(speedMultiplier: 0.8, repeatCount: 5),
   PetMotion.play: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 6),
