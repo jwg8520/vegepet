@@ -86,10 +86,6 @@ class AppLocalizationsEn extends AppLocalizations {
       '• Linked accounts cannot be changed.';
 
   @override
-  String get appleAccountLinkComingSoon =>
-      'Apple account linking will be available in the next update.';
-
-  @override
   String get pushNoticeEvent => 'Announcements & Events';
 
   @override

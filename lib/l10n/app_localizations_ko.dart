@@ -84,9 +84,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get accountLinkGuideCannotChange => '• 연동된 계정은 변경이 불가합니다.';
 
   @override
-  String get appleAccountLinkComingSoon => 'Apple 계정 연동은 다음 단계에서 지원될 예정이에요.';
-
-  @override
   String get pushNoticeEvent => '공지 및 이벤트';
 
   @override

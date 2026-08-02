@@ -248,12 +248,6 @@ abstract class AppLocalizations {
   /// **'• 연동된 계정은 변경이 불가합니다.'**
   String get accountLinkGuideCannotChange;
 
-  /// No description provided for @appleAccountLinkComingSoon.
-  ///
-  /// In ko, this message translates to:
-  /// **'Apple 계정 연동은 다음 단계에서 지원될 예정이에요.'**
-  String get appleAccountLinkComingSoon;
-
   /// No description provided for @pushNoticeEvent.
   ///
   /// In ko, this message translates to:

@@ -25,7 +25,6 @@
   "signInWithGoogle": "Sign in with Google",
   "accountLinkGuideOnlyOneProvider": "• Only one account can be linked.",
   "accountLinkGuideCannotChange": "• Linked accounts cannot be changed.",
-  "appleAccountLinkComingSoon": "Apple account linking will be available in the next update.",
   "pushNoticeEvent": "Announcements & Events",
   "pushMealReminder": "Meal Reminders",
   "pushNoticeEventDescription": "Get announcements and event updates from VegePet.",

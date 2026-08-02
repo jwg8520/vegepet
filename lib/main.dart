@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +17,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -3497,8 +3500,14 @@ class _HomePageState extends State<HomePage>
     final needle = provider.toLowerCase();
     for (final identity in identities) {
       if (identity.provider.toLowerCase() != needle) continue;
-      final raw = identity.identityData?['email']?.toString().trim();
-      if (raw != null && raw.isNotEmpty) return raw;
+      final data = identity.identityData;
+      final fromData = data?['email']?.toString().trim();
+      if (fromData != null && fromData.isNotEmpty) return fromData;
+      // Apple/Google identityData 에 email 이 없고 다른 키로만 올 수 있는 경우.
+      for (final key in const ['user_email', 'preferred_username']) {
+        final alt = data?[key]?.toString().trim();
+        if (alt != null && alt.isNotEmpty && alt.contains('@')) return alt;
+      }
     }
     return null;
   }
@@ -3546,11 +3555,7 @@ class _HomePageState extends State<HomePage>
 
   /// Google 연동 단계 로그. 토큰·이메일·이름 등 민감 값은 절대 넣지 않는다.
   void _logGoogleLink(String step, [String? detail]) {
-    if (detail == null || detail.isEmpty) {
-      debugPrint('google_link:$step');
-    } else {
-      debugPrint('google_link:$step:$detail');
-    }
+    _logAccountLink('google', step, detail);
   }
 
   /// 예외를 민감 정보 없이 요약한다.
@@ -3635,30 +3640,299 @@ class _HomePageState extends State<HomePage>
     return 'unknown';
   }
 
-  /// Apple 계정 연동. 이번 단계는 UI 배치만 하고 준비 중 안내만 표시한다.
+  /// 암호학적으로 안전한 Apple/OAuth raw nonce.
   ///
-  /// 실제 Apple 인증(`sign_in_with_apple` + `linkIdentityWithIdToken`)은 다음
-  /// 단계에서 이 함수 본문만 교체해 확장한다. account_type / profiles.email /
-  /// Auth identity 는 이 단계에서 절대 변경하지 않는다.
+  /// gotrue 2.20 에는 `generateRawNonce()` 가 없어 Random.secure 로 생성한다.
+  /// Apple SDK 에는 SHA-256(hashed) 를, Supabase 에는 raw 를 전달한다.
+  String _generateSecureRawNonce([int length = 32]) {
+    final random = Random.secure();
+    final values = List<int>.generate(length, (_) => random.nextInt(256));
+    return base64Url.encode(values).replaceAll('=', '');
+  }
+
+  String _sha256OfString(String input) {
+    final bytes = utf8.encode(input);
+    return sha256.convert(bytes).toString();
+  }
+
+  void _logAccountLink(String provider, String step, [String? detail]) {
+    final prefix = provider == 'apple' ? 'apple_link' : 'google_link';
+    if (detail == null || detail.isEmpty) {
+      debugPrint('$prefix:$step');
+    } else {
+      debugPrint('$prefix:$step:$detail');
+    }
+  }
+
+  bool _isAppleSignInCanceled(Object e) {
+    return e is SignInWithAppleAuthorizationException &&
+        e.code == AuthorizationErrorCode.canceled;
+  }
+
+  /// Apple 계정 연동: anonymous guest 에 Apple identity 를 연결한다.
   Future<void> _linkAppleAccount() async {
     if (_isAppleLinkBusy || _isGoogleLinkBusy) return;
-    final l10n = AppLocalizations.of(context);
 
+    final l10n = AppLocalizations.of(context);
+    final beforeUser = supabase.auth.currentUser;
+    if (beforeUser == null) {
+      _showSnack(l10n.snackLoginRequired);
+      return;
+    }
     if (_hasAnyLinkedAccount()) {
       _showSnack(l10n.snackAccountAlreadyLinked);
+      _safeSetState(_closeAccountLinkPanel);
+      return;
+    }
+    if (!_isCurrentUserAnonymous() &&
+        !_hasAnyLinkedAccountIdentity(beforeUser) &&
+        beforeUser.isAnonymous != true) {
+      // anonymous 가 아닌데 연동도 없는 비정상 세션은 막는다.
+      _showSnack(l10n.snackAccountLinkFailed);
       return;
     }
 
-    _showSnack(l10n.appleAccountLinkComingSoon);
+    final beforeUserId = beforeUser.id;
+    _safeSetState(() => _isAppleLinkBusy = true);
+    var authLinkSucceeded = false;
+
+    try {
+      _logAccountLink('apple', 'start');
+
+      final rawNonce = _generateSecureRawNonce();
+      final hashedNonce = _sha256OfString(rawNonce);
+      _logAccountLink('apple', 'nonce', 'generated');
+
+      _logAccountLink('apple', 'credential', 'start');
+      final AuthorizationCredentialAppleID credential;
+      try {
+        credential = await SignInWithApple.getAppleIDCredential(
+          scopes: const [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: hashedNonce,
+        );
+        _logAccountLink('apple', 'credential', 'success');
+      } on SignInWithAppleAuthorizationException catch (e) {
+        if (_isAppleSignInCanceled(e)) {
+          _logAccountLink('apple', 'credential', 'canceled');
+          return;
+        }
+        _logAccountLink(
+          'apple',
+          'credential',
+          'failed:type=SignInWithAppleAuthorizationException,'
+              'code=${e.code.name},'
+              'message=${_sanitizeAuthErrorMessage(e.message)}',
+        );
+        rethrow;
+      }
+
+      final identityToken = credential.identityToken;
+      if (identityToken == null || identityToken.isEmpty) {
+        _logAccountLink('apple', 'identity_token', 'missing');
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logAccountLink('apple', 'identity_token', 'present');
+
+      _logAccountLink('apple', 'supabase_link', 'start');
+      try {
+        await supabase.auth.linkIdentityWithIdToken(
+          provider: OAuthProvider.apple,
+          idToken: identityToken,
+          nonce: rawNonce,
+        );
+        _logAccountLink('apple', 'supabase_link', 'success');
+      } catch (e) {
+        _logSupabaseLinkAuthFailure(e, provider: 'apple');
+        if (_isIdentityAlreadyLinkedError(e)) {
+          if (!mounted) return;
+          await _showLinkedAccountInUseNotice();
+          return;
+        }
+        rethrow;
+      }
+
+      _logAccountLink('apple', 'identity_verify', 'start');
+      final linkedApple = await _waitForProviderIdentityLinked(
+        'apple',
+        logProvider: 'apple',
+      );
+      final afterUserId = supabase.auth.currentUser?.id;
+
+      if (!linkedApple) {
+        _logAccountLink(
+          'apple',
+          'identity_verify',
+          'failed:identity_not_found',
+        );
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logAccountLink('apple', 'identity_verify', 'success');
+
+      if (afterUserId == null || afterUserId != beforeUserId) {
+        _logAccountLink('apple', 'uuid_check', 'failed');
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+      _logAccountLink('apple', 'uuid_check', 'success');
+      authLinkSucceeded = true;
+
+      _linkedAccountProvider = _LinkedAccountProvider.apple;
+      _linkedAccountProviderReady = true;
+      if (mounted) {
+        _safeSetState(() {
+          if (_hasAnyLinkedAccount()) {
+            _isAccountLinkPanelOpen = false;
+          }
+        });
+      }
+
+      _logAccountLink('apple', 'profile_update', 'start');
+      try {
+        final appleEmail = await _resolveAppleLinkEmail(
+          credentialEmail: credential.email,
+        );
+        await _persistLinkedProviderToProfile(
+          userId: afterUserId,
+          provider: _LinkedAccountProvider.apple,
+          email: appleEmail,
+          logProvider: 'apple',
+        );
+      } catch (e) {
+        try {
+          await _syncLinkedProviderToProfileIfNeeded();
+          _logAccountLink('apple', 'profile_update', 'resync_attempted');
+        } catch (syncErr) {
+          _logAccountLink(
+            'apple',
+            'profile_update',
+            'resync_failed:${_summarizeGoogleLinkError(syncErr)}',
+          );
+        }
+      }
+
+      _logAccountLink('apple', 'refresh', 'start');
+      try {
+        await _refreshAllUserDataAfterAuthChange();
+        _logAccountLink('apple', 'refresh', 'success');
+      } catch (e) {
+        _logAccountLink(
+          'apple',
+          'refresh',
+          'failed:${_summarizeGoogleLinkError(e)}',
+        );
+        try {
+          await _fetchProfile();
+          await _syncLinkedProviderToProfileIfNeeded();
+        } catch (syncErr) {
+          _logAccountLink(
+            'apple',
+            'refresh',
+            'fallback_sync_failed:${_summarizeGoogleLinkError(syncErr)}',
+          );
+        }
+      }
+
+      final serverProvider = await _fetchLinkedAccountProviderFromServer();
+      _linkedAccountProvider = serverProvider;
+      _linkedAccountProviderReady = true;
+      final stillLinked = serverProvider == _LinkedAccountProvider.apple;
+      final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+      _logAccountLink(
+        'apple',
+        'post_check',
+        'server_linked=$stillLinked same_user=$stillSameUser',
+      );
+
+      if (!stillLinked || !stillSameUser) {
+        _logAccountLink(
+          'apple',
+          'complete',
+          'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
+        );
+        if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
+        return;
+      }
+
+      _logAccountLink('apple', 'complete', 'success');
+      if (!mounted) return;
+      await _finishAccountLinkSuccessUi(_LinkedAccountProvider.apple);
+    } catch (e, st) {
+      if (_isAppleSignInCanceled(e)) {
+        _logAccountLink('apple', 'credential', 'canceled');
+        return;
+      }
+      _logAccountLink(
+        'apple',
+        'failed',
+        '${_classifyGoogleLinkFailure(e)}:${_summarizeGoogleLinkError(e)}',
+      );
+      debugPrint('apple_link:stack:$st');
+
+      if (authLinkSucceeded) {
+        try {
+          final serverProvider = await _fetchLinkedAccountProviderFromServer();
+          _linkedAccountProvider = serverProvider;
+          _linkedAccountProviderReady = true;
+          final stillLinked = serverProvider == _LinkedAccountProvider.apple;
+          final stillSameUser = supabase.auth.currentUser?.id == beforeUserId;
+          if (stillLinked && stillSameUser) {
+            _logAccountLink('apple', 'complete', 'auth_ok_despite_post_error');
+            if (!mounted) return;
+            await _finishAccountLinkSuccessUi(_LinkedAccountProvider.apple);
+            return;
+          }
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
+    } finally {
+      if (mounted) {
+        _safeSetState(() => _isAppleLinkBusy = false);
+      } else {
+        _isAppleLinkBusy = false;
+      }
+    }
   }
 
-  /// Auth identity 연결이 성공한 뒤 UI 를 성공 상태로 닫는다.
-  Future<void> _finishGoogleAccountLinkSuccessUi() async {
+  /// Apple 연동 이메일 우선순위:
+  /// credential → identityData → currentUser.email → 기존 profiles.email
+  Future<String?> _resolveAppleLinkEmail({String? credentialEmail}) async {
+    final fromCredential = credentialEmail?.trim();
+    if (fromCredential != null && fromCredential.isNotEmpty) {
+      return fromCredential;
+    }
+    try {
+      final identities = await supabase.auth.getUserIdentities();
+      final fromIdentity = _emailFromIdentities(identities, 'apple');
+      if (fromIdentity != null && fromIdentity.isNotEmpty) return fromIdentity;
+    } catch (_) {}
+    final authEmail = supabase.auth.currentUser?.email?.trim();
+    if (authEmail != null && authEmail.isNotEmpty) return authEmail;
+    final stored = _profile?['email']?.toString().trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+    return null;
+  }
+
+  /// Auth identity 연결 성공 후 공통 UI 성공 처리.
+  Future<void> _finishAccountLinkSuccessUi(
+    _LinkedAccountProvider provider,
+  ) async {
     if (!mounted) return;
+    if (provider == _LinkedAccountProvider.none) return;
     final l10n = AppLocalizations.of(context);
     _dismissFocus();
     _safeSetState(() {
-      _linkedAccountProvider = _LinkedAccountProvider.google;
+      _linkedAccountProvider = provider;
       _linkedAccountProviderReady = true;
       _closeAccountLinkPanel();
       _isAccountLinkInviteNoticeOpen = false;
@@ -3667,10 +3941,11 @@ class _HomePageState extends State<HomePage>
     await _showAccountLinkSuccessNotice();
   }
 
-  /// Google identity 가 서버에 반영될 때까지 짧게 재조회한다.
-  ///
-  /// 즉시 → 300ms → 추가 500ms, 총 최대 3회. 무한 재시도는 하지 않는다.
-  Future<bool> _waitForGoogleIdentityLinked() async {
+  /// 서버 identities 에 provider 가 반영될 때까지 짧게 재조회한다.
+  Future<bool> _waitForProviderIdentityLinked(
+    String provider, {
+    required String logProvider,
+  }) async {
     const delays = <Duration>[
       Duration.zero,
       Duration(milliseconds: 300),
@@ -3684,11 +3959,16 @@ class _HomePageState extends State<HomePage>
       }
       try {
         final identities = await supabase.auth.getUserIdentities();
-        final linked = _identitiesContainProvider(identities, 'google');
-        _logGoogleLink('identity_verify', 'attempt=${i + 1} linked=$linked');
+        final linked = _identitiesContainProvider(identities, provider);
+        _logAccountLink(
+          logProvider,
+          'identity_verify',
+          'attempt=${i + 1} linked=$linked',
+        );
         if (linked) return true;
       } catch (e) {
-        _logGoogleLink(
+        _logAccountLink(
+          logProvider,
           'identity_verify',
           'attempt=${i + 1}_error:${_summarizeGoogleLinkError(e)}',
         );
@@ -3697,23 +3977,34 @@ class _HomePageState extends State<HomePage>
     return false;
   }
 
-  /// Google 연동 성공 후 profiles 를 update(+select) 하고 결과를 검증한다.
-  ///
-  /// row 가 없으면 기존 필수 필드를 보존한 upsert 를 시도한다.
-  /// row 가 있는데 update 가 0행이면 RLS 문제로 보고 upsert 로 우회하지 않는다.
-  Future<Map<String, dynamic>> _persistGoogleLinkToProfile({
+  /// Google/Apple 연동 성공 후 profiles 를 update(+select) 하고 검증한다.
+  Future<Map<String, dynamic>> _persistLinkedProviderToProfile({
     required String userId,
-    required String? googleEmail,
+    required _LinkedAccountProvider provider,
+    required String? email,
+    required String logProvider,
   }) async {
+    final providerKey = _linkedAccountProviderKey(provider);
+    if (providerKey == null) {
+      throw StateError('invalid linked provider for profile persist');
+    }
+
     final linkedAt = DateTime.now().toIso8601String();
     final payload = <String, dynamic>{
-      'email': (googleEmail == null || googleEmail.isEmpty)
-          ? null
-          : googleEmail,
-      'account_type': 'google',
+      'account_type': providerKey,
       'linked_at': linkedAt,
       'updated_at': linkedAt,
     };
+
+    final trimmedEmail = email?.trim();
+    final emailProvided = trimmedEmail != null && trimmedEmail.isNotEmpty;
+    if (emailProvided) {
+      payload['email'] = trimmedEmail;
+    } else if (provider == _LinkedAccountProvider.google) {
+      // Google 기존 동작: 이메일을 못 얻으면 명시적으로 null 저장 가능.
+      payload['email'] = null;
+    }
+    // Apple: email 키를 생략해 기존 profiles.email 을 유지한다.
 
     try {
       final updated = await supabase
@@ -3727,18 +4018,24 @@ class _HomePageState extends State<HomePage>
 
       if (rows.length == 1) {
         final row = rows.first;
-        _validateGoogleLinkedProfileRow(row, userId: userId);
+        _validateLinkedProfileRow(
+          row,
+          userId: userId,
+          providerKey: providerKey,
+          requireEmail: emailProvided,
+        );
         _profile = {...?_profile, ...row};
-        _logGoogleLink(
+        _logAccountLink(
+          logProvider,
           'profile_update',
-          'rows=1 account_type_ok=true '
+          'success rows=1 account_type_ok=true '
               'email_present=${_profileHasEmail(row)} '
               'linked_at_present=${row['linked_at'] != null}',
         );
         return row;
       }
 
-      _logGoogleLink('profile_update', 'rows=${rows.length}');
+      _logAccountLink(logProvider, 'profile_update', 'rows=${rows.length}');
 
       final existing = await supabase
           .from('profiles')
@@ -3753,13 +4050,11 @@ class _HomePageState extends State<HomePage>
         );
       }
 
-      // row 자체가 없을 때만 기존 메모리 profile 필드를 보존해 upsert.
       final upsertPayload = <String, dynamic>{
         'id': userId,
         if (_profile != null) ..._profile!,
         ...payload,
       };
-      // 민감/소유권 필드는 덮어쓰지 않도록 id 를 다시 확정.
       upsertPayload['id'] = userId;
 
       final upserted = await supabase
@@ -3773,17 +4068,23 @@ class _HomePageState extends State<HomePage>
         throw StateError('profiles upsert affected ${upsertRows.length} rows');
       }
       final row = upsertRows.first;
-      _validateGoogleLinkedProfileRow(row, userId: userId);
+      _validateLinkedProfileRow(
+        row,
+        userId: userId,
+        providerKey: providerKey,
+        requireEmail: emailProvided,
+      );
       _profile = {...?_profile, ...row};
-      _logGoogleLink(
+      _logAccountLink(
+        logProvider,
         'profile_update',
-        'rows=1 via_upsert account_type_ok=true '
+        'success rows=1 via_upsert account_type_ok=true '
             'email_present=${_profileHasEmail(row)} '
             'linked_at_present=${row['linked_at'] != null}',
       );
       return row;
     } catch (e) {
-      _logProfileUpdateFailure(e);
+      _logProfileUpdateFailure(e, logProvider: logProvider);
       rethrow;
     }
   }
@@ -3793,24 +4094,30 @@ class _HomePageState extends State<HomePage>
     return email != null && email.isNotEmpty;
   }
 
-  void _validateGoogleLinkedProfileRow(
+  void _validateLinkedProfileRow(
     Map<String, dynamic> row, {
     required String userId,
+    required String providerKey,
+    required bool requireEmail,
   }) {
     if (row['id']?.toString() != userId) {
       throw StateError('profiles update id mismatch');
     }
-    if (row['account_type']?.toString() != 'google') {
-      throw StateError('profiles account_type is not google');
+    if (row['account_type']?.toString() != providerKey) {
+      throw StateError('profiles account_type is not $providerKey');
     }
     if (row['linked_at'] == null) {
       throw StateError('profiles linked_at is null');
     }
+    if (requireEmail && !_profileHasEmail(row)) {
+      throw StateError('profiles email missing after update');
+    }
   }
 
-  void _logProfileUpdateFailure(Object e) {
+  void _logProfileUpdateFailure(Object e, {required String logProvider}) {
     if (e is PostgrestException) {
-      _logGoogleLink(
+      _logAccountLink(
+        logProvider,
         'profile_update',
         'failed:code=${e.code},'
             'message=${_sanitizeAuthErrorMessage(e.message)},'
@@ -3819,13 +4126,18 @@ class _HomePageState extends State<HomePage>
       );
       return;
     }
-    _logGoogleLink('profile_update', 'failed:${_summarizeGoogleLinkError(e)}');
+    _logAccountLink(
+      logProvider,
+      'profile_update',
+      'failed:${_summarizeGoogleLinkError(e)}',
+    );
   }
 
   /// AuthException 을 토큰 없이 supabase_link 실패 로그로 남긴다.
-  void _logSupabaseLinkAuthFailure(Object e) {
+  void _logSupabaseLinkAuthFailure(Object e, {String provider = 'google'}) {
     if (e is AuthException) {
-      _logGoogleLink(
+      _logAccountLink(
+        provider,
         'supabase_link',
         'failed:type=AuthException,'
             'status=${e.statusCode},'
@@ -3834,7 +4146,8 @@ class _HomePageState extends State<HomePage>
       );
       return;
     }
-    _logGoogleLink(
+    _logAccountLink(
+      provider,
       'supabase_link',
       'failed:type=${e.runtimeType},${_summarizeGoogleLinkError(e)}',
     );
@@ -4005,7 +4318,10 @@ class _HomePageState extends State<HomePage>
 
       // 링크 직후 서버 기준으로 identities 를 다시 확인한다(최대 3회).
       _logGoogleLink('identity_verify', 'start');
-      final linkedGoogle = await _waitForGoogleIdentityLinked();
+      final linkedGoogle = await _waitForProviderIdentityLinked(
+        'google',
+        logProvider: 'google',
+      );
       final afterUserId = supabase.auth.currentUser?.id;
 
       if (!linkedGoogle) {
@@ -4059,9 +4375,11 @@ class _HomePageState extends State<HomePage>
             _linkedIdentityEmail(supabase.auth.currentUser, 'google') ??
             account.email.trim();
 
-        await _persistGoogleLinkToProfile(
+        await _persistLinkedProviderToProfile(
           userId: afterUserId,
-          googleEmail: googleEmail,
+          provider: _LinkedAccountProvider.google,
+          email: googleEmail,
+          logProvider: 'google',
         );
       } catch (e) {
         try {
@@ -4115,7 +4433,7 @@ class _HomePageState extends State<HomePage>
 
       _logGoogleLink('complete', 'success');
       if (!mounted) return;
-      await _finishGoogleAccountLinkSuccessUi();
+      await _finishAccountLinkSuccessUi(_LinkedAccountProvider.google);
     } catch (e, st) {
       final kind = _classifyGoogleLinkFailure(e);
       _logGoogleLink('failed', '$kind:${_summarizeGoogleLinkError(e)}');
@@ -4132,7 +4450,7 @@ class _HomePageState extends State<HomePage>
           if (stillLinked && stillSameUser) {
             _logGoogleLink('complete', 'auth_ok_despite_post_error');
             if (!mounted) return;
-            await _finishGoogleAccountLinkSuccessUi();
+            await _finishAccountLinkSuccessUi(_LinkedAccountProvider.google);
             return;
           }
         } catch (_) {

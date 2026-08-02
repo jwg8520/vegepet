@@ -25,7 +25,6 @@
   "signInWithGoogle": "Sign in with Google",
   "accountLinkGuideOnlyOneProvider": "• 1가지의 계정만 연동이 가능합니다.",
   "accountLinkGuideCannotChange": "• 연동된 계정은 변경이 불가합니다.",
-  "appleAccountLinkComingSoon": "Apple 계정 연동은 다음 단계에서 지원될 예정이에요.",
   "pushNoticeEvent": "공지 및 이벤트",
   "pushMealReminder": "먹이(식단인증)",
   "pushNoticeEventDescription": "운영자가 보내는 공지와 이벤트 알림을 받아요.",
