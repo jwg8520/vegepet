@@ -83,7 +83,8 @@
   "menuLabelProfile": "프로필",
   "menuLabelDietDiary": "식단일지",
   "menuLabelBag": "가방",
-  "menuLabelShop": "상점",
+  "menuAnalysis": "분석",
+  "analysisPanelTitle": "분석",
   "menuLabelPokedex": "도감",
   "menuLabelStory": "스토리",
   "menuLabelHelp": "도움말",
@@ -149,8 +150,6 @@
   "pokedexDefaultPetName": "베지펫",
   "storyPanelTitle": "스토리",
   "helpPanelTitle": "도움말",
-  "shopNoticeTitle": "오픈 준비중...",
-  "shopNoticeDescription": "조금만 기다려주세요!",
   "withdrawConfirmTitle": "⚠️회원 탈퇴",
   "withdrawConfirmDescription": "현재 계정의 펫, 식단 일지 등 모든 기록이 초기화 되며, 되돌릴 수 없어요. 정말 탈퇴할까요?",
   "withdrawConfirmDeleteButton": "탈퇴",
@@ -337,5 +336,58 @@
   "mealFeedbackDietaryFiberDown": "식이섬유 줄이기",
   "withdrawErrorNoticeTitle": "탈퇴 오류",
   "withdrawErrorNoticeBody": "회원 탈퇴 중 오류가 발생했습니다. 다시 시도해 주세요.",
-  "withdrawErrorNoticeConfirm": "확인"
+  "withdrawErrorNoticeConfirm": "확인",
+  "analysisPeriodSevenDays": "7일",
+  "analysisPeriodThirtyDays": "30일",
+  "analysisPeriodThreeMonths": "3개월",
+  "analysisWeightTrendTitle": "체중 변화 추세",
+  "analysisWeightStart": "시작",
+  "analysisWeightCurrent": "현재",
+  "analysisWeightChange": "변화",
+  "analysisWeightLegendWeight": "체중",
+  "analysisWeightLegendTarget": "목표",
+  "analysisTargetWeightLabel": "목표 {weight}kg",
+  "@analysisTargetWeightLabel": {
+    "placeholders": {
+      "weight": {"type": "String"}
+    }
+  },
+  "analysisTargetWeightUnset": "목표 미설정",
+  "analysisNoWeightData": "선택한 기간의 체중 기록이 없습니다.",
+  "analysisFeedbackTitle": "식단 피드백 현황",
+  "analysisFeedbackPerfect": "Perfect",
+  "analysisFeedbackOther": "기타",
+  "analysisFeedbackTotalTopThree": "피드백 총 {count}건 중 Top 3",
+  "@analysisFeedbackTotalTopThree": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "analysisFeedbackCountAndPercent": "{count}건, {percent}%",
+  "@analysisFeedbackCountAndPercent": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "percent": {"type": "int"}
+    }
+  },
+  "analysisFeedbackLegendValue": "{count}건 · {percent}%",
+  "@analysisFeedbackLegendValue": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "percent": {"type": "int"}
+    }
+  },
+  "analysisNoFeedbackData": "선택한 기간의 식단 피드백이 없습니다.",
+  "analysisFeedbackProteinUp": "단백질 높이기",
+  "analysisFeedbackProteinDown": "단백질 줄이기",
+  "analysisFeedbackCarbohydratesUp": "탄수화물 높이기",
+  "analysisFeedbackCarbohydratesDown": "탄수화물 줄이기",
+  "analysisFeedbackFatUp": "지방 높이기",
+  "analysisFeedbackFatDown": "지방 줄이기",
+  "analysisFeedbackDietaryFiberUp": "식이섬유 높이기",
+  "analysisFeedbackDietaryFiberDown": "식이섬유 줄이기",
+  "analysisLoading": "데이터를 불러오는 중입니다.",
+  "analysisLoadFailed": "분석 데이터를 불러오지 못했습니다.",
+  "analysisRetry": "다시 시도",
+  "analysisNoRecord": "기록 없음"
 }

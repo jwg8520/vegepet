@@ -83,7 +83,8 @@
   "menuLabelProfile": "Profile",
   "menuLabelDietDiary": "Diet Diary",
   "menuLabelBag": "Bag",
-  "menuLabelShop": "Shop",
+  "menuAnalysis": "Analytics",
+  "analysisPanelTitle": "Analytics",
   "menuLabelPokedex": "Pokedex",
   "menuLabelStory": "Story",
   "menuLabelHelp": "Help",
@@ -149,8 +150,6 @@
   "pokedexDefaultPetName": "VegePet",
   "storyPanelTitle": "Story",
   "helpPanelTitle": "Help",
-  "shopNoticeTitle": "Coming soon...",
-  "shopNoticeDescription": "Please stay tuned!",
   "withdrawConfirmTitle": "⚠️Delete Account",
   "withdrawConfirmDescription": "Deleting your account will remove all pets, diet diary records, and account data. This can't be undone. Continue?",
   "withdrawConfirmDeleteButton": "Delete",
@@ -337,5 +336,58 @@
   "mealFeedbackDietaryFiberDown": "less dietary fiber",
   "withdrawErrorNoticeTitle": "Withdrawal error",
   "withdrawErrorNoticeBody": "An error occurred while deleting your account. Please try again.",
-  "withdrawErrorNoticeConfirm": "OK"
+  "withdrawErrorNoticeConfirm": "OK",
+  "analysisPeriodSevenDays": "7 days",
+  "analysisPeriodThirtyDays": "30 days",
+  "analysisPeriodThreeMonths": "3 months",
+  "analysisWeightTrendTitle": "Weight trend",
+  "analysisWeightStart": "Start",
+  "analysisWeightCurrent": "Current",
+  "analysisWeightChange": "Change",
+  "analysisWeightLegendWeight": "Weight",
+  "analysisWeightLegendTarget": "Target",
+  "analysisTargetWeightLabel": "Target {weight} kg",
+  "@analysisTargetWeightLabel": {
+    "placeholders": {
+      "weight": {"type": "String"}
+    }
+  },
+  "analysisTargetWeightUnset": "Target not set",
+  "analysisNoWeightData": "No weight records for this period.",
+  "analysisFeedbackTitle": "Meal feedback",
+  "analysisFeedbackPerfect": "Perfect",
+  "analysisFeedbackOther": "Other",
+  "analysisFeedbackTotalTopThree": "Top 3 feedback items out of {count}",
+  "@analysisFeedbackTotalTopThree": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "analysisFeedbackCountAndPercent": "{count}, {percent}%",
+  "@analysisFeedbackCountAndPercent": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "percent": {"type": "int"}
+    }
+  },
+  "analysisFeedbackLegendValue": "{count} · {percent}%",
+  "@analysisFeedbackLegendValue": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "percent": {"type": "int"}
+    }
+  },
+  "analysisNoFeedbackData": "No meal feedback for this period.",
+  "analysisFeedbackProteinUp": "Increase protein",
+  "analysisFeedbackProteinDown": "Reduce protein",
+  "analysisFeedbackCarbohydratesUp": "Increase carbohydrates",
+  "analysisFeedbackCarbohydratesDown": "Reduce carbohydrates",
+  "analysisFeedbackFatUp": "Increase fat",
+  "analysisFeedbackFatDown": "Reduce fat",
+  "analysisFeedbackDietaryFiberUp": "Increase dietary fiber",
+  "analysisFeedbackDietaryFiberDown": "Reduce dietary fiber",
+  "analysisLoading": "Loading data…",
+  "analysisLoadFailed": "Couldn’t load analytics data.",
+  "analysisRetry": "Retry",
+  "analysisNoRecord": "No records"
 }

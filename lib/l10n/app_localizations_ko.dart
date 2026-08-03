@@ -260,7 +260,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get menuLabelBag => '가방';
 
   @override
-  String get menuLabelShop => '상점';
+  String get menuAnalysis => '분석';
+
+  @override
+  String get analysisPanelTitle => '분석';
 
   @override
   String get menuLabelPokedex => '도감';
@@ -459,12 +462,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get helpPanelTitle => '도움말';
-
-  @override
-  String get shopNoticeTitle => '오픈 준비중...';
-
-  @override
-  String get shopNoticeDescription => '조금만 기다려주세요!';
 
   @override
   String get withdrawConfirmTitle => '⚠️회원 탈퇴';
@@ -948,4 +945,105 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get withdrawErrorNoticeConfirm => '확인';
+
+  @override
+  String get analysisPeriodSevenDays => '7일';
+
+  @override
+  String get analysisPeriodThirtyDays => '30일';
+
+  @override
+  String get analysisPeriodThreeMonths => '3개월';
+
+  @override
+  String get analysisWeightTrendTitle => '체중 변화 추세';
+
+  @override
+  String get analysisWeightStart => '시작';
+
+  @override
+  String get analysisWeightCurrent => '현재';
+
+  @override
+  String get analysisWeightChange => '변화';
+
+  @override
+  String get analysisWeightLegendWeight => '체중';
+
+  @override
+  String get analysisWeightLegendTarget => '목표';
+
+  @override
+  String analysisTargetWeightLabel(String weight) {
+    return '목표 ${weight}kg';
+  }
+
+  @override
+  String get analysisTargetWeightUnset => '목표 미설정';
+
+  @override
+  String get analysisNoWeightData => '선택한 기간의 체중 기록이 없습니다.';
+
+  @override
+  String get analysisFeedbackTitle => '식단 피드백 현황';
+
+  @override
+  String get analysisFeedbackPerfect => 'Perfect';
+
+  @override
+  String get analysisFeedbackOther => '기타';
+
+  @override
+  String analysisFeedbackTotalTopThree(int count) {
+    return '피드백 총 $count건 중 Top 3';
+  }
+
+  @override
+  String analysisFeedbackCountAndPercent(int count, int percent) {
+    return '$count건, $percent%';
+  }
+
+  @override
+  String analysisFeedbackLegendValue(int count, int percent) {
+    return '$count건 · $percent%';
+  }
+
+  @override
+  String get analysisNoFeedbackData => '선택한 기간의 식단 피드백이 없습니다.';
+
+  @override
+  String get analysisFeedbackProteinUp => '단백질 높이기';
+
+  @override
+  String get analysisFeedbackProteinDown => '단백질 줄이기';
+
+  @override
+  String get analysisFeedbackCarbohydratesUp => '탄수화물 높이기';
+
+  @override
+  String get analysisFeedbackCarbohydratesDown => '탄수화물 줄이기';
+
+  @override
+  String get analysisFeedbackFatUp => '지방 높이기';
+
+  @override
+  String get analysisFeedbackFatDown => '지방 줄이기';
+
+  @override
+  String get analysisFeedbackDietaryFiberUp => '식이섬유 높이기';
+
+  @override
+  String get analysisFeedbackDietaryFiberDown => '식이섬유 줄이기';
+
+  @override
+  String get analysisLoading => '데이터를 불러오는 중입니다.';
+
+  @override
+  String get analysisLoadFailed => '분석 데이터를 불러오지 못했습니다.';
+
+  @override
+  String get analysisRetry => '다시 시도';
+
+  @override
+  String get analysisNoRecord => '기록 없음';
 }

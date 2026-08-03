@@ -596,11 +596,17 @@ abstract class AppLocalizations {
   /// **'가방'**
   String get menuLabelBag;
 
-  /// No description provided for @menuLabelShop.
+  /// No description provided for @menuAnalysis.
   ///
   /// In ko, this message translates to:
-  /// **'상점'**
-  String get menuLabelShop;
+  /// **'분석'**
+  String get menuAnalysis;
+
+  /// No description provided for @analysisPanelTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'분석'**
+  String get analysisPanelTitle;
 
   /// No description provided for @menuLabelPokedex.
   ///
@@ -991,18 +997,6 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'도움말'**
   String get helpPanelTitle;
-
-  /// No description provided for @shopNoticeTitle.
-  ///
-  /// In ko, this message translates to:
-  /// **'오픈 준비중...'**
-  String get shopNoticeTitle;
-
-  /// No description provided for @shopNoticeDescription.
-  ///
-  /// In ko, this message translates to:
-  /// **'조금만 기다려주세요!'**
-  String get shopNoticeDescription;
 
   /// No description provided for @withdrawConfirmTitle.
   ///
@@ -1867,6 +1861,192 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'확인'**
   String get withdrawErrorNoticeConfirm;
+
+  /// No description provided for @analysisPeriodSevenDays.
+  ///
+  /// In ko, this message translates to:
+  /// **'7일'**
+  String get analysisPeriodSevenDays;
+
+  /// No description provided for @analysisPeriodThirtyDays.
+  ///
+  /// In ko, this message translates to:
+  /// **'30일'**
+  String get analysisPeriodThirtyDays;
+
+  /// No description provided for @analysisPeriodThreeMonths.
+  ///
+  /// In ko, this message translates to:
+  /// **'3개월'**
+  String get analysisPeriodThreeMonths;
+
+  /// No description provided for @analysisWeightTrendTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'체중 변화 추세'**
+  String get analysisWeightTrendTitle;
+
+  /// No description provided for @analysisWeightStart.
+  ///
+  /// In ko, this message translates to:
+  /// **'시작'**
+  String get analysisWeightStart;
+
+  /// No description provided for @analysisWeightCurrent.
+  ///
+  /// In ko, this message translates to:
+  /// **'현재'**
+  String get analysisWeightCurrent;
+
+  /// No description provided for @analysisWeightChange.
+  ///
+  /// In ko, this message translates to:
+  /// **'변화'**
+  String get analysisWeightChange;
+
+  /// No description provided for @analysisWeightLegendWeight.
+  ///
+  /// In ko, this message translates to:
+  /// **'체중'**
+  String get analysisWeightLegendWeight;
+
+  /// No description provided for @analysisWeightLegendTarget.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표'**
+  String get analysisWeightLegendTarget;
+
+  /// No description provided for @analysisTargetWeightLabel.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표 {weight}kg'**
+  String analysisTargetWeightLabel(String weight);
+
+  /// No description provided for @analysisTargetWeightUnset.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표 미설정'**
+  String get analysisTargetWeightUnset;
+
+  /// No description provided for @analysisNoWeightData.
+  ///
+  /// In ko, this message translates to:
+  /// **'선택한 기간의 체중 기록이 없습니다.'**
+  String get analysisNoWeightData;
+
+  /// No description provided for @analysisFeedbackTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'식단 피드백 현황'**
+  String get analysisFeedbackTitle;
+
+  /// No description provided for @analysisFeedbackPerfect.
+  ///
+  /// In ko, this message translates to:
+  /// **'Perfect'**
+  String get analysisFeedbackPerfect;
+
+  /// No description provided for @analysisFeedbackOther.
+  ///
+  /// In ko, this message translates to:
+  /// **'기타'**
+  String get analysisFeedbackOther;
+
+  /// No description provided for @analysisFeedbackTotalTopThree.
+  ///
+  /// In ko, this message translates to:
+  /// **'피드백 총 {count}건 중 Top 3'**
+  String analysisFeedbackTotalTopThree(int count);
+
+  /// No description provided for @analysisFeedbackCountAndPercent.
+  ///
+  /// In ko, this message translates to:
+  /// **'{count}건, {percent}%'**
+  String analysisFeedbackCountAndPercent(int count, int percent);
+
+  /// No description provided for @analysisFeedbackLegendValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'{count}건 · {percent}%'**
+  String analysisFeedbackLegendValue(int count, int percent);
+
+  /// No description provided for @analysisNoFeedbackData.
+  ///
+  /// In ko, this message translates to:
+  /// **'선택한 기간의 식단 피드백이 없습니다.'**
+  String get analysisNoFeedbackData;
+
+  /// No description provided for @analysisFeedbackProteinUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'단백질 높이기'**
+  String get analysisFeedbackProteinUp;
+
+  /// No description provided for @analysisFeedbackProteinDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'단백질 줄이기'**
+  String get analysisFeedbackProteinDown;
+
+  /// No description provided for @analysisFeedbackCarbohydratesUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'탄수화물 높이기'**
+  String get analysisFeedbackCarbohydratesUp;
+
+  /// No description provided for @analysisFeedbackCarbohydratesDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'탄수화물 줄이기'**
+  String get analysisFeedbackCarbohydratesDown;
+
+  /// No description provided for @analysisFeedbackFatUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'지방 높이기'**
+  String get analysisFeedbackFatUp;
+
+  /// No description provided for @analysisFeedbackFatDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'지방 줄이기'**
+  String get analysisFeedbackFatDown;
+
+  /// No description provided for @analysisFeedbackDietaryFiberUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'식이섬유 높이기'**
+  String get analysisFeedbackDietaryFiberUp;
+
+  /// No description provided for @analysisFeedbackDietaryFiberDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'식이섬유 줄이기'**
+  String get analysisFeedbackDietaryFiberDown;
+
+  /// No description provided for @analysisLoading.
+  ///
+  /// In ko, this message translates to:
+  /// **'데이터를 불러오는 중입니다.'**
+  String get analysisLoading;
+
+  /// No description provided for @analysisLoadFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'분석 데이터를 불러오지 못했습니다.'**
+  String get analysisLoadFailed;
+
+  /// No description provided for @analysisRetry.
+  ///
+  /// In ko, this message translates to:
+  /// **'다시 시도'**
+  String get analysisRetry;
+
+  /// No description provided for @analysisNoRecord.
+  ///
+  /// In ko, this message translates to:
+  /// **'기록 없음'**
+  String get analysisNoRecord;
 }
 
 class _AppLocalizationsDelegate

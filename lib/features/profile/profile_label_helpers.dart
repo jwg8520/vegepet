@@ -174,10 +174,10 @@ String menuLabelForKey(String key, AppLocalizations l10n) {
       return l10n.menuLabelProfile;
     case 'dietDiary':
       return l10n.menuLabelDietDiary;
+    case 'analysis':
+      return l10n.menuAnalysis;
     case 'bag':
       return l10n.menuLabelBag;
-    case 'shop':
-      return l10n.menuLabelShop;
     case 'pokedex':
       return l10n.menuLabelPokedex;
     case 'story':

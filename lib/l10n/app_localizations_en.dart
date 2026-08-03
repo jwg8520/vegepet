@@ -269,7 +269,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuLabelBag => 'Bag';
 
   @override
-  String get menuLabelShop => 'Shop';
+  String get menuAnalysis => 'Analytics';
+
+  @override
+  String get analysisPanelTitle => 'Analytics';
 
   @override
   String get menuLabelPokedex => 'Pokedex';
@@ -476,12 +479,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get helpPanelTitle => 'Help';
-
-  @override
-  String get shopNoticeTitle => 'Coming soon...';
-
-  @override
-  String get shopNoticeDescription => 'Please stay tuned!';
 
   @override
   String get withdrawConfirmTitle => '⚠️Delete Account';
@@ -987,4 +984,105 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get withdrawErrorNoticeConfirm => 'OK';
+
+  @override
+  String get analysisPeriodSevenDays => '7 days';
+
+  @override
+  String get analysisPeriodThirtyDays => '30 days';
+
+  @override
+  String get analysisPeriodThreeMonths => '3 months';
+
+  @override
+  String get analysisWeightTrendTitle => 'Weight trend';
+
+  @override
+  String get analysisWeightStart => 'Start';
+
+  @override
+  String get analysisWeightCurrent => 'Current';
+
+  @override
+  String get analysisWeightChange => 'Change';
+
+  @override
+  String get analysisWeightLegendWeight => 'Weight';
+
+  @override
+  String get analysisWeightLegendTarget => 'Target';
+
+  @override
+  String analysisTargetWeightLabel(String weight) {
+    return 'Target $weight kg';
+  }
+
+  @override
+  String get analysisTargetWeightUnset => 'Target not set';
+
+  @override
+  String get analysisNoWeightData => 'No weight records for this period.';
+
+  @override
+  String get analysisFeedbackTitle => 'Meal feedback';
+
+  @override
+  String get analysisFeedbackPerfect => 'Perfect';
+
+  @override
+  String get analysisFeedbackOther => 'Other';
+
+  @override
+  String analysisFeedbackTotalTopThree(int count) {
+    return 'Top 3 feedback items out of $count';
+  }
+
+  @override
+  String analysisFeedbackCountAndPercent(int count, int percent) {
+    return '$count, $percent%';
+  }
+
+  @override
+  String analysisFeedbackLegendValue(int count, int percent) {
+    return '$count · $percent%';
+  }
+
+  @override
+  String get analysisNoFeedbackData => 'No meal feedback for this period.';
+
+  @override
+  String get analysisFeedbackProteinUp => 'Increase protein';
+
+  @override
+  String get analysisFeedbackProteinDown => 'Reduce protein';
+
+  @override
+  String get analysisFeedbackCarbohydratesUp => 'Increase carbohydrates';
+
+  @override
+  String get analysisFeedbackCarbohydratesDown => 'Reduce carbohydrates';
+
+  @override
+  String get analysisFeedbackFatUp => 'Increase fat';
+
+  @override
+  String get analysisFeedbackFatDown => 'Reduce fat';
+
+  @override
+  String get analysisFeedbackDietaryFiberUp => 'Increase dietary fiber';
+
+  @override
+  String get analysisFeedbackDietaryFiberDown => 'Reduce dietary fiber';
+
+  @override
+  String get analysisLoading => 'Loading data…';
+
+  @override
+  String get analysisLoadFailed => 'Couldn’t load analytics data.';
+
+  @override
+  String get analysisRetry => 'Retry';
+
+  @override
+  String get analysisNoRecord => 'No records';
 }

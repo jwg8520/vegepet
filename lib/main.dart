@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -23,6 +23,9 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:vegepet/l10n/app_localizations.dart';
 import 'package:vegepet/features/bag/bag_models.dart';
+import 'package:vegepet/features/analysis/analysis_helpers.dart';
+import 'package:vegepet/features/analysis/analysis_models.dart';
+import 'package:vegepet/features/analysis/analysis_panel_content.dart';
 import 'package:vegepet/features/pet/vegepet_species_identity.dart';
 import 'package:vegepet/features/profile/profile_label_helpers.dart';
 import 'package:vegepet/features/profile/profile_select_helpers.dart';
@@ -220,6 +223,7 @@ enum _GameMenuSubOutsideDismissKind {
   none,
   profile,
   dietDiary,
+  analysis,
   bag,
   pokedex,
   story,
@@ -849,6 +853,23 @@ class _HomePageState extends State<HomePage>
   BagItem? _bagPanelDetailItem;
   late AnimationController _gameBagSwapController;
   late Animation<double> _gameBagSwapCurve;
+
+  /// 게임 메뉴 ↔ 분석 패널 전환.
+  bool _isAnalysisPanelOpen = false;
+  bool _analysisPanelSwapInProgress = false;
+  late AnimationController _gameAnalysisSwapController;
+  late Animation<double> _gameAnalysisSwapCurve;
+
+  AnalysisPeriod _selectedAnalysisPeriod = AnalysisPeriod.sevenDays;
+  AnalysisSnapshot _analysisSnapshot = AnalysisSnapshot.empty();
+  bool _isAnalysisLoading = false;
+  String? _analysisLoadError;
+  int _analysisRequestGeneration = 0;
+  String? _analysisLoadedUserId;
+  AnalysisPeriod? _analysisLoadedPeriod;
+  final Map<AnalysisPeriod, AnalysisSnapshot> _analysisCache =
+      <AnalysisPeriod, AnalysisSnapshot>{};
+
   bool _isPokedexPanelOpen = false;
   bool _pokedexPanelSwapInProgress = false;
   Map<String, dynamic>? _pokedexPanelSelectedEntry;
@@ -890,9 +911,6 @@ class _HomePageState extends State<HomePage>
 
   /// 설정 위 마당 오버레이: 고객센터(문의 이메일·복사) 글래스 패널.
   bool _isCustomerCenterPanelOpen = false;
-
-  /// 마당 공통 알림창: 상점 MVP 준비중 안내.
-  bool _isShopNoticeOpen = false;
 
   /// 가방 랜덤 분양권 사용 확인 (240×116 · 마당 좌표계).
   bool _isRandomTicketUseConfirmOpen = false;
@@ -1059,8 +1077,8 @@ class _HomePageState extends State<HomePage>
   static const List<(IconData, String)> _menuSheetItems = [
     (Icons.person_outline, 'profile'),
     (Icons.event_note_outlined, 'dietDiary'),
+    (Icons.analytics_outlined, 'analysis'),
     (Icons.backpack_outlined, 'bag'),
-    (Icons.storefront_outlined, 'shop'),
     (Icons.menu_book_outlined, 'pokedex'),
     (Icons.auto_stories_outlined, 'story'),
     (Icons.help_outline, 'help'),
@@ -1095,6 +1113,12 @@ class _HomePageState extends State<HomePage>
   static const double _kStoryIllustrationTop = 15;
   static const double _kStoryIllustrationW = 691;
   static const double _kStoryIllustrationH = 280;
+
+  /// 분석 글래스 패널 (844×390 마당 기준 · 스토리와 별도 좌표).
+  static const double _kAnalysisPanelLeft = 40;
+  static const double _kAnalysisPanelTop = 40;
+  static const double _kAnalysisPanelW = 766;
+  static const double _kAnalysisPanelH = 310;
 
   /// 추후 story png 삽입 시 경로 추가.
   static const List<String> _storyPageAssetPaths = <String>[
@@ -1240,6 +1264,14 @@ class _HomePageState extends State<HomePage>
       parent: _gameBagSwapController,
       curve: _kYardSidePanelSwapCurve,
     );
+    _gameAnalysisSwapController = AnimationController(
+      vsync: this,
+      duration: _kYardSidePanelSwapDuration,
+    );
+    _gameAnalysisSwapCurve = CurvedAnimation(
+      parent: _gameAnalysisSwapController,
+      curve: _kYardSidePanelSwapCurve,
+    );
     _gamePokedexSwapController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -1335,6 +1367,7 @@ class _HomePageState extends State<HomePage>
     _gameProfileSwapController.dispose();
     _gameDietDiarySwapController.dispose();
     _gameBagSwapController.dispose();
+    _gameAnalysisSwapController.dispose();
     _gamePokedexSwapController.dispose();
     _gameStorySwapController.dispose();
     _gameSettingsSwapController.dispose();
@@ -1497,6 +1530,7 @@ class _HomePageState extends State<HomePage>
     _diaryLogsCachedMonthKey = null;
     _randomTicketCount = 0;
     _selectedSpeciesId = null;
+    _invalidateAnalysisCache(resetPeriod: true);
   }
 
   /// 계정 전환 시 호출. 이전 user fetch/sync 결과를 무효화한다.
@@ -1629,6 +1663,8 @@ class _HomePageState extends State<HomePage>
       _profilePanelSwapInProgress = false;
       _isDietDiaryPanelOpen = false;
       _dietDiaryPanelSwapInProgress = false;
+      _isAnalysisPanelOpen = false;
+      _analysisPanelSwapInProgress = false;
       _isBagPanelOpen = false;
       _bagPanelSwapInProgress = false;
       _isPokedexPanelOpen = false;
@@ -1953,6 +1989,7 @@ class _HomePageState extends State<HomePage>
           _isInitialAdoptionPanelVisible = false;
         }
       });
+      _invalidateAnalysisCache();
     } catch (e, st) {
       debugPrint('profile upsert failed: $e\n$st');
 
@@ -2761,6 +2798,8 @@ class _HomePageState extends State<HomePage>
         _profileOpenedFromGameMenu = false;
         _isDietDiaryPanelOpen = false;
         _dietDiaryPanelSwapInProgress = false;
+        _isAnalysisPanelOpen = false;
+        _analysisPanelSwapInProgress = false;
         _isBagPanelOpen = false;
         _bagPanelSwapInProgress = false;
         _bagPanelDetailItem = null;
@@ -2793,6 +2832,7 @@ class _HomePageState extends State<HomePage>
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
       _gameBagSwapController.value = 0;
+      _gameAnalysisSwapController.value = 0;
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
       _gameHelpSwapController.value = 0;
@@ -3263,6 +3303,9 @@ class _HomePageState extends State<HomePage>
     _dietDiaryPanelSwapInProgress = false;
     _diaryVisibleMonth = _todayDiaryMonth();
 
+    _isAnalysisPanelOpen = false;
+    _analysisPanelSwapInProgress = false;
+
     _isBagPanelOpen = false;
     _bagPanelSwapInProgress = false;
     _bagPanelDetailItem = null;
@@ -3287,6 +3330,7 @@ class _HomePageState extends State<HomePage>
     _gameProfileSwapController.value = 0;
     _gameDietDiarySwapController.value = 0;
     _gameBagSwapController.value = 0;
+    _gameAnalysisSwapController.value = 0;
     _gamePokedexSwapController.value = 0;
     _gameSettingsSwapController.value = 0;
     _gameHelpSwapController.value = 0;
@@ -6941,6 +6985,8 @@ class _HomePageState extends State<HomePage>
         _profileOpenedFromGameMenu = false;
         _isDietDiaryPanelOpen = false;
         _dietDiaryPanelSwapInProgress = false;
+        _isAnalysisPanelOpen = false;
+        _analysisPanelSwapInProgress = false;
         _isBagPanelOpen = false;
         _bagPanelSwapInProgress = false;
         _bagPanelDetailItem = null;
@@ -6964,6 +7010,7 @@ class _HomePageState extends State<HomePage>
       _gameProfileSwapController.value = 0;
       _gameDietDiarySwapController.value = 0;
       _gameBagSwapController.value = 0;
+      _gameAnalysisSwapController.value = 0;
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
       _gameHelpSwapController.value = 0;
@@ -7165,6 +7212,7 @@ class _HomePageState extends State<HomePage>
     if (_gameBagSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
@@ -7228,6 +7276,7 @@ class _HomePageState extends State<HomePage>
     if (_gamePokedexSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
@@ -7305,11 +7354,273 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  void _instantResetAnalysisPanelIfOpen() {
+    _gameAnalysisSwapController.stop();
+    _gameAnalysisSwapController.value = 0.0;
+    if (!_isAnalysisPanelOpen && !_analysisPanelSwapInProgress) return;
+    _safeSetState(() {
+      _isAnalysisPanelOpen = false;
+      _analysisPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _openAnalysisPanelFromGameMenu() async {
+    if (_analysisPanelSwapInProgress) return;
+    if (_gameAnalysisSwapController.isAnimating) return;
+    _instantResetSettingsPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
+    if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
+        _pokedexPanelSelectedEntry = null;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    await _waitForUiSettle();
+    if (!mounted) return;
+    _gameAnalysisSwapController.stop();
+    _gameAnalysisSwapController.value = 0.0;
+    _safeSetState(() {
+      _analysisPanelSwapInProgress = true;
+      _isAnalysisPanelOpen = true;
+      final cached = _analysisCache[_selectedAnalysisPeriod];
+      if (cached != null) {
+        _analysisSnapshot = cached;
+        _isAnalysisLoading = false;
+        _analysisLoadError = null;
+      } else if (_analysisLoadedPeriod != _selectedAnalysisPeriod ||
+          _analysisLoadedUserId != supabase.auth.currentUser?.id) {
+        _isAnalysisLoading = true;
+        _analysisLoadError = null;
+      }
+    });
+    unawaited(_fetchAnalysisData(period: _selectedAnalysisPeriod));
+    await _gameAnalysisSwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _analysisPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closeAnalysisPanelToGameMenu() async {
+    if (_analysisPanelSwapInProgress) return;
+    _dismissFocus();
+    _gameAnalysisSwapController.value = 1.0;
+    _safeSetState(() {
+      _analysisPanelSwapInProgress = true;
+    });
+    await _gameAnalysisSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _analysisPanelSwapInProgress = false;
+      _isAnalysisPanelOpen = false;
+    });
+  }
+
+  void _invalidateAnalysisCache({bool resetPeriod = false}) {
+    _analysisRequestGeneration++;
+    _analysisCache.clear();
+    _analysisLoadedUserId = null;
+    _analysisLoadedPeriod = null;
+    if (resetPeriod) {
+      _selectedAnalysisPeriod = AnalysisPeriod.sevenDays;
+    }
+    if (!mounted) return;
+    final shouldRefreshOpenPanel =
+        _isAnalysisPanelOpen && !resetPeriod;
+    _safeSetState(() {
+      if (resetPeriod) {
+        _analysisSnapshot = AnalysisSnapshot.empty();
+        _analysisLoadError = null;
+        _isAnalysisLoading = false;
+      }
+    });
+    if (shouldRefreshOpenPanel) {
+      unawaited(
+        _fetchAnalysisData(
+          period: _selectedAnalysisPeriod,
+          force: true,
+        ),
+      );
+    }
+  }
+
+  void _onAnalysisPeriodSelected(AnalysisPeriod period) {
+    if (period == _selectedAnalysisPeriod) return;
+    _safeSetState(() {
+      _selectedAnalysisPeriod = period;
+      _analysisLoadError = null;
+      final cached = _analysisCache[period];
+      if (cached != null) {
+        _analysisSnapshot = cached;
+        _analysisLoadedPeriod = period;
+        _isAnalysisLoading = false;
+      } else {
+        _isAnalysisLoading = true;
+      }
+    });
+    unawaited(_fetchAnalysisData(period: period));
+  }
+
+  Future<void> _fetchAnalysisData({
+    required AnalysisPeriod period,
+    bool force = false,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      _safeSetState(() {
+        _analysisSnapshot = AnalysisSnapshot.empty();
+        _analysisLoadError = null;
+        _isAnalysisLoading = false;
+        _analysisLoadedUserId = null;
+        _analysisLoadedPeriod = null;
+      });
+      return;
+    }
+
+    if (!force &&
+        _analysisLoadedUserId == user.id &&
+        _analysisLoadedPeriod == period &&
+        _analysisCache.containsKey(period)) {
+      if (!mounted) return;
+      _safeSetState(() {
+        _analysisSnapshot = _analysisCache[period]!;
+        _isAnalysisLoading = false;
+        _analysisLoadError = null;
+      });
+      return;
+    }
+
+    if (!force && _analysisCache.containsKey(period)) {
+      if (!mounted) return;
+      _safeSetState(() {
+        _analysisSnapshot = _analysisCache[period]!;
+        _analysisLoadedUserId = user.id;
+        _analysisLoadedPeriod = period;
+        _isAnalysisLoading = false;
+        _analysisLoadError = null;
+      });
+      return;
+    }
+
+    final requestGeneration = ++_analysisRequestGeneration;
+    final requestedUserId = user.id;
+    final requestedPeriod = period;
+    final capturedUserDataGeneration = _userDataGeneration;
+    final range = analysisDateRangeFor(period);
+    final startDateKey = analysisDateKey(range.start);
+    final endDateKey = analysisDateKey(range.end);
+
+    if (mounted) {
+      _safeSetState(() {
+        _isAnalysisLoading = true;
+        _analysisLoadError = null;
+      });
+    }
+
+    try {
+      final results = await Future.wait<dynamic>([
+        supabase
+            .from('profiles')
+            .select('target_weight_kg')
+            .eq('id', user.id)
+            .maybeSingle(),
+        supabase
+            .from('meal_diary_notes')
+            .select('diary_date, current_weight_kg, updated_at')
+            .eq('user_id', user.id)
+            .gte('diary_date', startDateKey)
+            .lte('diary_date', endDateKey)
+            .order('diary_date', ascending: true)
+            .order('updated_at', ascending: true),
+        supabase
+            .from('meal_logs')
+            .select('meal_date, result_type, memo')
+            .eq('user_id', user.id)
+            .gte('meal_date', startDateKey)
+            .lte('meal_date', endDateKey)
+            .order('meal_date', ascending: true),
+      ]);
+
+      if (!mounted) return;
+      if (requestGeneration != _analysisRequestGeneration) return;
+      if (requestedUserId != supabase.auth.currentUser?.id) return;
+      if (requestedPeriod != _selectedAnalysisPeriod) return;
+      if (capturedUserDataGeneration != _userDataGeneration) return;
+
+      final profileRow = results[0] as Map<String, dynamic>?;
+      final weightRowsRaw = results[1];
+      final mealRowsRaw = results[2];
+
+      final weightRows = <Map<String, dynamic>>[
+        for (final row in (weightRowsRaw as List<dynamic>))
+          Map<String, dynamic>.from(row as Map),
+      ];
+      final mealRows = <Map<String, dynamic>>[
+        for (final row in (mealRowsRaw as List<dynamic>))
+          Map<String, dynamic>.from(row as Map),
+      ];
+
+      final snapshot = buildAnalysisSnapshot(
+        rangeStart: range.start,
+        rangeEnd: range.end,
+        targetWeightKg: profileRow?['target_weight_kg'],
+        weightRows: weightRows,
+        mealRows: mealRows,
+      );
+
+      _analysisCache[period] = snapshot;
+      _safeSetState(() {
+        _analysisSnapshot = snapshot;
+        _analysisLoadedUserId = requestedUserId;
+        _analysisLoadedPeriod = requestedPeriod;
+        _isAnalysisLoading = false;
+        _analysisLoadError = null;
+      });
+    } catch (e, st) {
+      debugPrint('fetch analysis data failed: $e\n$st');
+      if (!mounted) return;
+      if (requestGeneration != _analysisRequestGeneration) return;
+      if (requestedUserId != supabase.auth.currentUser?.id) return;
+      if (requestedPeriod != _selectedAnalysisPeriod) return;
+      if (capturedUserDataGeneration != _userDataGeneration) return;
+      _safeSetState(() {
+        _isAnalysisLoading = false;
+        _analysisLoadError = 'failed';
+      });
+    }
+  }
+
   Future<void> _openStoryPanelFromGameMenu() async {
     if (_storyPanelSwapInProgress) return;
     if (_gameStorySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
@@ -7385,6 +7696,7 @@ class _HomePageState extends State<HomePage>
     if (_gameHelpSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     _gameProfileSwapController.stop();
     _gameProfileSwapController.value = 0.0;
     if (mounted) {
@@ -7588,6 +7900,103 @@ class _HomePageState extends State<HomePage>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAnalysisGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: _buildVegePetGlassPanel(
+        width: _kAnalysisPanelW,
+        height: _kAnalysisPanelH,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // 프로필 패널과 동일한 뒤로가기 + 대제목 inset/스타일.
+            ..._buildGameSubPanelHeader(
+              title: l10n.analysisPanelTitle,
+              onBack: () => unawaited(_closeAnalysisPanelToGameMenu()),
+              useProfileTitleInset: true,
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 42,
+              bottom: 10,
+              child: AnalysisPanelContent(
+                l10n: l10n,
+                isEnglish: _isEnglishLocale,
+                selectedPeriod: _selectedAnalysisPeriod,
+                snapshot: _analysisSnapshot,
+                isLoading: _isAnalysisLoading,
+                loadError: _analysisLoadError,
+                onSelectPeriod: _onAnalysisPeriodSelected,
+                onRetry: () => unawaited(
+                  _fetchAnalysisData(
+                    period: _selectedAnalysisPeriod,
+                    force: true,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnalysisPanelLayer() {
+    final yardExitFade =
+        _gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none;
+    if (!_isAnalysisPanelOpen &&
+        !_analysisPanelSwapInProgress &&
+        !yardExitFade) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _gameAnalysisSwapController,
+        _gameMenuSubOutsideDismissController,
+      ]),
+      builder: (context, _) {
+        final analysisT =
+            _gameAnalysisSwapCurve.value.clamp(0.0, 1.0) *
+            _gameMenuYardExitFadeMultiplier;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => unawaited(
+                  _dismissGameSubPanelWithCenterExit(
+                    _GameMenuSubOutsideDismissKind.analysis,
+                  ),
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              left: _kAnalysisPanelLeft,
+              top: _kAnalysisPanelTop,
+              width: _kAnalysisPanelW,
+              height: _kAnalysisPanelH,
+              child: IgnorePointer(
+                ignoring: analysisT < 0.05,
+                child: Opacity(
+                  opacity: analysisT,
+                  child: _buildAnalysisGameMenuGlassPanel(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -9189,7 +9598,6 @@ class _HomePageState extends State<HomePage>
 
   /// 마당 240×116 공통 알림창 open 플래그를 모두 false 로 리셋한다.
   void _resetYardConfirmOverlayOpenFlags() {
-    _isShopNoticeOpen = false;
     _isWithdrawConfirmOpen = false;
     _isWithdrawFinalConfirmOpen = false;
     _isWithdrawErrorNoticeOpen = false;
@@ -9292,20 +9700,6 @@ class _HomePageState extends State<HomePage>
     _safeSetState(setClosed);
   }
 
-  Future<void> _hideShopNotice() async {
-    await _hideYardNotice(
-      isOpen: () => _isShopNoticeOpen,
-      markClosed: () => _isShopNoticeOpen = false,
-    );
-  }
-
-  void _closeShopNoticeOverlay() {
-    _requestHideYardNotice(
-      isOpen: () => _isShopNoticeOpen,
-      hide: _hideShopNotice,
-    );
-  }
-
   Future<void> _hideWithdrawConfirmNotice() async {
     await _hideYardNotice(
       isOpen: () => _isWithdrawConfirmOpen,
@@ -9336,7 +9730,6 @@ class _HomePageState extends State<HomePage>
 
   void _openWithdrawFinalConfirmFromFirst() {
     _safeSetState(() {
-      _isShopNoticeOpen = false;
       _isWithdrawConfirmOpen = false;
       _isWithdrawFinalConfirmOpen = true;
       _isNameInterlockNoticeOpen = false;
@@ -9826,7 +10219,6 @@ class _HomePageState extends State<HomePage>
         _buildPokedexMaturePetDetailGlobalOverlay(),
         _buildAccountLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
-        _buildShopNoticeGlobalOverlay(),
         _buildRandomTicketUseConfirmGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
@@ -10074,21 +10466,6 @@ class _HomePageState extends State<HomePage>
         bodyMaxLinesKo: 2,
         bodyOverflow: TextOverflow.visible,
         blockDialogPointerWithGestureDetector: false,
-      ),
-    );
-  }
-
-  Widget _buildShopNoticeGlobalOverlay() {
-    final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
-        isOpen: _isShopNoticeOpen,
-        title: l10n.shopNoticeTitle,
-        body: l10n.shopNoticeDescription,
-        primaryLabel: l10n.confirmLabel,
-        onPrimaryTap: _closeShopNoticeOverlay,
-        onOutsideTap: _closeShopNoticeOverlay,
-        bodyMaxLines: 2,
       ),
     );
   }
@@ -10509,7 +10886,6 @@ class _HomePageState extends State<HomePage>
       _resetAccountLinkPanelBusy();
       _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
-      _isShopNoticeOpen = false;
       _isNameInterlockNoticeOpen = false;
       _isAccountLinkInviteNoticeOpen = false;
       _isAccountLinkSuccessNoticeOpen = false;
@@ -11592,6 +11968,8 @@ class _HomePageState extends State<HomePage>
         _profilePanelSwapInProgress ||
         _isDietDiaryPanelOpen ||
         _dietDiaryPanelSwapInProgress ||
+        _isAnalysisPanelOpen ||
+        _analysisPanelSwapInProgress ||
         _isBagPanelOpen ||
         _bagPanelSwapInProgress ||
         _isPokedexPanelOpen ||
@@ -11626,7 +12004,6 @@ class _HomePageState extends State<HomePage>
     }
     return _gameMenuPanelOpen ||
         _isAnyGameMenuSubPanelOpenOrSwapping() ||
-        _isShopNoticeOpen ||
         _isRandomTicketUseConfirmOpen ||
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
@@ -11670,6 +12047,9 @@ class _HomePageState extends State<HomePage>
     }
     if (_isBagPanelOpen || _bagPanelSwapInProgress) {
       opacity *= 1.0 - _gameBagSwapCurve.value;
+    }
+    if (_isAnalysisPanelOpen || _analysisPanelSwapInProgress) {
+      opacity *= 1.0 - _gameAnalysisSwapCurve.value;
     }
     if (_isPokedexPanelOpen || _pokedexPanelSwapInProgress) {
       opacity *= 1.0 - _gamePokedexSwapCurve.value;
@@ -11763,6 +12143,7 @@ class _HomePageState extends State<HomePage>
           _buildToyMenuLayer(),
           _buildMealPanelLayer(),
           _buildGameMenuOverlayLayer(),
+          _buildAnalysisPanelLayer(),
           _buildStoryPanelLayer(),
         ],
       ),
@@ -16739,6 +17120,7 @@ class _HomePageState extends State<HomePage>
     if (gain == 3 || gain == 5) {
       _triggerPetKneadingIfApplicable(gain);
     }
+    _invalidateAnalysisCache();
   }
 
   Future<void> _applyRetryAllowedMealEvaluationResult(
@@ -17024,6 +17406,7 @@ class _HomePageState extends State<HomePage>
         _gameProfileSwapController,
         _gameDietDiarySwapController,
         _gameBagSwapController,
+        _gameAnalysisSwapController,
         _gamePokedexSwapController,
         _gameStorySwapController,
         _gameSettingsSwapController,
@@ -17681,6 +18064,10 @@ class _HomePageState extends State<HomePage>
       await _openDietDiaryFromGameMenu();
       return;
     }
+    if (key == 'analysis') {
+      await _openAnalysisPanelFromGameMenu();
+      return;
+    }
     if (key == 'bag') {
       await _openBagPanelFromGameMenu();
       return;
@@ -17699,15 +18086,6 @@ class _HomePageState extends State<HomePage>
     }
     if (key == 'help') {
       await _openHelpPanelFromGameMenu();
-      return;
-    }
-    if (key == 'shop') {
-      await _showYardNotice(
-        isOpen: () => _isShopNoticeOpen,
-        markOpen: () => _isShopNoticeOpen = true,
-        instantCloseOtherYardNotices: false,
-        beforeOpenSync: () => _isNameInterlockNoticeOpen = false,
-      );
       return;
     }
     await _closeGameMenuPanel();
@@ -17737,6 +18115,7 @@ class _HomePageState extends State<HomePage>
           _profile?['target_weight_kg'],
         );
         _profilePanelInitialTargetWeightKg = _targetWeightController.text;
+        _invalidateAnalysisCache();
       }
       _safeSetState(() {});
     } catch (e) {
@@ -17969,6 +18348,8 @@ class _HomePageState extends State<HomePage>
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     final user = supabase.auth.currentUser;
     if (user == null || _profile == null) {
       _showSnack(l10n.snackProfileLoadFailed);
@@ -18052,6 +18433,10 @@ class _HomePageState extends State<HomePage>
     _gameDietDiarySwapController.value = 0;
     _isDietDiaryPanelOpen = false;
     _dietDiaryPanelSwapInProgress = false;
+    _gameAnalysisSwapController.stop();
+    _gameAnalysisSwapController.value = 0;
+    _isAnalysisPanelOpen = false;
+    _analysisPanelSwapInProgress = false;
     _gameBagSwapController.stop();
     _gameBagSwapController.value = 0;
     _isBagPanelOpen = false;
@@ -18118,6 +18503,8 @@ class _HomePageState extends State<HomePage>
         }
       case _GameMenuSubOutsideDismissKind.dietDiary:
         if (_dietDiaryPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.analysis:
+        if (_analysisPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.bag:
         if (_bagPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.pokedex:
@@ -18193,11 +18580,6 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    if (_isShopNoticeOpen) {
-      _closeShopNoticeOverlay();
-      return;
-    }
-
     if (_isRandomTicketUseConfirmOpen) {
       _closeRandomTicketUseConfirmOverlay();
       return;
@@ -18249,6 +18631,13 @@ class _HomePageState extends State<HomePage>
     if (_isStoryPanelOpen && !_storyPanelSwapInProgress) {
       await _dismissGameSubPanelWithCenterExit(
         _GameMenuSubOutsideDismissKind.story,
+      );
+      return;
+    }
+
+    if (_isAnalysisPanelOpen && !_analysisPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.analysis,
       );
       return;
     }
@@ -18648,6 +19037,8 @@ class _HomePageState extends State<HomePage>
     if (_gameDietDiarySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     _dismissFocus();
     await _closeProfileSelectOverlay(notify: false, animated: false);
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
@@ -18772,6 +19163,7 @@ class _HomePageState extends State<HomePage>
     if (_settingsPanelSwapInProgress) return;
     if (_gameSettingsSwapController.isAnimating) return;
     _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
@@ -20255,6 +20647,7 @@ class _HomePageState extends State<HomePage>
       }, onConflict: 'user_id,diary_date');
       // 달력 ★ 즉시 반영용 캐시 갱신.
       _diaryCurrentWeightByDate[dateKey] = currentWeightKg;
+      _invalidateAnalysisCache();
       return true;
     } catch (e) {
       _showSnack(l10n.snackDiarySaveFailed(e.toString()));
