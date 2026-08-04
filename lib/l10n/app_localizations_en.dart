@@ -995,7 +995,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analysisPeriodThreeMonths => '3 months';
 
   @override
-  String get analysisWeightTrendTitle => 'Weight trend';
+  String get analysisRecent => 'Recent';
+
+  @override
+  String get analysisWeightTrendTitle => '• Weight trend';
 
   @override
   String get analysisWeightStart => 'Start';
@@ -1005,6 +1008,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get analysisWeightChange => 'Change';
+
+  @override
+  String get analysisWeightToTarget => 'To target';
+
+  @override
+  String get analysisTargetAchieved => 'Achieved🎉';
 
   @override
   String get analysisWeightLegendWeight => 'Weight';
@@ -1024,7 +1033,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analysisNoWeightData => 'No weight records for this period.';
 
   @override
-  String get analysisFeedbackTitle => 'Meal feedback';
+  String get analysisFeedbackTitle => '• Meal feedback';
 
   @override
   String get analysisFeedbackPerfect => 'Perfect';

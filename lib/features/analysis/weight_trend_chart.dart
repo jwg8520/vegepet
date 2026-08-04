@@ -5,28 +5,43 @@ import 'package:vegepet/features/analysis/analysis_models.dart';
 const Color kAnalysisWeightLineColor = Color(0xFF78AFA3);
 const Color kAnalysisTargetLineColor = Color(0xFFB7A7C8);
 
+/// 설정 패널 “회원 탈퇴” 문구와 동일한 색상.
+const Color kAnalysisWithdrawAccentColor = Color(0xFFB92020);
+
+/// 식단일지 목표 달성 문구와 동일한 색상.
+const Color kAnalysisGoalAchievedColor = Color(0xFF0051FF);
+
 class WeightTrendChart extends StatelessWidget {
   const WeightTrendChart({
     super.key,
     required this.points,
+    required this.period,
     required this.rangeStart,
     required this.rangeEnd,
     required this.targetWeightKg,
+    required this.weightLegendLabel,
+    required this.targetLegendLabel,
   });
 
   final List<AnalysisWeightPoint> points;
+  final AnalysisPeriod period;
   final DateTime rangeStart;
   final DateTime rangeEnd;
   final double? targetWeightKg;
+  final String weightLegendLabel;
+  final String targetLegendLabel;
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
       painter: _WeightTrendPainter(
         points: points,
+        period: period,
         rangeStart: rangeStart,
         rangeEnd: rangeEnd,
         targetWeightKg: targetWeightKg,
+        weightLegendLabel: weightLegendLabel,
+        targetLegendLabel: targetLegendLabel,
       ),
       child: const SizedBox.expand(),
     );
@@ -36,22 +51,28 @@ class WeightTrendChart extends StatelessWidget {
 class _WeightTrendPainter extends CustomPainter {
   _WeightTrendPainter({
     required this.points,
+    required this.period,
     required this.rangeStart,
     required this.rangeEnd,
     required this.targetWeightKg,
+    required this.weightLegendLabel,
+    required this.targetLegendLabel,
   });
 
   final List<AnalysisWeightPoint> points;
+  final AnalysisPeriod period;
   final DateTime rangeStart;
   final DateTime rangeEnd;
   final double? targetWeightKg;
+  final String weightLegendLabel;
+  final String targetLegendLabel;
 
   @override
   void paint(Canvas canvas, Size size) {
-    const leftPad = 28.0;
-    const rightPad = 6.0;
-    const topPad = 8.0;
-    const bottomPad = 18.0;
+    const leftPad = 34.0;
+    const rightPad = 8.0;
+    const topPad = 18.0;
+    const bottomPad = 20.0;
     final chart = Rect.fromLTRB(
       leftPad,
       topPad,
@@ -84,6 +105,8 @@ class _WeightTrendPainter extends CustomPainter {
       return chart.bottom - chart.height * t.clamp(0.0, 1.0);
     }
 
+    _drawLegend(canvas, chart);
+
     final gridPaint = Paint()
       ..color = const Color(0xFF000000).withValues(alpha: 0.06)
       ..strokeWidth = 1;
@@ -99,21 +122,34 @@ class _WeightTrendPainter extends CustomPainter {
       height: 1.0,
     );
 
+    final targetY = targetWeightKg == null ? null : yFor(targetWeightKg!);
+    final tickValues = <double>[maxY, (minY + maxY) / 2, minY];
+
     void drawYLabel(double value, double y) {
+      final ty = targetY;
+      if (ty != null && (y - ty).abs() < 9) {
+        return;
+      }
       final tp = TextPainter(
         text: TextSpan(text: value.toStringAsFixed(0), style: labelStyle),
         textDirection: TextDirection.ltr,
         maxLines: 1,
-      )..layout(maxWidth: leftPad - 2);
-      tp.paint(canvas, Offset(chart.left - tp.width - 3, y - tp.height / 2));
+      )..layout(maxWidth: leftPad - 4);
+      // 기존 대비 x축 방향 2px 왼쪽.
+      tp.paint(
+        canvas,
+        Offset(chart.left - tp.width - 3 - 2, y - tp.height / 2),
+      );
     }
 
-    drawYLabel(maxY, chart.top);
-    drawYLabel((minY + maxY) / 2, chart.center.dy);
-    drawYLabel(minY, chart.bottom);
+    for (final value in tickValues) {
+      drawYLabel(value, yFor(value));
+    }
 
-    if (targetWeightKg != null) {
-      final y = yFor(targetWeightKg!);
+    final resolvedTarget = targetWeightKg;
+    final resolvedTargetY = targetY;
+    if (resolvedTarget != null && resolvedTargetY != null) {
+      final y = resolvedTargetY;
       final dashPaint = Paint()
         ..color = kAnalysisTargetLineColor.withValues(alpha: 0.85)
         ..strokeWidth = 1.2
@@ -126,6 +162,29 @@ class _WeightTrendPainter extends CustomPainter {
         canvas.drawLine(Offset(x, y), Offset(x2, y), dashPaint);
         x += dash + gap;
       }
+
+      final targetTp = TextPainter(
+        text: TextSpan(
+          text: resolvedTarget.toStringAsFixed(1),
+          style: const TextStyle(
+            color: kAnalysisTargetLineColor,
+            fontSize: 8,
+            fontWeight: FontWeight.w700,
+            height: 1.0,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout(maxWidth: leftPad - 2);
+      final targetLabelX = (chart.left - targetTp.width - 3 - 2).clamp(
+        0.0,
+        chart.left - 2,
+      );
+      final targetLabelY = (y - targetTp.height / 2).clamp(
+        0.0,
+        size.height - targetTp.height,
+      );
+      targetTp.paint(canvas, Offset(targetLabelX, targetLabelY));
     }
 
     if (points.isNotEmpty) {
@@ -147,13 +206,49 @@ class _WeightTrendPainter extends CustomPainter {
       if (points.length > 1) {
         canvas.drawPath(path, linePaint);
       }
+      const pointRadius = 2.6;
       final dotPaint = Paint()..color = kAnalysisWeightLineColor;
       for (final point in points) {
         canvas.drawCircle(
           Offset(xFor(point.date), yFor(point.weightKg)),
-          2.6,
+          pointRadius,
           dotPaint,
         );
+      }
+
+      final showAll = period == AnalysisPeriod.sevenDays;
+      final labelIndices = <int>[];
+      if (showAll) {
+        for (var i = 0; i < points.length; i++) {
+          labelIndices.add(i);
+        }
+      } else if (points.isNotEmpty) {
+        labelIndices.add(points.length - 1);
+      }
+
+      final pointLabelStyle = TextStyle(
+        color: kAnalysisWeightLineColor.withValues(alpha: 0.95),
+        fontSize: 8,
+        fontWeight: FontWeight.w700,
+        height: 1.0,
+      );
+      for (final i in labelIndices) {
+        final point = points[i];
+        final pointX = xFor(point.date);
+        final pointY = yFor(point.weightKg);
+        final tp = TextPainter(
+          text: TextSpan(
+            text: point.weightKg.toStringAsFixed(1),
+            style: pointLabelStyle,
+          ),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+        )..layout();
+        var labelX = pointX - tp.width / 2;
+        var labelY = pointY - pointRadius - 3 - tp.height;
+        labelX = labelX.clamp(chart.left, chart.right - tp.width);
+        labelY = labelY.clamp(0.0, chart.bottom - tp.height);
+        tp.paint(canvas, Offset(labelX, labelY));
       }
     }
 
@@ -177,18 +272,75 @@ class _WeightTrendPainter extends CustomPainter {
         maxLines: 1,
       )..layout();
       final x = xFor(d) - tp.width / 2;
+      // 기존 대비 y축 방향 2px 아래.
       tp.paint(
         canvas,
-        Offset(x.clamp(0.0, size.width - tp.width), chart.bottom + 3),
+        Offset(x.clamp(0.0, size.width - tp.width), chart.bottom + 3 + 2),
       );
+    }
+  }
+
+  void _drawLegend(Canvas canvas, Rect chart) {
+    final style = const TextStyle(
+      color: Color(0xFF5A5A5A),
+      fontSize: 8,
+      fontWeight: FontWeight.w600,
+      height: 1.0,
+    );
+    final weightTp = TextPainter(
+      text: TextSpan(text: weightLegendLabel, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+
+    TextPainter? targetTp;
+    if (targetWeightKg != null) {
+      targetTp = TextPainter(
+        text: TextSpan(text: targetLegendLabel, style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+    }
+
+    const swatch = 7.0;
+    const gap = 4.0;
+    const itemGap = 10.0;
+    var totalW = swatch + gap + weightTp.width;
+    if (targetTp != null) {
+      totalW += itemGap + swatch + gap + targetTp.width;
+    }
+
+    final legendRight = chart.right;
+    final legendLeft = legendRight - totalW;
+    final legendBottom = chart.top - 3;
+    final legendTop = legendBottom - weightTp.height;
+    if (legendTop < 0) return;
+
+    var x = legendLeft;
+    final cy = legendTop + weightTp.height / 2;
+    final swatchPaint = Paint()..color = kAnalysisWeightLineColor;
+    canvas.drawCircle(Offset(x + swatch / 2, cy), swatch / 2, swatchPaint);
+    x += swatch + gap;
+    weightTp.paint(canvas, Offset(x, legendTop));
+    x += weightTp.width;
+
+    if (targetTp != null) {
+      x += itemGap;
+      final targetPaint = Paint()..color = kAnalysisTargetLineColor;
+      canvas.drawCircle(Offset(x + swatch / 2, cy), swatch / 2, targetPaint);
+      x += swatch + gap;
+      targetTp.paint(canvas, Offset(x, legendTop));
     }
   }
 
   @override
   bool shouldRepaint(covariant _WeightTrendPainter oldDelegate) {
     return oldDelegate.points != points ||
+        oldDelegate.period != period ||
         oldDelegate.rangeStart != rangeStart ||
         oldDelegate.rangeEnd != rangeEnd ||
-        oldDelegate.targetWeightKg != targetWeightKg;
+        oldDelegate.targetWeightKg != targetWeightKg ||
+        oldDelegate.weightLegendLabel != weightLegendLabel ||
+        oldDelegate.targetLegendLabel != targetLegendLabel;
   }
 }

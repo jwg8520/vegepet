@@ -796,6 +796,9 @@ class _HomePageState extends State<HomePage>
   /// 월별 meal_diary_notes.current_weight_kg 캐시. key: yyyy-MM-dd.
   Map<String, double?> _diaryCurrentWeightByDate = {};
 
+  /// 월별 meal_diary_notes.note_text(식후감정&실패요인) 비어있지 않은지. key: yyyy-MM-dd.
+  Map<String, bool> _diaryHasNoteTextByDate = {};
+
   /// [_fetchDiaryMonthLogs] 가 마지막으로 성공 반영한 월(yyyy-MM). 프리로드 중복 방지용.
   String? _diaryLogsCachedMonthKey;
   bool _isPreloadingDiaryMonth = false;
@@ -1527,6 +1530,7 @@ class _HomePageState extends State<HomePage>
     _pokedexPanelSelectedEntry = null;
     _diaryLogsByDate = {};
     _diaryCurrentWeightByDate = {};
+    _diaryHasNoteTextByDate = {};
     _diaryLogsCachedMonthKey = null;
     _randomTicketCount = 0;
     _selectedSpeciesId = null;
@@ -1630,6 +1634,7 @@ class _HomePageState extends State<HomePage>
       _pokedexPanelSelectedEntry = null;
       _diaryLogsByDate = {};
       _diaryCurrentWeightByDate = {};
+      _diaryHasNoteTextByDate = {};
       _diaryLogsCachedMonthKey = null;
       _randomTicketCount = 0;
       _selectedSpeciesId = null;
@@ -2781,6 +2786,7 @@ class _HomePageState extends State<HomePage>
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _diaryCurrentWeightByDate = {};
+        _diaryHasNoteTextByDate = {};
         _diaryLogsCachedMonthKey = null;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
@@ -5294,6 +5300,7 @@ class _HomePageState extends State<HomePage>
   void _invalidateMealDiaryMonthCache() {
     _diaryLogsByDate = {};
     _diaryCurrentWeightByDate = {};
+    _diaryHasNoteTextByDate = {};
     _diaryLogsCachedMonthKey = null;
     debugPrint('meal_diary:cache_invalidated');
   }
@@ -6749,6 +6756,7 @@ class _HomePageState extends State<HomePage>
         _diaryVisibleMonth = _todayDiaryMonth();
         _diaryLogsByDate = {};
         _diaryCurrentWeightByDate = {};
+        _diaryHasNoteTextByDate = {};
         _diaryLogsCachedMonthKey = null;
 
         _isUploadingMeal = false;
@@ -7920,6 +7928,20 @@ class _HomePageState extends State<HomePage>
               onBack: () => unawaited(_closeAnalysisPanelToGameMenu()),
               useProfileTitleInset: true,
             ),
+            // 기간 선택: 대제목과 동일 y 라인 · 패널 우측 상단.
+            // 현재 분석 패널에는 X 버튼이 없으므로 우측 padding만 확보한다.
+            Positioned(
+              top:
+                  _gameMenuSubPanelTitleTop +
+                  (16 - AnalysisPeriodSelector.buttonHeight) / 2,
+              right: 12,
+              child: AnalysisPeriodSelector(
+                l10n: l10n,
+                isEnglish: _isEnglishLocale,
+                selectedPeriod: _selectedAnalysisPeriod,
+                onSelectPeriod: _onAnalysisPeriodSelected,
+              ),
+            ),
             Positioned(
               left: 12,
               right: 12,
@@ -7932,7 +7954,6 @@ class _HomePageState extends State<HomePage>
                 snapshot: _analysisSnapshot,
                 isLoading: _isAnalysisLoading,
                 loadError: _analysisLoadError,
-                onSelectPeriod: _onAnalysisPeriodSelected,
                 onRetry: () => unawaited(
                   _fetchAnalysisData(
                     period: _selectedAnalysisPeriod,
@@ -20490,6 +20511,7 @@ class _HomePageState extends State<HomePage>
     if (user == null) {
       _diaryLogsByDate = {};
       _diaryCurrentWeightByDate = {};
+      _diaryHasNoteTextByDate = {};
       _diaryLogsCachedMonthKey = null;
       return;
     }
@@ -20508,7 +20530,7 @@ class _HomePageState extends State<HomePage>
             .lte('meal_date', end),
         supabase
             .from('meal_diary_notes')
-            .select('diary_date, current_weight_kg')
+            .select('diary_date, current_weight_kg, note_text')
             .eq('user_id', requestedUserId)
             .gte('diary_date', start)
             .lte('diary_date', end),
@@ -20540,14 +20562,18 @@ class _HomePageState extends State<HomePage>
       }
 
       final weightByDate = <String, double?>{};
+      final hasNoteByDate = <String, bool>{};
       for (final row in noteRows) {
         final key = row['diary_date']?.toString();
         if (key == null || key.isEmpty) continue;
         weightByDate[key] = _parseDiaryWeightKg(row['current_weight_kg']);
+        final noteText = row['note_text']?.toString().trim() ?? '';
+        hasNoteByDate[key] = noteText.isNotEmpty;
       }
 
       _diaryLogsByDate = byDate;
       _diaryCurrentWeightByDate = weightByDate;
+      _diaryHasNoteTextByDate = hasNoteByDate;
       _diaryLogsCachedMonthKey =
           '${month.year}-${month.month.toString().padLeft(2, '0')}';
     } catch (e) {
@@ -20556,6 +20582,7 @@ class _HomePageState extends State<HomePage>
       if (requestedUserId != supabase.auth.currentUser?.id) return;
       _diaryLogsByDate = {};
       _diaryCurrentWeightByDate = {};
+      _diaryHasNoteTextByDate = {};
       _diaryLogsCachedMonthKey = null;
     }
   }
@@ -20645,8 +20672,9 @@ class _HomePageState extends State<HomePage>
         'note_text': note.isEmpty ? null : note,
         'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,diary_date');
-      // 달력 ★ 즉시 반영용 캐시 갱신.
+      // 달력 ★ / 빨간 점 즉시 반영용 캐시 갱신.
       _diaryCurrentWeightByDate[dateKey] = currentWeightKg;
+      _diaryHasNoteTextByDate[dateKey] = note.isNotEmpty;
       _invalidateAnalysisCache();
       return true;
     } catch (e) {
@@ -20751,6 +20779,9 @@ class _HomePageState extends State<HomePage>
       final date = DateTime(visibleMonth.year, visibleMonth.month, day);
       final dateKey = _dateKey(date);
       final hasMeal = (diaryLogsByDate[dateKey] ?? const []).isNotEmpty;
+      final hasWeight = _diaryCurrentWeightByDate[dateKey] != null;
+      final hasNote = _diaryHasNoteTextByDate[dateKey] == true;
+      final showRedDot = hasMeal || hasWeight || hasNote;
       final isGoalAchieved = isWeightGoalAchieved(
         currentWeightKg: _diaryCurrentWeightByDate[dateKey],
         targetWeightKg: targetWeightKg,
@@ -20806,7 +20837,7 @@ class _HomePageState extends State<HomePage>
                                       TextLeadingDistribution.even,
                                 ),
                               )
-                            : hasMeal
+                            : showRedDot
                             ? Container(
                                 width: 4,
                                 height: 4,

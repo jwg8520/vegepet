@@ -1880,10 +1880,16 @@ abstract class AppLocalizations {
   /// **'3개월'**
   String get analysisPeriodThreeMonths;
 
+  /// No description provided for @analysisRecent.
+  ///
+  /// In ko, this message translates to:
+  /// **'최근'**
+  String get analysisRecent;
+
   /// No description provided for @analysisWeightTrendTitle.
   ///
   /// In ko, this message translates to:
-  /// **'체중 변화 추세'**
+  /// **'• 체중 변화 추세'**
   String get analysisWeightTrendTitle;
 
   /// No description provided for @analysisWeightStart.
@@ -1903,6 +1909,18 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'변화'**
   String get analysisWeightChange;
+
+  /// No description provided for @analysisWeightToTarget.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표까지'**
+  String get analysisWeightToTarget;
+
+  /// No description provided for @analysisTargetAchieved.
+  ///
+  /// In ko, this message translates to:
+  /// **'달성🎉'**
+  String get analysisTargetAchieved;
 
   /// No description provided for @analysisWeightLegendWeight.
   ///
@@ -1937,7 +1955,7 @@ abstract class AppLocalizations {
   /// No description provided for @analysisFeedbackTitle.
   ///
   /// In ko, this message translates to:
-  /// **'식단 피드백 현황'**
+  /// **'• 식단 피드백 현황'**
   String get analysisFeedbackTitle;
 
   /// No description provided for @analysisFeedbackPerfect.

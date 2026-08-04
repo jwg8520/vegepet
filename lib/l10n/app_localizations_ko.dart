@@ -956,7 +956,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get analysisPeriodThreeMonths => '3개월';
 
   @override
-  String get analysisWeightTrendTitle => '체중 변화 추세';
+  String get analysisRecent => '최근';
+
+  @override
+  String get analysisWeightTrendTitle => '• 체중 변화 추세';
 
   @override
   String get analysisWeightStart => '시작';
@@ -966,6 +969,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get analysisWeightChange => '변화';
+
+  @override
+  String get analysisWeightToTarget => '목표까지';
+
+  @override
+  String get analysisTargetAchieved => '달성🎉';
 
   @override
   String get analysisWeightLegendWeight => '체중';
@@ -985,7 +994,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get analysisNoWeightData => '선택한 기간의 체중 기록이 없습니다.';
 
   @override
-  String get analysisFeedbackTitle => '식단 피드백 현황';
+  String get analysisFeedbackTitle => '• 식단 피드백 현황';
 
   @override
   String get analysisFeedbackPerfect => 'Perfect';

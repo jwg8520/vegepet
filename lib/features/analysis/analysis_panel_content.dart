@@ -1,9 +1,117 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:vegepet/features/analysis/analysis_helpers.dart';
 import 'package:vegepet/features/analysis/analysis_models.dart';
 import 'package:vegepet/features/analysis/feedback_pie_chart.dart';
 import 'package:vegepet/features/analysis/weight_trend_chart.dart';
 import 'package:vegepet/l10n/app_localizations.dart';
+
+/// 분석 패널 우측 상단 기간 선택 (대제목과 동일 y라인에 배치).
+class AnalysisPeriodSelector extends StatelessWidget {
+  const AnalysisPeriodSelector({
+    super.key,
+    required this.l10n,
+    required this.isEnglish,
+    required this.selectedPeriod,
+    required this.onSelectPeriod,
+  });
+
+  final AppLocalizations l10n;
+  final bool isEnglish;
+  final AnalysisPeriod selectedPeriod;
+  final ValueChanged<AnalysisPeriod> onSelectPeriod;
+
+  static const double buttonHeight = 22;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = <AnalysisPeriod, String>{
+      AnalysisPeriod.sevenDays: l10n.analysisPeriodSevenDays,
+      AnalysisPeriod.thirtyDays: l10n.analysisPeriodThirtyDays,
+      AnalysisPeriod.threeMonths: l10n.analysisPeriodThreeMonths,
+    };
+    final textStyle = TextStyle(
+      fontSize: isEnglish ? 9 : 10,
+      fontWeight: FontWeight.w700,
+      color: const Color(0xFF3A3A3A),
+      height: 1.0,
+    );
+
+    var maxLabelW = 0.0;
+    for (final label in labels.values) {
+      final tp = TextPainter(
+        text: TextSpan(text: label, style: textStyle),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      maxLabelW = math.max(maxLabelW, tp.width);
+    }
+    // 가장 긴 라벨(“3개월” / “3 months”) 기준 동일 너비.
+    final buttonWidth = maxLabelW + (isEnglish ? 10 : 12);
+
+    Widget chip(AnalysisPeriod period) {
+      final selected = selectedPeriod == period;
+      return SizedBox(
+        width: buttonWidth,
+        height: buttonHeight,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => onSelectPeriod(period),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFF78AFA3).withValues(alpha: 0.28)
+                    : Colors.white.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFF78AFA3).withValues(alpha: 0.7)
+                      : const Color(0xFFE5E5E5).withValues(alpha: 0.8),
+                  width: 0.9,
+                ),
+              ),
+              child: Text(
+                labels[period]!,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                textAlign: TextAlign.center,
+                style: textStyle,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          l10n.analysisRecent,
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: isEnglish ? 9 : 10,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF3A3A3A),
+            height: 1.0,
+          ),
+        ),
+        SizedBox(width: isEnglish ? 4 : 5),
+        chip(AnalysisPeriod.sevenDays),
+        const SizedBox(width: 4),
+        chip(AnalysisPeriod.thirtyDays),
+        const SizedBox(width: 4),
+        chip(AnalysisPeriod.threeMonths),
+      ],
+    );
+  }
+}
 
 class AnalysisPanelContent extends StatelessWidget {
   const AnalysisPanelContent({
@@ -14,7 +122,6 @@ class AnalysisPanelContent extends StatelessWidget {
     required this.snapshot,
     required this.isLoading,
     required this.loadError,
-    required this.onSelectPeriod,
     required this.onRetry,
   });
 
@@ -24,71 +131,14 @@ class AnalysisPanelContent extends StatelessWidget {
   final AnalysisSnapshot snapshot;
   final bool isLoading;
   final String? loadError;
-  final ValueChanged<AnalysisPeriod> onSelectPeriod;
   final VoidCallback onRetry;
+
+  static const double _metricLabelFontSize = 9;
+  static const double _metricValueFontSize = _metricLabelFontSize + 2;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildPeriodSelector(),
-        const SizedBox(height: 6),
-        Expanded(child: _buildBody()),
-      ],
-    );
-  }
-
-  Widget _buildPeriodSelector() {
-    Widget chip(AnalysisPeriod period, String label) {
-      final selected = selectedPeriod == period;
-      return Expanded(
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => onSelectPeriod(period),
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              height: 26,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected
-                    ? const Color(0xFF78AFA3).withValues(alpha: 0.28)
-                    : Colors.white.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: selected
-                      ? const Color(0xFF78AFA3).withValues(alpha: 0.7)
-                      : const Color(0xFFE5E5E5).withValues(alpha: 0.8),
-                  width: 0.9,
-                ),
-              ),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: isEnglish ? 9 : 10,
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF3A3A3A),
-                  height: 1.0,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Row(
-      children: [
-        chip(AnalysisPeriod.sevenDays, l10n.analysisPeriodSevenDays),
-        const SizedBox(width: 6),
-        chip(AnalysisPeriod.thirtyDays, l10n.analysisPeriodThirtyDays),
-        const SizedBox(width: 6),
-        chip(AnalysisPeriod.threeMonths, l10n.analysisPeriodThreeMonths),
-      ],
-    );
+    return _buildBody();
   }
 
   Widget _buildBody() {
@@ -160,41 +210,16 @@ class AnalysisPanelContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          _weightSummaryLine(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: isEnglish ? 8.5 : 9,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF4A4A4A),
-            height: 1.1,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          snapshot.targetWeightKg == null
-              ? l10n.analysisTargetWeightUnset
-              : l10n.analysisTargetWeightLabel(
-                  formatAnalysisWeight(snapshot.targetWeightKg!),
-                ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 8,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF6B6B6B),
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(height: 4),
         Expanded(
           child: hasPoints
               ? WeightTrendChart(
                   points: snapshot.weightPoints,
+                  period: selectedPeriod,
                   rangeStart: snapshot.rangeStart,
                   rangeEnd: snapshot.rangeEnd,
                   targetWeightKg: snapshot.targetWeightKg,
+                  weightLegendLabel: l10n.analysisWeightLegendWeight,
+                  targetLegendLabel: l10n.analysisWeightLegendTarget,
                 )
               : Center(
                   child: Text(
@@ -208,50 +233,111 @@ class AnalysisPanelContent extends StatelessWidget {
                   ),
                 ),
         ),
-        if (hasPoints) ...[
-          const SizedBox(height: 2),
-          Row(
-            children: [
-              _legendDot(kAnalysisWeightLineColor),
-              const SizedBox(width: 4),
-              Text(
-                l10n.analysisWeightLegendWeight,
-                style: const TextStyle(
-                  fontSize: 8,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF5A5A5A),
-                ),
-              ),
-              const SizedBox(width: 10),
-              _legendDot(kAnalysisTargetLineColor),
-              const SizedBox(width: 4),
-              Text(
-                l10n.analysisWeightLegendTarget,
-                style: const TextStyle(
-                  fontSize: 8,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF5A5A5A),
-                ),
-              ),
-            ],
-          ),
-        ],
+        const SizedBox(height: 4),
+        _buildWeightMetricsRow(),
       ],
     );
   }
 
-  String _weightSummaryLine() {
-    if (snapshot.startWeightKg == null ||
-        snapshot.currentWeightKg == null ||
-        snapshot.weightChangeKg == null) {
-      return l10n.analysisNoRecord;
+  Widget _buildWeightMetricsRow() {
+    final startText = snapshot.startWeightKg == null
+        ? '-'
+        : '${formatAnalysisWeight(snapshot.startWeightKg!)}kg';
+    final currentText = snapshot.currentWeightKg == null
+        ? '-'
+        : '${formatAnalysisWeight(snapshot.currentWeightKg!)}kg';
+    final changeText = snapshot.weightChangeKg == null
+        ? '-'
+        : '${formatAnalysisWeightChange(snapshot.weightChangeKg!)}kg';
+
+    final toTarget = _toTargetDisplay();
+
+    return Row(
+      children: [
+        Expanded(
+          child: _metricColumn(
+            label: l10n.analysisWeightStart,
+            value: startText,
+          ),
+        ),
+        Expanded(
+          child: _metricColumn(
+            label: l10n.analysisWeightCurrent,
+            value: currentText,
+          ),
+        ),
+        Expanded(
+          child: _metricColumn(
+            label: l10n.analysisWeightChange,
+            value: changeText,
+            valueColor: snapshot.weightChangeKg == null
+                ? null
+                : kAnalysisWithdrawAccentColor,
+          ),
+        ),
+        Expanded(
+          child: _metricColumn(
+            label: l10n.analysisWeightToTarget,
+            value: toTarget.text,
+            valueColor: toTarget.color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  ({String text, Color? color}) _toTargetDisplay() {
+    final current = snapshot.currentWeightKg;
+    final target = snapshot.targetWeightKg;
+    if (current == null || target == null) {
+      return (text: '-', color: null);
     }
-    final start = formatAnalysisWeight(snapshot.startWeightKg!);
-    final current = formatAnalysisWeight(snapshot.currentWeightKg!);
-    final change = formatAnalysisWeightChange(snapshot.weightChangeKg!);
-    return '${l10n.analysisWeightStart} ${start}kg   '
-        '${l10n.analysisWeightCurrent} ${current}kg   '
-        '${l10n.analysisWeightChange} ${change}kg';
+    final remaining = current - target;
+    if (remaining <= 0) {
+      return (
+        text: l10n.analysisTargetAchieved,
+        color: kAnalysisGoalAchievedColor,
+      );
+    }
+    return (text: '+${remaining.toStringAsFixed(1)}kg', color: null);
+  }
+
+  Widget _metricColumn({
+    required String label,
+    required String value,
+    Color? valueColor,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: _metricLabelFontSize,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF5A5A5A),
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: _metricValueFontSize,
+            fontWeight: FontWeight.w700,
+            color: valueColor ?? const Color(0xFF3A3A3A),
+            height: 1.0,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildFeedbackSection() {
@@ -419,13 +505,5 @@ class AnalysisPanelContent extends StatelessWidget {
       default:
         return key;
     }
-  }
-
-  Widget _legendDot(Color color) {
-    return Container(
-      width: 7,
-      height: 7,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
   }
 }
