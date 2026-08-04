@@ -502,6 +502,9 @@ class AnalysisPanelContent extends StatelessWidget {
     required AnalysisFeedbackItem item,
   }) {
     // 색상 + 이름만 (건수·%는 도넛 조각에 표시)
+    // 긴 영어 라벨: 가용 폭에 맞게 scaleDown (잘림 없이 전체 표시)
+    final label = _feedbackLabel(item.key);
+    final baseFontSize = isEnglish ? 8.0 : 8.5;
     return Row(
       children: [
         Container(
@@ -513,18 +516,21 @@ class AnalysisPanelContent extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            _feedbackLabel(item.key),
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.left,
-            style: TextStyle(
-              fontSize: isEnglish ? 8 : 8.5,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF3A3A3A),
-              height: 1.0,
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: baseFontSize,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF3A3A3A),
+                height: 1.0,
+              ),
             ),
           ),
         ),
