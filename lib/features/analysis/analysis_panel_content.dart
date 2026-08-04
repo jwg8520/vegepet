@@ -136,10 +136,7 @@ class AnalysisPanelContent extends StatelessWidget {
   static const double _metricLabelFontSize = 9;
   static const double _metricValueFontSize = _metricLabelFontSize + 2;
 
-  /// 범례 숫자열 고정 폭 (우측 끝 위치 유지).
-  static const double _feedbackLegendValueWidth = 72;
-
-  /// 범례 이름 ↔ 건수·% 간격.
+  /// 범례 이름 ↔ 건수·% 간격 (고정 폭 없이 바로 붙임).
   static const double _feedbackLegendNameValueGap = 5;
 
   /// 도넛 ↔ 범례 간격.
@@ -150,9 +147,6 @@ class AnalysisPanelContent extends StatelessWidget {
 
   /// Top 3 순위 행 간격.
   static const double _feedbackTopThreeRowGap = 2;
-
-  /// Top 3 영역 최대 높이 (제목 + 최대 3행).
-  static const double _feedbackTopThreeMaxHeight = 64;
 
   @override
   Widget build(BuildContext context) {
@@ -399,51 +393,18 @@ class AnalysisPanelContent extends StatelessWidget {
         ] else ...[
           const SizedBox(height: 4),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final availableH = constraints.maxHeight;
-                final availableW = constraints.maxWidth;
-                final donutSize = kAnalysisFeedbackDonutSize;
-                // 범례 최소 폭: 긴 한국어 이름 + gap + 숫자열.
-                final legendMinW = math.min(
-                  availableW * 0.48,
-                  math.max(
-                    148.0,
-                    availableW - donutSize - _feedbackDonutLegendGap - 8,
-                  ),
-                );
-                // 도넛을 우측으로: 남는 왼쪽 여백의 일부만 사용.
-                final usedW = donutSize + _feedbackDonutLegendGap + legendMinW;
-                final leftover = math.max(0.0, availableW - usedW);
-                final donutLeft = leftover * 0.35;
-                final legendLeft =
-                    donutLeft + donutSize + _feedbackDonutLegendGap;
-                final donutCenterX = donutLeft + donutSize / 2;
-                final topThreeTop = donutSize + _feedbackTopThreeGap;
-                final topThreeHeight = math.max(
-                  0.0,
-                  math.min(
-                    _feedbackTopThreeMaxHeight,
-                    availableH - topThreeTop,
-                  ),
-                );
-                // Top 3: 도넛 중앙 기준 약간 왼쪽에서 시작.
-                final topThreeWidth = math.min(
-                  220.0,
-                  availableW - (donutCenterX - 40),
-                );
-                final topThreeLeft = (donutCenterX - topThreeWidth * 0.35)
-                    .clamp(0.0, math.max(0.0, availableW - topThreeWidth))
-                    .toDouble();
-
-                return Stack(
-                  clipBehavior: Clip.hardEdge,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 좌·우 Expanded 동일 → 도넛이 피드백 영역 가로 중앙
+                // 범례는 우측 Expanded 안에서 왼쪽 맞춤
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Positioned(
-                      top: 0,
-                      left: donutLeft,
-                      width: donutSize,
-                      height: donutSize,
+                    const Expanded(child: SizedBox.shrink()),
+                    SizedBox(
+                      width: kAnalysisFeedbackDonutSize,
+                      height: kAnalysisFeedbackDonutSize,
                       child: FeedbackPieChart(
                         items: snapshot.pieItems,
                         centerLabel: l10n.analysisFeedbackDonutTotal(
@@ -451,16 +412,14 @@ class AnalysisPanelContent extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Positioned(
-                      top: 0,
-                      left: legendLeft,
-                      right: 0,
-                      height: donutSize,
-                      child: Align(
-                        alignment: Alignment.centerLeft,
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          left: _feedbackDonutLegendGap,
+                        ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             for (var i = 0; i < snapshot.pieItems.length; i++)
                               Padding(
@@ -472,31 +431,20 @@ class AnalysisPanelContent extends StatelessWidget {
                                 child: _legendRow(
                                   color: colors[i],
                                   item: snapshot.pieItems[i],
-                                  nameMaxWidth: math.max(
-                                    56.0,
-                                    (availableW - legendLeft) -
-                                        _feedbackLegendValueWidth -
-                                        _feedbackLegendNameValueGap -
-                                        12,
-                                  ),
                                 ),
                               ),
                           ],
                         ),
                       ),
                     ),
-                    if (snapshot.topFeedbackItems.isNotEmpty &&
-                        topThreeHeight > 0)
-                      Positioned(
-                        top: topThreeTop,
-                        left: topThreeLeft,
-                        width: topThreeWidth,
-                        height: topThreeHeight,
-                        child: _buildTopThreeBlock(),
-                      ),
                   ],
-                );
-              },
+                ),
+                if (snapshot.topFeedbackItems.isNotEmpty) ...[
+                  const SizedBox(height: _feedbackTopThreeGap),
+                  // 도넛과 같은 가로 중앙
+                  Center(child: _buildTopThreeBlock()),
+                ],
+              ],
             ),
           ),
         ],
@@ -507,13 +455,14 @@ class AnalysisPanelContent extends StatelessWidget {
   Widget _buildTopThreeBlock() {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
           l10n.analysisFeedbackTotalTopThree(snapshot.totalFeedbackCount),
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: isEnglish ? 9 : 10,
             fontWeight: FontWeight.w700,
@@ -535,6 +484,7 @@ class AnalysisPanelContent extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: isEnglish ? 8.5 : 9,
                 fontWeight: FontWeight.w600,
@@ -553,60 +503,44 @@ class AnalysisPanelContent extends StatelessWidget {
   Widget _legendRow({
     required Color color,
     required AnalysisFeedbackItem item,
-    required double nameMaxWidth,
   }) {
+    // 고정 폭 없이: [색] 이름  건수·% 가 왼쪽부터 붙음
     return Row(
       children: [
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: nameMaxWidth),
-                  child: Text(
-                    _feedbackLabel(item.key),
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.left,
-                    style: TextStyle(
-                      fontSize: isEnglish ? 8 : 8.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF3A3A3A),
-                      height: 1.0,
-                    ),
-                  ),
-                ),
-              ],
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            _feedbackLabel(item.key),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              fontSize: isEnglish ? 8 : 8.5,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF3A3A3A),
+              height: 1.0,
             ),
           ),
         ),
         const SizedBox(width: _feedbackLegendNameValueGap),
-        SizedBox(
-          width: _feedbackLegendValueWidth,
-          child: Text(
-            l10n.analysisFeedbackLegendValue(item.count, item.percentage),
-            maxLines: 1,
-            softWrap: false,
-            textAlign: TextAlign.right,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: isEnglish ? 8 : 8.5,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF5A5A5A),
-              height: 1.0,
-            ),
+        Text(
+          l10n.analysisFeedbackLegendValue(item.count, item.percentage),
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: isEnglish ? 8 : 8.5,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFF5A5A5A),
+            height: 1.0,
           ),
         ),
       ],
