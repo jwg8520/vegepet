@@ -1970,6 +1970,12 @@ abstract class AppLocalizations {
   /// **'기타'**
   String get analysisFeedbackOther;
 
+  /// No description provided for @analysisFeedbackDonutTotal.
+  ///
+  /// In ko, this message translates to:
+  /// **'총 {count}건'**
+  String analysisFeedbackDonutTotal(int count);
+
   /// No description provided for @analysisFeedbackTotalTopThree.
   ///
   /// In ko, this message translates to:

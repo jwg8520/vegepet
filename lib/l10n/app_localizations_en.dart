@@ -1042,6 +1042,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analysisFeedbackOther => 'Other';
 
   @override
+  String analysisFeedbackDonutTotal(int count) {
+    return 'Total $count';
+  }
+
+  @override
   String analysisFeedbackTotalTopThree(int count) {
     return 'Top 3 feedback items out of $count';
   }

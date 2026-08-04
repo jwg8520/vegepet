@@ -360,6 +360,12 @@
   "analysisFeedbackTitle": "• Meal feedback",
   "analysisFeedbackPerfect": "Perfect",
   "analysisFeedbackOther": "Other",
+  "analysisFeedbackDonutTotal": "Total {count}",
+  "@analysisFeedbackDonutTotal": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "analysisFeedbackTotalTopThree": "Top 3 feedback items out of {count}",
   "@analysisFeedbackTotalTopThree": {
     "placeholders": {

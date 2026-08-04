@@ -360,6 +360,12 @@
   "analysisFeedbackTitle": "• 식단 피드백 현황",
   "analysisFeedbackPerfect": "Perfect",
   "analysisFeedbackOther": "기타",
+  "analysisFeedbackDonutTotal": "총 {count}건",
+  "@analysisFeedbackDonutTotal": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "analysisFeedbackTotalTopThree": "피드백 총 {count}건 중 Top 3",
   "@analysisFeedbackTotalTopThree": {
     "placeholders": {

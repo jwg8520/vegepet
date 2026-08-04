@@ -136,6 +136,15 @@ class AnalysisPanelContent extends StatelessWidget {
   static const double _metricLabelFontSize = 9;
   static const double _metricValueFontSize = _metricLabelFontSize + 2;
 
+  /// 범례 숫자열 고정 폭 (우측 끝 위치 유지).
+  static const double _feedbackLegendValueWidth = 72;
+
+  /// 범례 이름 ↔ 건수·% 간격.
+  static const double _feedbackLegendNameValueGap = 6;
+
+  /// 도넛 ↔ 범례 간격.
+  static const double _feedbackDonutLegendGap = 6;
+
   @override
   Widget build(BuildContext context) {
     return _buildBody();
@@ -358,8 +367,9 @@ class AnalysisPanelContent extends StatelessWidget {
             height: 1.0,
           ),
         ),
-        const SizedBox(height: 6),
-        if (!hasFeedback)
+        if (!hasFeedback) ...[
+          // 체중 빈 안내와 동일 y: 제목 아래 4 + Expanded 중앙 + 하단 요약 영역만큼 여백.
+          const SizedBox(height: 4),
           Expanded(
             child: Center(
               child: Text(
@@ -372,22 +382,34 @@ class AnalysisPanelContent extends StatelessWidget {
                 ),
               ),
             ),
-          )
-        else ...[
+          ),
+          const SizedBox(height: 4),
+          const SizedBox(
+            height: _metricLabelFontSize + 2 + _metricValueFontSize,
+          ),
+        ] else ...[
+          const SizedBox(height: 6),
           SizedBox(
-            height: 118,
+            height: kAnalysisFeedbackDonutSize,
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 SizedBox(
-                  width: 112,
-                  height: 112,
-                  child: FeedbackPieChart(items: snapshot.pieItems),
+                  width: kAnalysisFeedbackDonutSize,
+                  height: kAnalysisFeedbackDonutSize,
+                  child: FeedbackPieChart(
+                    items: snapshot.pieItems,
+                    centerLabel: l10n.analysisFeedbackDonutTotal(
+                      snapshot.totalFeedbackCount,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: _feedbackDonutLegendGap),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       for (var i = 0; i < snapshot.pieItems.length; i++)
                         Padding(
@@ -428,7 +450,10 @@ class AnalysisPanelContent extends StatelessWidget {
                   style: TextStyle(
                     fontSize: isEnglish ? 8.5 : 9,
                     fontWeight: FontWeight.w600,
-                    color: const Color(0xFF4A4A4A),
+                    // Top 1 전체 문구: 설정 “회원 탈퇴”와 동일 색상(0xFFB92020).
+                    color: i == 0
+                        ? kAnalysisWithdrawAccentColor
+                        : const Color(0xFF4A4A4A),
                     height: 1.15,
                   ),
                 ),
@@ -445,35 +470,51 @@ class AnalysisPanelContent extends StatelessWidget {
   }) {
     return Row(
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  _feedbackLabel(item.key),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: isEnglish ? 8 : 8.5,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF3A3A3A),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 4),
-        Expanded(
+        const SizedBox(width: _feedbackLegendNameValueGap),
+        SizedBox(
+          width: _feedbackLegendValueWidth,
           child: Text(
-            _feedbackLabel(item.key),
+            l10n.analysisFeedbackLegendValue(item.count, item.percentage),
             maxLines: 1,
+            softWrap: false,
+            textAlign: TextAlign.right,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: isEnglish ? 8 : 8.5,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF3A3A3A),
+              color: const Color(0xFF5A5A5A),
               height: 1.0,
             ),
-          ),
-        ),
-        Text(
-          l10n.analysisFeedbackLegendValue(item.count, item.percentage),
-          style: TextStyle(
-            fontSize: isEnglish ? 8 : 8.5,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF5A5A5A),
-            height: 1.0,
           ),
         ),
       ],

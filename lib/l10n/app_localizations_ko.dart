@@ -1003,6 +1003,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get analysisFeedbackOther => '기타';
 
   @override
+  String analysisFeedbackDonutTotal(int count) {
+    return '총 $count건';
+  }
+
+  @override
   String analysisFeedbackTotalTopThree(int count) {
     return '피드백 총 $count건 중 Top 3';
   }
