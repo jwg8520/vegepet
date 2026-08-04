@@ -140,7 +140,19 @@ class AnalysisPanelContent extends StatelessWidget {
   static const double _feedbackLegendValueWidth = 72;
 
   /// 범례 이름 ↔ 건수·% 간격.
-  static const double _feedbackLegendNameValueGap = 6;
+  static const double _feedbackLegendNameValueGap = 5;
+
+  /// 도넛 ↔ 범례 간격.
+  static const double _feedbackDonutLegendGap = 8;
+
+  /// 도넛 하단 ↔ Top 3 간격.
+  static const double _feedbackTopThreeGap = 5;
+
+  /// Top 3 순위 행 간격.
+  static const double _feedbackTopThreeRowGap = 2;
+
+  /// Top 3 영역 최대 높이 (제목 + 최대 3행).
+  static const double _feedbackTopThreeMaxHeight = 64;
 
   @override
   Widget build(BuildContext context) {
@@ -385,112 +397,106 @@ class AnalysisPanelContent extends StatelessWidget {
             height: _metricLabelFontSize + 2 + _metricValueFontSize,
           ),
         ] else ...[
-          // 대제목 바로 아래 · 도넛은 좌측으로 소폭 이동해 범례 폭 확보
           const SizedBox(height: 4),
           Expanded(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 좌측 여백 < 우측 범례 → 도넛이 중앙보다 살짝 왼쪽
-                  const Expanded(flex: 1, child: SizedBox.shrink()),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: kAnalysisFeedbackDonutSize,
-                        height: kAnalysisFeedbackDonutSize,
-                        child: FeedbackPieChart(
-                          items: snapshot.pieItems,
-                          centerLabel: l10n.analysisFeedbackDonutTotal(
-                            snapshot.totalFeedbackCount,
-                          ),
-                        ),
-                      ),
-                      if (snapshot.topFeedbackItems.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        // Top 3: 도넛 중앙 바로 아래 (가로로만 넓게 그려 레이아웃 폭은 도넛 유지)
-                        SizedBox(
-                          width: kAnalysisFeedbackDonutSize,
-                          child: OverflowBox(
-                            alignment: Alignment.topCenter,
-                            minWidth: kAnalysisFeedbackDonutSize,
-                            maxWidth: 220,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Text(
-                                  l10n.analysisFeedbackTotalTopThree(
-                                    snapshot.totalFeedbackCount,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: isEnglish ? 9 : 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF3A3A3A),
-                                    height: 1.1,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                for (var i = 0;
-                                    i < snapshot.topFeedbackItems.length;
-                                    i++)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 2),
-                                    child: Text(
-                                      '${i + 1}. ${_feedbackLabel(snapshot.topFeedbackItems[i].key)} '
-                                      '(${l10n.analysisFeedbackCountAndPercent(snapshot.topFeedbackItems[i].count, snapshot.topFeedbackItems[i].percentage)})',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: isEnglish ? 8.5 : 9,
-                                        fontWeight: FontWeight.w600,
-                                        // Top 1 전체 문구: 설정 “회원 탈퇴”와 동일 색상(0xFFB92020).
-                                        color: i == 0
-                                            ? kAnalysisWithdrawAccentColor
-                                            : const Color(0xFF4A4A4A),
-                                        height: 1.15,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final availableH = constraints.maxHeight;
+                final availableW = constraints.maxWidth;
+                final donutSize = kAnalysisFeedbackDonutSize;
+                // 범례 최소 폭: 긴 한국어 이름 + gap + 숫자열.
+                final legendMinW = math.min(
+                  availableW * 0.48,
+                  math.max(
+                    148.0,
+                    availableW - donutSize - _feedbackDonutLegendGap - 8,
                   ),
-                  const SizedBox(width: 8),
-                  // 범례: 도넛 우측 · 텍스트 왼쪽 맞춤 · 도넛 높이에 수직 중앙
-                  Expanded(
-                    flex: 2,
-                    child: SizedBox(
-                      height: kAnalysisFeedbackDonutSize,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (var i = 0; i < snapshot.pieItems.length; i++)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: _legendRow(
-                                color: colors[i],
-                                item: snapshot.pieItems[i],
-                              ),
-                            ),
-                        ],
+                );
+                // 도넛을 우측으로: 남는 왼쪽 여백의 일부만 사용.
+                final usedW = donutSize + _feedbackDonutLegendGap + legendMinW;
+                final leftover = math.max(0.0, availableW - usedW);
+                final donutLeft = leftover * 0.35;
+                final legendLeft =
+                    donutLeft + donutSize + _feedbackDonutLegendGap;
+                final donutCenterX = donutLeft + donutSize / 2;
+                final topThreeTop = donutSize + _feedbackTopThreeGap;
+                final topThreeHeight = math.max(
+                  0.0,
+                  math.min(
+                    _feedbackTopThreeMaxHeight,
+                    availableH - topThreeTop,
+                  ),
+                );
+                // Top 3: 도넛 중앙 기준 약간 왼쪽에서 시작.
+                final topThreeWidth = math.min(
+                  220.0,
+                  availableW - (donutCenterX - 40),
+                );
+                final topThreeLeft = (donutCenterX - topThreeWidth * 0.35)
+                    .clamp(0.0, math.max(0.0, availableW - topThreeWidth))
+                    .toDouble();
+
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: donutLeft,
+                      width: donutSize,
+                      height: donutSize,
+                      child: FeedbackPieChart(
+                        items: snapshot.pieItems,
+                        centerLabel: l10n.analysisFeedbackDonutTotal(
+                          snapshot.totalFeedbackCount,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                    Positioned(
+                      top: 0,
+                      left: legendLeft,
+                      right: 0,
+                      height: donutSize,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (var i = 0; i < snapshot.pieItems.length; i++)
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: i == snapshot.pieItems.length - 1
+                                      ? 0
+                                      : 3,
+                                ),
+                                child: _legendRow(
+                                  color: colors[i],
+                                  item: snapshot.pieItems[i],
+                                  nameMaxWidth: math.max(
+                                    56.0,
+                                    (availableW - legendLeft) -
+                                        _feedbackLegendValueWidth -
+                                        _feedbackLegendNameValueGap -
+                                        12,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (snapshot.topFeedbackItems.isNotEmpty &&
+                        topThreeHeight > 0)
+                      Positioned(
+                        top: topThreeTop,
+                        left: topThreeLeft,
+                        width: topThreeWidth,
+                        height: topThreeHeight,
+                        child: _buildTopThreeBlock(),
+                      ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -498,32 +504,91 @@ class AnalysisPanelContent extends StatelessWidget {
     );
   }
 
+  Widget _buildTopThreeBlock() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.analysisFeedbackTotalTopThree(snapshot.totalFeedbackCount),
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: isEnglish ? 9 : 10,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF3A3A3A),
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 3),
+        for (var i = 0; i < snapshot.topFeedbackItems.length; i++)
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: i == snapshot.topFeedbackItems.length - 1
+                  ? 0
+                  : _feedbackTopThreeRowGap,
+            ),
+            child: Text(
+              '${i + 1}. ${_feedbackLabel(snapshot.topFeedbackItems[i].key)} '
+              '(${l10n.analysisFeedbackCountAndPercent(snapshot.topFeedbackItems[i].count, snapshot.topFeedbackItems[i].percentage)})',
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: isEnglish ? 8.5 : 9,
+                fontWeight: FontWeight.w600,
+                // Top 1 전체 문구: 설정 “회원 탈퇴”와 동일 색상(0xFFB92020).
+                color: i == 0
+                    ? kAnalysisWithdrawAccentColor
+                    : const Color(0xFF4A4A4A),
+                height: 1.15,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _legendRow({
     required Color color,
     required AnalysisFeedbackItem item,
+    required double nameMaxWidth,
   }) {
     return Row(
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 4),
         Expanded(
-          child: Text(
-            _feedbackLabel(item.key),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.left,
-            style: TextStyle(
-              fontSize: isEnglish ? 8 : 8.5,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF3A3A3A),
-              height: 1.0,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: nameMaxWidth),
+                  child: Text(
+                    _feedbackLabel(item.key),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.left,
+                    style: TextStyle(
+                      fontSize: isEnglish ? 8 : 8.5,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF3A3A3A),
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
