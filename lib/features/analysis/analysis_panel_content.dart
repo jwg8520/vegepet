@@ -385,34 +385,20 @@ class AnalysisPanelContent extends StatelessWidget {
             height: _metricLabelFontSize + 2 + _metricValueFontSize,
           ),
         ] else ...[
-          const SizedBox(height: 6),
+          // 대제목 바로 아래 · 도넛은 좌측으로 소폭 이동해 범례 폭 확보
+          const SizedBox(height: 4),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Row(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 좌측 여백 < 우측 범례 → 도넛이 중앙보다 살짝 왼쪽
+                  const Expanded(flex: 1, child: SizedBox.shrink()),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // 범례: 좌측 · 텍스트 왼쪽 맞춤
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (var i = 0; i < snapshot.pieItems.length; i++)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 3),
-                                child: _legendRow(
-                                  color: colors[i],
-                                  item: snapshot.pieItems[i],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      // 도넛: 섹션 가로 중앙 (좌·우 Expanded로 균형)
                       SizedBox(
                         width: kAnalysisFeedbackDonutSize,
                         height: kAnalysisFeedbackDonutSize,
@@ -423,60 +409,88 @@ class AnalysisPanelContent extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const Expanded(child: SizedBox.shrink()),
-                    ],
-                  ),
-                ),
-                if (snapshot.topFeedbackItems.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  // Top 3: 도넛 중앙 하단
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Text(
-                          l10n.analysisFeedbackTotalTopThree(
-                            snapshot.totalFeedbackCount,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: isEnglish ? 9 : 10,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF3A3A3A),
-                            height: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        for (var i = 0;
-                            i < snapshot.topFeedbackItems.length;
-                            i++)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Text(
-                              '${i + 1}. ${_feedbackLabel(snapshot.topFeedbackItems[i].key)} '
-                              '(${l10n.analysisFeedbackCountAndPercent(snapshot.topFeedbackItems[i].count, snapshot.topFeedbackItems[i].percentage)})',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: isEnglish ? 8.5 : 9,
-                                fontWeight: FontWeight.w600,
-                                // Top 1 전체 문구: 설정 “회원 탈퇴”와 동일 색상(0xFFB92020).
-                                color: i == 0
-                                    ? kAnalysisWithdrawAccentColor
-                                    : const Color(0xFF4A4A4A),
-                                height: 1.15,
-                              ),
+                      if (snapshot.topFeedbackItems.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        // Top 3: 도넛 중앙 바로 아래 (가로로만 넓게 그려 레이아웃 폭은 도넛 유지)
+                        SizedBox(
+                          width: kAnalysisFeedbackDonutSize,
+                          child: OverflowBox(
+                            alignment: Alignment.topCenter,
+                            minWidth: kAnalysisFeedbackDonutSize,
+                            maxWidth: 220,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text(
+                                  l10n.analysisFeedbackTotalTopThree(
+                                    snapshot.totalFeedbackCount,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: isEnglish ? 9 : 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF3A3A3A),
+                                    height: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                for (var i = 0;
+                                    i < snapshot.topFeedbackItems.length;
+                                    i++)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 2),
+                                    child: Text(
+                                      '${i + 1}. ${_feedbackLabel(snapshot.topFeedbackItems[i].key)} '
+                                      '(${l10n.analysisFeedbackCountAndPercent(snapshot.topFeedbackItems[i].count, snapshot.topFeedbackItems[i].percentage)})',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: isEnglish ? 8.5 : 9,
+                                        fontWeight: FontWeight.w600,
+                                        // Top 1 전체 문구: 설정 “회원 탈퇴”와 동일 색상(0xFFB92020).
+                                        color: i == 0
+                                            ? kAnalysisWithdrawAccentColor
+                                            : const Color(0xFF4A4A4A),
+                                        height: 1.15,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
+                        ),
                       ],
+                    ],
+                  ),
+                  const SizedBox(width: 8),
+                  // 범례: 도넛 우측 · 텍스트 왼쪽 맞춤 · 도넛 높이에 수직 중앙
+                  Expanded(
+                    flex: 2,
+                    child: SizedBox(
+                      height: kAnalysisFeedbackDonutSize,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var i = 0; i < snapshot.pieItems.length; i++)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 3),
+                              child: _legendRow(
+                                color: colors[i],
+                                item: snapshot.pieItems[i],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
           ),
         ],
