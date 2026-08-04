@@ -1973,25 +1973,25 @@ abstract class AppLocalizations {
   /// No description provided for @analysisFeedbackDonutTotal.
   ///
   /// In ko, this message translates to:
-  /// **'총 {count}건'**
+  /// **'총 {count}개'**
   String analysisFeedbackDonutTotal(int count);
 
   /// No description provided for @analysisFeedbackTotalTopThree.
   ///
   /// In ko, this message translates to:
-  /// **'피드백 총 {count}건 중 Top 3'**
+  /// **'피드백 총 {count}개 중 Top 3'**
   String analysisFeedbackTotalTopThree(int count);
 
   /// No description provided for @analysisFeedbackCountAndPercent.
   ///
   /// In ko, this message translates to:
-  /// **'{count}건, {percent}%'**
+  /// **'{count}개, {percent}%'**
   String analysisFeedbackCountAndPercent(int count, int percent);
 
   /// No description provided for @analysisFeedbackLegendValue.
   ///
   /// In ko, this message translates to:
-  /// **'{count}건 · {percent}%'**
+  /// **'{count}개 · {percent}%'**
   String analysisFeedbackLegendValue(int count, int percent);
 
   /// No description provided for @analysisNoFeedbackData.

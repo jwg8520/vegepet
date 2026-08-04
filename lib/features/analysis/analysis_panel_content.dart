@@ -136,9 +136,6 @@ class AnalysisPanelContent extends StatelessWidget {
   static const double _metricLabelFontSize = 9;
   static const double _metricValueFontSize = _metricLabelFontSize + 2;
 
-  /// 범례 이름 ↔ 건수·% 간격 (고정 폭 없이 바로 붙임).
-  static const double _feedbackLegendNameValueGap = 5;
-
   /// 도넛 ↔ 범례 간격.
   static const double _feedbackDonutLegendGap = 8;
 
@@ -504,7 +501,7 @@ class AnalysisPanelContent extends StatelessWidget {
     required Color color,
     required AnalysisFeedbackItem item,
   }) {
-    // 고정 폭 없이: [색] 이름  건수·% 가 왼쪽부터 붙음
+    // 색상 + 이름만 (건수·%는 도넛 조각에 표시)
     return Row(
       children: [
         Container(
@@ -529,18 +526,6 @@ class AnalysisPanelContent extends StatelessWidget {
               color: const Color(0xFF3A3A3A),
               height: 1.0,
             ),
-          ),
-        ),
-        const SizedBox(width: _feedbackLegendNameValueGap),
-        Text(
-          l10n.analysisFeedbackLegendValue(item.count, item.percentage),
-          maxLines: 1,
-          softWrap: false,
-          style: TextStyle(
-            fontSize: isEnglish ? 8 : 8.5,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF5A5A5A),
-            height: 1.0,
           ),
         ),
       ],

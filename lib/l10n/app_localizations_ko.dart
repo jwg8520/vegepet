@@ -1004,22 +1004,22 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String analysisFeedbackDonutTotal(int count) {
-    return '총 $count건';
+    return '총 $count개';
   }
 
   @override
   String analysisFeedbackTotalTopThree(int count) {
-    return '피드백 총 $count건 중 Top 3';
+    return '피드백 총 $count개 중 Top 3';
   }
 
   @override
   String analysisFeedbackCountAndPercent(int count, int percent) {
-    return '$count건, $percent%';
+    return '$count개, $percent%';
   }
 
   @override
   String analysisFeedbackLegendValue(int count, int percent) {
-    return '$count건 · $percent%';
+    return '$count개 · $percent%';
   }
 
   @override

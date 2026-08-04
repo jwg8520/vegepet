@@ -9,11 +9,11 @@ const Color kAnalysisPieTop2 = Color(0xFFC9B8AE);
 const Color kAnalysisPieTop3 = Color(0xFFAEBBC7);
 const Color kAnalysisPieOther = Color(0xFFC2C2BC);
 
-/// 피드백 도넛 기본 지름 (기존 112 → 소폭 확대).
-const double kAnalysisFeedbackDonutSize = 122;
+/// 피드백 도넛 기본 지름 (조각 안 %+(개수) 표시용 소폭 확대).
+const double kAnalysisFeedbackDonutSize = 136;
 
 /// 도넛 링 두께.
-const double kAnalysisFeedbackDonutStrokeWidth = 24;
+const double kAnalysisFeedbackDonutStrokeWidth = 30;
 
 Color analysisPieColorForKey(String key, int indexAmongNutrients) {
   if (key == kAnalysisFeedbackPerfectKey) return kAnalysisPiePerfect;
@@ -118,22 +118,38 @@ class _FeedbackPiePainter extends CustomPainter {
           center.dx + math.cos(mid) * labelRadius,
           center.dy + math.sin(mid) * labelRadius,
         );
-        final tp = TextPainter(
-          text: TextSpan(
-            text: '${item.percentage}%',
-            style: const TextStyle(
-              color: Color(0xFF3D3D3D),
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              height: 1.0,
-            ),
-          ),
+        const percentStyle = TextStyle(
+          color: Color(0xFF3D3D3D),
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          height: 1.0,
+        );
+        const countStyle = TextStyle(
+          color: Color(0xFF3D3D3D),
+          fontSize: 8,
+          fontWeight: FontWeight.w600,
+          height: 1.0,
+        );
+        final percentTp = TextPainter(
+          text: TextSpan(text: '${item.percentage}%', style: percentStyle),
           textDirection: TextDirection.ltr,
           maxLines: 1,
         )..layout();
-        tp.paint(
+        final countTp = TextPainter(
+          text: TextSpan(text: '(${item.count})', style: countStyle),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+        )..layout();
+        const lineGap = 1.0;
+        final blockH = percentTp.height + lineGap + countTp.height;
+        final top = labelPos.dy - blockH / 2;
+        percentTp.paint(canvas, Offset(labelPos.dx - percentTp.width / 2, top));
+        countTp.paint(
           canvas,
-          Offset(labelPos.dx - tp.width / 2, labelPos.dy - tp.height / 2),
+          Offset(
+            labelPos.dx - countTp.width / 2,
+            top + percentTp.height + lineGap,
+          ),
         );
       }
       start += sweep;
