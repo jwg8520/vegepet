@@ -117,7 +117,7 @@ class _WeightTrendPainter extends CustomPainter {
 
     final labelStyle = TextStyle(
       color: const Color(0xFF6B6B6B).withValues(alpha: 0.9),
-      fontSize: 8,
+      fontSize: 9,
       fontWeight: FontWeight.w600,
       height: 1.0,
     );
@@ -135,10 +135,10 @@ class _WeightTrendPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
         maxLines: 1,
       )..layout(maxWidth: leftPad - 4);
-      // 기존 대비 x축 방향 2px 왼쪽.
+      // 기존 대비 x축 방향 3px 왼쪽.
       tp.paint(
         canvas,
-        Offset(chart.left - tp.width - 3 - 2, y - tp.height / 2),
+        Offset(chart.left - tp.width - 3 - 3, y - tp.height / 2),
       );
     }
 
@@ -168,7 +168,7 @@ class _WeightTrendPainter extends CustomPainter {
           text: resolvedTarget.toStringAsFixed(1),
           style: const TextStyle(
             color: kAnalysisTargetLineColor,
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: FontWeight.w700,
             height: 1.0,
           ),
@@ -176,7 +176,7 @@ class _WeightTrendPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
         maxLines: 1,
       )..layout(maxWidth: leftPad - 2);
-      final targetLabelX = (chart.left - targetTp.width - 3 - 2).clamp(
+      final targetLabelX = (chart.left - targetTp.width - 3 - 3).clamp(
         0.0,
         chart.left - 2,
       );
@@ -190,7 +190,7 @@ class _WeightTrendPainter extends CustomPainter {
     if (points.isNotEmpty) {
       final linePaint = Paint()
         ..color = kAnalysisWeightLineColor
-        ..strokeWidth = 2.2
+        ..strokeWidth = 1.6
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
@@ -222,13 +222,17 @@ class _WeightTrendPainter extends CustomPainter {
         for (var i = 0; i < points.length; i++) {
           labelIndices.add(i);
         }
-      } else if (points.isNotEmpty) {
-        labelIndices.add(points.length - 1);
+      } else {
+        // 30일·3개월: 시작 체중 점 + 현재(마지막) 체중 점.
+        labelIndices.add(0);
+        if (points.length > 1) {
+          labelIndices.add(points.length - 1);
+        }
       }
 
       final pointLabelStyle = TextStyle(
         color: kAnalysisWeightLineColor.withValues(alpha: 0.95),
-        fontSize: 8,
+        fontSize: 9,
         fontWeight: FontWeight.w700,
         height: 1.0,
       );
@@ -261,6 +265,23 @@ class _WeightTrendPainter extends CustomPainter {
       xLabels.add(rangeStart.add(Duration(days: (span / 2).round())));
     }
     if (rangeEnd != rangeStart) xLabels.add(rangeEnd);
+    // 시작 체중 기록 날짜는 가로축에 반드시 표시.
+    if (points.isNotEmpty) {
+      final startWeightDate = DateTime(
+        points.first.date.year,
+        points.first.date.month,
+        points.first.date.day,
+      );
+      final startKey =
+          '${startWeightDate.month}/${startWeightDate.day}';
+      final alreadyListed = xLabels.any(
+        (d) => '${d.month}/${d.day}' == startKey,
+      );
+      if (!alreadyListed) {
+        xLabels.add(startWeightDate);
+        xLabels.sort((a, b) => a.compareTo(b));
+      }
+    }
 
     final seen = <String>{};
     for (final d in xLabels) {
@@ -272,10 +293,10 @@ class _WeightTrendPainter extends CustomPainter {
         maxLines: 1,
       )..layout();
       final x = xFor(d) - tp.width / 2;
-      // 기존 대비 y축 방향 2px 아래.
+      // 기존 대비 y축 방향 3px 아래.
       tp.paint(
         canvas,
-        Offset(x.clamp(0.0, size.width - tp.width), chart.bottom + 3 + 2),
+        Offset(x.clamp(0.0, size.width - tp.width), chart.bottom + 3 + 3),
       );
     }
   }
