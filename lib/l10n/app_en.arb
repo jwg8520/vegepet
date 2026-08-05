@@ -180,8 +180,13 @@
   "snackPlayedToday": "You already played with your VegePet today.",
   "snackRandomTicketGranted": "You earned a Random Adoption Ticket!",
   "snackStageReachedAdult": "Your VegePet reached the Adult stage! Raising complete!",
-  "maturityCompleteNoticeTitle": "Reached Adulthood! 🎉",
-  "maturityCompleteNoticeBody": "Use an Adoption Ticket to welcome a new VegePet!",
+  "maturityCompleteNoticeTitle": "Congratulations🎉",
+  "maturityCompleteNoticeBody": "{petNameSubject} has reached adulthood! Use an adoption ticket to welcome a new AvoPet.",
+  "@maturityCompleteNoticeBody": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
   "profileSelectMissingNoticeTitle": "Please check your profile.",
   "profileSelectMissingNoticeBody": "Please select your gender, age range, and diet goal.",
   "profileSelectMissingNoticeConfirm": "OK",
@@ -286,34 +291,64 @@
   "snackPettedTodayAlready": "You already petted your VegePet today.",
   "snackPetFetchFailed": "Failed to load pet info: {error}",
   "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
-  "mealPerfectMessage1": "VegePet looks happy after such a healthy meal!",
-  "mealPerfectMessage2": "VegePet enjoyed a well-balanced meal! Let’s keep it up.",
-  "mealGoodFeedbackMessage1": "VegePet enjoyed the meal! Next time, try adjusting it with {feedback} in mind.",
+  "mealPerfectMessage1": "{petNameSubject} happily enjoyed the meal! (Perfect +{affectionGain}💕)",
+  "@mealPerfectMessage1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "mealPerfectMessage2": "{petNameTopic} seems even healthier now! (Perfect +{affectionGain}💕)",
+  "@mealPerfectMessage2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "mealGoodFeedbackMessage1": "{petNameSubject} really enjoyed the meal. Next time, let’s {feedback}. (Good +{affectionGain}💕)",
   "@mealGoodFeedbackMessage1": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petNameSubject": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage2": "VegePet seems happy! A meal with {feedback} in mind could be even better next time.",
+  "mealGoodFeedbackMessage2": "{petName} seems to be getting healthier. Next time, let’s prepare the meal with this in mind: {feedback}. (Good +{affectionGain}💕)",
   "@mealGoodFeedbackMessage2": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petName": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFallbackMessage": "VegePet enjoyed the meal! A little more balance next time would make it even better.",
-  "mealBadFeedbackMessage1": "This meal seems a little unbalanced. Next time, try adjusting it with {feedback} in mind.",
+  "mealGoodFallbackMessage": "{petNameSubject} enjoyed the meal. Let’s aim for a slightly better nutritional balance next time.",
+  "@mealGoodFallbackMessage": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
+  "mealBadFeedbackMessage1": "{petName} doesn’t seem very happy with the meal. Next time, let’s {feedback}. (Bad +{affectionGain})",
   "@mealBadFeedbackMessage1": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petName": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFeedbackMessage2": "VegePet ate the meal, but it could be better balanced. Keep {feedback} in mind next time.",
+  "mealBadFeedbackMessage2": "{petNameTopic} seems low on energy. Let’s prepare the next meal with this in mind: {feedback}. (Bad +{affectionGain})",
   "@mealBadFeedbackMessage2": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petNameTopic": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFallbackMessage": "VegePet ate the meal, but a more balanced meal would be better next time.",
+  "mealBadFallbackMessage": "{petName} doesn’t seem very happy with the meal. Let’s aim for a better nutritional balance next time.",
+  "@mealBadFallbackMessage": {
+    "placeholders": {
+      "petName": {"type": "String"}
+    }
+  },
   "mealRecognitionRetryMessage": "We couldn’t recognize the meal. Please try again.",
   "mealRecognitionFailureTitle": "Recognition failed",
   "mealRecognitionFailureBody": "We couldn’t recognize the meal. Please try again.",
@@ -398,5 +433,93 @@
   "analysisLoading": "Loading data…",
   "analysisLoadFailed": "Couldn’t load analytics data.",
   "analysisRetry": "Retry",
-  "analysisNoRecord": "No records"
+  "analysisNoRecord": "No records",
+  "interactionPetNameFallback": "VegePet",
+  "interactionPettingCat1": "{petNameSubject} is purring happily..! (+{affectionGain}❤️)",
+  "@interactionPettingCat1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingCat2": "{petName} starts kneading! (+{affectionGain}❤️)",
+  "@interactionPettingCat2": {
+    "placeholders": {
+      "petName": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingDog1": "{petNameSubject} is grinning from ear to ear! (+{affectionGain}❤️)",
+  "@interactionPettingDog1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingDog2": "{petName} activates tail-copter mode! (+{affectionGain}❤️)",
+  "@interactionPettingDog2": {
+    "placeholders": {
+      "petName": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlaySuccess1": "{petNameTopic} looks incredibly excited! (+{affectionGain}❤️)",
+  "@interactionPlaySuccess1": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlaySuccess2": "{petNameTopic} seems to love playing with you! (+{affectionGain}❤️)",
+  "@interactionPlaySuccess2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlayFailure1": "{petNameTopic} doesn’t seem to feel like playing. Let’s try again tomorrow.",
+  "@interactionPlayFailure1": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "interactionPlayFailure2": "{petNameTopic} seems too tired to respond. Let’s try playing again tomorrow.",
+  "@interactionPlayFailure2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "interactionGrowthBabyToYoung": "... Wait, did {petName} just get a little bigger?",
+  "@interactionGrowthBabyToYoung": {
+    "placeholders": {
+      "petName": {"type": "String"}
+    }
+  },
+  "interactionGrowthYoungToGrown": "... Wait, does {petNameSubject} look a little more grown-up?",
+  "@interactionGrowthYoungToGrown": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
+  "interactionGrowthGrownToAdult": "{petNameTopic} seems to have grown into a fine adult!",
+  "@interactionGrowthGrownToAdult": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultPerfect": "Perfect",
+  "mealDiaryPhotoResultGood": "Good({feedback})",
+  "@mealDiaryPhotoResultGood": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultBad": "Bad({feedback})",
+  "@mealDiaryPhotoResultBad": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultGoodPlain": "Good",
+  "mealDiaryPhotoResultBadPlain": "Bad"
 }

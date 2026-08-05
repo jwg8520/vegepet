@@ -557,10 +557,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackStageReachedAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
 
   @override
-  String get maturityCompleteNoticeTitle => '성숙기가 되었어요🎉';
+  String get maturityCompleteNoticeTitle => '축하합니다🎉';
 
   @override
-  String get maturityCompleteNoticeBody => '분양권을 사용하여 새로운 베지펫을 분양 받아보세요!';
+  String maturityCompleteNoticeBody(String petNameSubject) {
+    return '$petNameSubject 성숙기가 되었어요. 분양권을 사용하여 새로운 아보펫을 분양받아 보세요!';
+  }
 
   @override
   String get profileSelectMissingNoticeTitle => '다시 입력해주세요.';
@@ -844,37 +846,60 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get mealPerfectMessage1 => '건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!';
-
-  @override
-  String get mealPerfectMessage2 => '베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!';
-
-  @override
-  String mealGoodFeedbackMessage1(String feedback) {
-    return '베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 $feedback를 반영한 음식을 줘보는 것이 어떨까?!';
+  String mealPerfectMessage1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject 행복하게 음식을 먹었다! (Perfect +$affectionGain💕)';
   }
 
   @override
-  String mealGoodFeedbackMessage2(String feedback) {
-    return '나름 기분이 좋아 보인다! 다음에는 $feedback를 반영한 음식을 줘보자!';
+  String mealPerfectMessage2(String petNameTopic, int affectionGain) {
+    return '$petNameTopic 한층 더 건강해진 것 같다! (Perfect +$affectionGain💕)';
   }
 
   @override
-  String get mealGoodFallbackMessage =>
-      '베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보자!';
-
-  @override
-  String mealBadFeedbackMessage1(String feedback) {
-    return '기운이 빠지는 식사인 것 같다. 다음에는 $feedback를 반영한 음식을 줘보자!';
+  String mealGoodFeedbackMessage1(
+    String petNameSubject,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petNameSubject 맛있게 음식을 먹었다. 다음에는 $feedback를 반영해 보자. (Good +$affectionGain💕)';
   }
 
   @override
-  String mealBadFeedbackMessage2(String feedback) {
-    return '다소 만족스럽지 않은 식사인 것 같다. 다음에는 $feedback를 반영한 음식을 줘보자!';
+  String mealGoodFeedbackMessage2(
+    String petName,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petName의 건강이 좋아지는 느낌이다. 다음에는 $feedback를 반영한 음식을 줘 보자. (Good +$affectionGain💕)';
   }
 
   @override
-  String get mealBadFallbackMessage => '베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보자!';
+  String mealGoodFallbackMessage(String petNameSubject) {
+    return '$petNameSubject 맛있게 음식을 먹었다. 다음에는 영양 균형을 조금 더 맞춰 보자.';
+  }
+
+  @override
+  String mealBadFeedbackMessage1(
+    String petName,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petName의 기분이 좋지 않아 보인다. 다음에는 $feedback를 반영해 보자. (Bad +$affectionGain)';
+  }
+
+  @override
+  String mealBadFeedbackMessage2(
+    String petNameTopic,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petNameTopic 힘이 없어 보인다. 다음에는 $feedback를 반영한 음식을 줘 보자. (Bad +$affectionGain)';
+  }
+
+  @override
+  String mealBadFallbackMessage(String petName) {
+    return '$petName의 기분이 좋지 않아 보인다. 다음에는 영양 균형을 조금 더 맞춰 보자.';
+  }
 
   @override
   String get mealRecognitionRetryMessage => '식단 인식을 실패했습니다. 다시 시도해주세요.';
@@ -1060,4 +1085,81 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get analysisNoRecord => '기록 없음';
+
+  @override
+  String get interactionPetNameFallback => '베지펫';
+
+  @override
+  String interactionPettingCat1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject 갸르릉거린다..! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingCat2(String petName, int affectionGain) {
+    return '$petName의 꾹꾹이 발동! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingDog1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject 기분이 좋은지 함박웃음을 짓는다! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingDog2(String petName, int affectionGain) {
+    return '$petName의 꼬리콥터 발동! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlaySuccess1(String petNameTopic, int affectionGain) {
+    return '$petNameTopic 매우 신나 보인다! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlaySuccess2(String petNameTopic, int affectionGain) {
+    return '$petNameTopic 주인이 놀아 주는 게 즐거운 듯하다! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlayFailure1(String petNameTopic) {
+    return '$petNameTopic 별로 놀고 싶어 하지 않는 것 같다. 내일 다시 놀아 줘 보자.';
+  }
+
+  @override
+  String interactionPlayFailure2(String petNameTopic) {
+    return '$petNameTopic 기운이 없는지 반응이 없다. 내일 다시 놀아 줘 보자.';
+  }
+
+  @override
+  String interactionGrowthBabyToYoung(String petName) {
+    return '... 어라? $petName의 몸집이 조금 커진 것 같다!';
+  }
+
+  @override
+  String interactionGrowthYoungToGrown(String petNameSubject) {
+    return '... 어라? $petNameSubject 다소 늠름해진 것 같다!';
+  }
+
+  @override
+  String interactionGrowthGrownToAdult(String petNameTopic) {
+    return '$petNameTopic 이제 어엿한 어른이 된 것 같다!';
+  }
+
+  @override
+  String get mealDiaryPhotoResultPerfect => 'Perfect';
+
+  @override
+  String mealDiaryPhotoResultGood(String feedback) {
+    return 'Good($feedback)';
+  }
+
+  @override
+  String mealDiaryPhotoResultBad(String feedback) {
+    return 'Bad($feedback)';
+  }
+
+  @override
+  String get mealDiaryPhotoResultGoodPlain => 'Good';
+
+  @override
+  String get mealDiaryPhotoResultBadPlain => 'Bad';
 }

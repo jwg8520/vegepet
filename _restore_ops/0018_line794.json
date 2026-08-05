@@ -1,0 +1,10 @@
+{
+  "lineNo": 794,
+  "callIndex": 18,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "    default:\n      return '';\n  }\n}\n\nString _joinFeedbackPhrases(List<String> phrases, {required bool isEnglish}) {",
+  "new_string": "    default:\n      return '';\n  }\n}\n\n/// 영어 교감 문장 삽입용 소문자 동사구 (let’s {feedback}).\nString _localizedMealFeedbackActionPhrase(String code) {\n  switch (code) {\n    case 'protein_up':\n      return 'increase protein';\n    case 'protein_down':\n      return 'reduce protein';\n    case 'carbohydrates_up':\n      return 'increase carbohydrates';\n    case 'carbohydrates_down':\n      return 'reduce carbohydrates';\n    case 'fat_up':\n      return 'increase fat';\n    case 'fat_down':\n      return 'reduce fat';\n    case 'dietary_fiber_up':\n      return 'increase dietary fiber';\n    case 'dietary_fiber_down':\n      return 'reduce dietary fiber';\n    default:\n      return '';\n  }\n}\n\nString _joinFeedbackPhrases(List<String> phrases, {required bool isEnglish}) {",
+  "replace_all": null,
+  "contents": null
+}

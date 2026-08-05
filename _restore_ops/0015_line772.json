@@ -1,0 +1,10 @@
+{
+  "lineNo": 772,
+  "callIndex": 15,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "  void _dismissAllUiForDeletedAccountReset() {\n    _instantCloseYardConfirmOverlays();\n    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));",
+  "new_string": "  void _dismissAllUiForDeletedAccountReset() {\n    _instantCloseYardConfirmOverlays();\n    _resetInteractionStatusState();\n    unawaited(_closeProfileSelectOverlay(notify: false, animated: false));",
+  "replace_all": null,
+  "contents": null
+}

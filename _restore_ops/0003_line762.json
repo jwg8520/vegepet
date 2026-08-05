@@ -1,0 +1,10 @@
+{
+  "lineNo": 762,
+  "callIndex": 3,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "    _yardConfirmOverlayFadeController = AnimationController(\n      vsync: this,\n      duration: const Duration(milliseconds: 180),\n    );\n    _yardConfirmOverlayFadeCurve = CurvedAnimation(\n      parent: _yardConfirmOverlayFadeController,\n      curve: Curves.easeOutCubic,\n      reverseCurve: Curves.easeInCubic,\n    );",
+  "new_string": "    _yardConfirmOverlayFadeController = AnimationController(\n      vsync: this,\n      duration: const Duration(milliseconds: 180),\n    );\n    _yardConfirmOverlayFadeCurve = CurvedAnimation(\n      parent: _yardConfirmOverlayFadeController,\n      curve: Curves.easeOutCubic,\n      reverseCurve: Curves.easeInCubic,\n    );\n    _interactionStatusAnimationController = AnimationController(\n      vsync: this,\n      duration: const Duration(milliseconds: 220),\n      reverseDuration: const Duration(milliseconds: 180),\n    );\n    _interactionStatusOpacity = CurvedAnimation(\n      parent: _interactionStatusAnimationController,\n      curve: Curves.easeOutCubic,\n      reverseCurve: Curves.easeInCubic,\n    );\n    _interactionStatusScale = Tween<double>(begin: 0.94, end: 1.0).animate(\n      CurvedAnimation(\n        parent: _interactionStatusAnimationController,\n        curve: Curves.easeOutBack,\n        reverseCurve: Curves.easeInCubic,\n      ),\n    );",
+  "replace_all": null,
+  "contents": null
+}

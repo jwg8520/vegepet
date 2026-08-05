@@ -1,0 +1,10 @@
+{
+  "lineNo": 767,
+  "callIndex": 9,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "  Future<void> _dismissYardConfirmOverlayAnimated(\n    void Function() setClosed,\n  ) async {\n    if (_yardConfirmOverlayFadeController.value <= 0) {\n      if (mounted) {\n        _safeSetState(setClosed);\n      } else {\n        setClosed();\n      }\n      return;\n    }\n    if (_yardConfirmOverlayFadeController.status == AnimationStatus.reverse) {\n      return;\n    }\n    await _yardConfirmOverlayFadeController.reverse();\n    if (!mounted) return;\n    _safeSetState(setClosed);\n  }",
+  "new_string": "  Future<void> _dismissYardConfirmOverlayAnimated(\n    void Function() setClosed,\n  ) async {\n    if (_yardConfirmOverlayFadeController.value <= 0) {\n      if (mounted) {\n        _safeSetState(setClosed);\n      } else {\n        setClosed();\n      }\n      if (!_hasBlockingYardModalOpen()) {\n        unawaited(_presentNextInteractionStatusIfIdle());\n      }\n      return;\n    }\n    if (_yardConfirmOverlayFadeController.status == AnimationStatus.reverse) {\n      return;\n    }\n    await _yardConfirmOverlayFadeController.reverse();\n    if (!mounted) return;\n    _safeSetState(setClosed);\n    if (!_hasBlockingYardModalOpen()) {\n      unawaited(_presentNextInteractionStatusIfIdle());\n    }\n  }",
+  "replace_all": null,
+  "contents": null
+}

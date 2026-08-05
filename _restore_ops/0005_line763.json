@@ -1,0 +1,10 @@
+{
+  "lineNo": 763,
+  "callIndex": 5,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "    _yardConfirmOverlayFadeController.dispose();\n    _petNamingPanelEnterController.dispose();",
+  "new_string": "    _yardConfirmOverlayFadeController.dispose();\n    _interactionStatusAnimationController.dispose();\n    _petNamingPanelEnterController.dispose();",
+  "replace_all": null,
+  "contents": null
+}

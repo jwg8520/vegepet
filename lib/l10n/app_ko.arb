@@ -180,8 +180,13 @@
   "snackPlayedToday": "오늘은 이미 놀아줬어요.",
   "snackRandomTicketGranted": "랜덤 분양권을 획득했어요!",
   "snackStageReachedAdult": "베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!",
-  "maturityCompleteNoticeTitle": "성숙기가 되었어요🎉",
-  "maturityCompleteNoticeBody": "분양권을 사용하여 새로운 베지펫을 분양 받아보세요!",
+  "maturityCompleteNoticeTitle": "축하합니다🎉",
+  "maturityCompleteNoticeBody": "{petNameSubject} 성숙기가 되었어요. 분양권을 사용하여 새로운 아보펫을 분양받아 보세요!",
+  "@maturityCompleteNoticeBody": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
   "profileSelectMissingNoticeTitle": "다시 입력해주세요.",
   "profileSelectMissingNoticeBody": "성별/나이대/식단 목적을 선택해 주세요.",
   "profileSelectMissingNoticeConfirm": "확인",
@@ -286,34 +291,64 @@
   "snackPettedTodayAlready": "오늘은 이미 쓰다듬었어요.",
   "snackPetFetchFailed": "펫 정보를 불러올 수 없어요: {error}",
   "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
-  "mealPerfectMessage1": "건강한 음식을 먹어서 그런가? 베지펫의 기분이 좋아 보인다!",
-  "mealPerfectMessage2": "베지펫이 만족스러운 식사를 했다! 지금처럼 균형을 유지하면 좋을 것 같다!",
-  "mealGoodFeedbackMessage1": "베지펫이 맛있게 음식을 먹은 것 같다! 다음에는 {feedback}를 반영한 음식을 줘보는 것이 어떨까?!",
+  "mealPerfectMessage1": "{petNameSubject} 행복하게 음식을 먹었다! (Perfect +{affectionGain}💕)",
+  "@mealPerfectMessage1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "mealPerfectMessage2": "{petNameTopic} 한층 더 건강해진 것 같다! (Perfect +{affectionGain}💕)",
+  "@mealPerfectMessage2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "mealGoodFeedbackMessage1": "{petNameSubject} 맛있게 음식을 먹었다. 다음에는 {feedback}를 반영해 보자. (Good +{affectionGain}💕)",
   "@mealGoodFeedbackMessage1": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petNameSubject": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage2": "나름 기분이 좋아 보인다! 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "mealGoodFeedbackMessage2": "{petName}의 건강이 좋아지는 느낌이다. 다음에는 {feedback}를 반영한 음식을 줘 보자. (Good +{affectionGain}💕)",
   "@mealGoodFeedbackMessage2": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petName": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFallbackMessage": "베지펫이 맛있게 음식을 먹었다! 다음에는 영양 균형을 조금 더 맞춰보자!",
-  "mealBadFeedbackMessage1": "기운이 빠지는 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "mealGoodFallbackMessage": "{petNameSubject} 맛있게 음식을 먹었다. 다음에는 영양 균형을 조금 더 맞춰 보자.",
+  "@mealGoodFallbackMessage": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
+  "mealBadFeedbackMessage1": "{petName}의 기분이 좋지 않아 보인다. 다음에는 {feedback}를 반영해 보자. (Bad +{affectionGain})",
   "@mealBadFeedbackMessage1": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petName": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFeedbackMessage2": "다소 만족스럽지 않은 식사인 것 같다. 다음에는 {feedback}를 반영한 음식을 줘보자!",
+  "mealBadFeedbackMessage2": "{petNameTopic} 힘이 없어 보인다. 다음에는 {feedback}를 반영한 음식을 줘 보자. (Bad +{affectionGain})",
   "@mealBadFeedbackMessage2": {
     "placeholders": {
-      "feedback": {"type": "String"}
+      "petNameTopic": {"type": "String"},
+      "feedback": {"type": "String"},
+      "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFallbackMessage": "베지펫이 음식을 먹었지만, 다음에는 식단 구성을 조금 더 조절해보자!",
+  "mealBadFallbackMessage": "{petName}의 기분이 좋지 않아 보인다. 다음에는 영양 균형을 조금 더 맞춰 보자.",
+  "@mealBadFallbackMessage": {
+    "placeholders": {
+      "petName": {"type": "String"}
+    }
+  },
   "mealRecognitionRetryMessage": "식단 인식을 실패했습니다. 다시 시도해주세요.",
   "mealRecognitionFailureTitle": "인식 실패",
   "mealRecognitionFailureBody": "식단 인식을 실패했습니다. 다시 시도해주세요.",
@@ -398,5 +433,93 @@
   "analysisLoading": "데이터를 불러오는 중입니다.",
   "analysisLoadFailed": "분석 데이터를 불러오지 못했습니다.",
   "analysisRetry": "다시 시도",
-  "analysisNoRecord": "기록 없음"
+  "analysisNoRecord": "기록 없음",
+  "interactionPetNameFallback": "베지펫",
+  "interactionPettingCat1": "{petNameSubject} 갸르릉거린다..! (+{affectionGain}❤️)",
+  "@interactionPettingCat1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingCat2": "{petName}의 꾹꾹이 발동! (+{affectionGain}❤️)",
+  "@interactionPettingCat2": {
+    "placeholders": {
+      "petName": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingDog1": "{petNameSubject} 기분이 좋은지 함박웃음을 짓는다! (+{affectionGain}❤️)",
+  "@interactionPettingDog1": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPettingDog2": "{petName}의 꼬리콥터 발동! (+{affectionGain}❤️)",
+  "@interactionPettingDog2": {
+    "placeholders": {
+      "petName": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlaySuccess1": "{petNameTopic} 매우 신나 보인다! (+{affectionGain}❤️)",
+  "@interactionPlaySuccess1": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlaySuccess2": "{petNameTopic} 주인이 놀아 주는 게 즐거운 듯하다! (+{affectionGain}❤️)",
+  "@interactionPlaySuccess2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"},
+      "affectionGain": {"type": "int"}
+    }
+  },
+  "interactionPlayFailure1": "{petNameTopic} 별로 놀고 싶어 하지 않는 것 같다. 내일 다시 놀아 줘 보자.",
+  "@interactionPlayFailure1": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "interactionPlayFailure2": "{petNameTopic} 기운이 없는지 반응이 없다. 내일 다시 놀아 줘 보자.",
+  "@interactionPlayFailure2": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "interactionGrowthBabyToYoung": "... 어라? {petName}의 몸집이 조금 커진 것 같다!",
+  "@interactionGrowthBabyToYoung": {
+    "placeholders": {
+      "petName": {"type": "String"}
+    }
+  },
+  "interactionGrowthYoungToGrown": "... 어라? {petNameSubject} 다소 늠름해진 것 같다!",
+  "@interactionGrowthYoungToGrown": {
+    "placeholders": {
+      "petNameSubject": {"type": "String"}
+    }
+  },
+  "interactionGrowthGrownToAdult": "{petNameTopic} 이제 어엿한 어른이 된 것 같다!",
+  "@interactionGrowthGrownToAdult": {
+    "placeholders": {
+      "petNameTopic": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultPerfect": "Perfect",
+  "mealDiaryPhotoResultGood": "Good({feedback})",
+  "@mealDiaryPhotoResultGood": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultBad": "Bad({feedback})",
+  "@mealDiaryPhotoResultBad": {
+    "placeholders": {
+      "feedback": {"type": "String"}
+    }
+  },
+  "mealDiaryPhotoResultGoodPlain": "Good",
+  "mealDiaryPhotoResultBadPlain": "Bad"
 }

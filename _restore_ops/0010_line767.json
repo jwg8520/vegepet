@@ -1,0 +1,10 @@
+{
+  "lineNo": 767,
+  "callIndex": 10,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "        _buildCustomerCenterPanelGlobalOverlay(),\n        _buildRandomTicketUseConfirmGlobalOverlay(),",
+  "new_string": "        _buildCustomerCenterPanelGlobalOverlay(),\n        _buildInteractionStatusMessageOverlay(),\n        _buildRandomTicketUseConfirmGlobalOverlay(),",
+  "replace_all": null,
+  "contents": null
+}

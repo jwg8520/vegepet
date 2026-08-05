@@ -272,8 +272,7 @@ class _WeightTrendPainter extends CustomPainter {
         points.first.date.month,
         points.first.date.day,
       );
-      final startKey =
-          '${startWeightDate.month}/${startWeightDate.day}';
+      final startKey = '${startWeightDate.month}/${startWeightDate.day}';
       final alreadyListed = xLabels.any(
         (d) => '${d.month}/${d.day}' == startKey,
       );

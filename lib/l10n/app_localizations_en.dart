@@ -578,11 +578,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your VegePet reached the Adult stage! Raising complete!';
 
   @override
-  String get maturityCompleteNoticeTitle => 'Reached Adulthood! 🎉';
+  String get maturityCompleteNoticeTitle => 'Congratulations🎉';
 
   @override
-  String get maturityCompleteNoticeBody =>
-      'Use an Adoption Ticket to welcome a new VegePet!';
+  String maturityCompleteNoticeBody(String petNameSubject) {
+    return '$petNameSubject has reached adulthood! Use an adoption ticket to welcome a new AvoPet.';
+  }
 
   @override
   String get profileSelectMissingNoticeTitle => 'Please check your profile.';
@@ -877,40 +878,60 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get mealPerfectMessage1 =>
-      'VegePet looks happy after such a healthy meal!';
-
-  @override
-  String get mealPerfectMessage2 =>
-      'VegePet enjoyed a well-balanced meal! Let’s keep it up.';
-
-  @override
-  String mealGoodFeedbackMessage1(String feedback) {
-    return 'VegePet enjoyed the meal! Next time, try adjusting it with $feedback in mind.';
+  String mealPerfectMessage1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject happily enjoyed the meal! (Perfect +$affectionGain💕)';
   }
 
   @override
-  String mealGoodFeedbackMessage2(String feedback) {
-    return 'VegePet seems happy! A meal with $feedback in mind could be even better next time.';
+  String mealPerfectMessage2(String petNameTopic, int affectionGain) {
+    return '$petNameTopic seems even healthier now! (Perfect +$affectionGain💕)';
   }
 
   @override
-  String get mealGoodFallbackMessage =>
-      'VegePet enjoyed the meal! A little more balance next time would make it even better.';
-
-  @override
-  String mealBadFeedbackMessage1(String feedback) {
-    return 'This meal seems a little unbalanced. Next time, try adjusting it with $feedback in mind.';
+  String mealGoodFeedbackMessage1(
+    String petNameSubject,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petNameSubject really enjoyed the meal. Next time, let’s $feedback. (Good +$affectionGain💕)';
   }
 
   @override
-  String mealBadFeedbackMessage2(String feedback) {
-    return 'VegePet ate the meal, but it could be better balanced. Keep $feedback in mind next time.';
+  String mealGoodFeedbackMessage2(
+    String petName,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petName seems to be getting healthier. Next time, let’s prepare the meal with this in mind: $feedback. (Good +$affectionGain💕)';
   }
 
   @override
-  String get mealBadFallbackMessage =>
-      'VegePet ate the meal, but a more balanced meal would be better next time.';
+  String mealGoodFallbackMessage(String petNameSubject) {
+    return '$petNameSubject enjoyed the meal. Let’s aim for a slightly better nutritional balance next time.';
+  }
+
+  @override
+  String mealBadFeedbackMessage1(
+    String petName,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petName doesn’t seem very happy with the meal. Next time, let’s $feedback. (Bad +$affectionGain)';
+  }
+
+  @override
+  String mealBadFeedbackMessage2(
+    String petNameTopic,
+    String feedback,
+    int affectionGain,
+  ) {
+    return '$petNameTopic seems low on energy. Let’s prepare the next meal with this in mind: $feedback. (Bad +$affectionGain)';
+  }
+
+  @override
+  String mealBadFallbackMessage(String petName) {
+    return '$petName doesn’t seem very happy with the meal. Let’s aim for a better nutritional balance next time.';
+  }
 
   @override
   String get mealRecognitionRetryMessage =>
@@ -1099,4 +1120,81 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get analysisNoRecord => 'No records';
+
+  @override
+  String get interactionPetNameFallback => 'VegePet';
+
+  @override
+  String interactionPettingCat1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject is purring happily..! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingCat2(String petName, int affectionGain) {
+    return '$petName starts kneading! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingDog1(String petNameSubject, int affectionGain) {
+    return '$petNameSubject is grinning from ear to ear! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPettingDog2(String petName, int affectionGain) {
+    return '$petName activates tail-copter mode! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlaySuccess1(String petNameTopic, int affectionGain) {
+    return '$petNameTopic looks incredibly excited! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlaySuccess2(String petNameTopic, int affectionGain) {
+    return '$petNameTopic seems to love playing with you! (+$affectionGain❤️)';
+  }
+
+  @override
+  String interactionPlayFailure1(String petNameTopic) {
+    return '$petNameTopic doesn’t seem to feel like playing. Let’s try again tomorrow.';
+  }
+
+  @override
+  String interactionPlayFailure2(String petNameTopic) {
+    return '$petNameTopic seems too tired to respond. Let’s try playing again tomorrow.';
+  }
+
+  @override
+  String interactionGrowthBabyToYoung(String petName) {
+    return '... Wait, did $petName just get a little bigger?';
+  }
+
+  @override
+  String interactionGrowthYoungToGrown(String petNameSubject) {
+    return '... Wait, does $petNameSubject look a little more grown-up?';
+  }
+
+  @override
+  String interactionGrowthGrownToAdult(String petNameTopic) {
+    return '$petNameTopic seems to have grown into a fine adult!';
+  }
+
+  @override
+  String get mealDiaryPhotoResultPerfect => 'Perfect';
+
+  @override
+  String mealDiaryPhotoResultGood(String feedback) {
+    return 'Good($feedback)';
+  }
+
+  @override
+  String mealDiaryPhotoResultBad(String feedback) {
+    return 'Bad($feedback)';
+  }
+
+  @override
+  String get mealDiaryPhotoResultGoodPlain => 'Good';
+
+  @override
+  String get mealDiaryPhotoResultBadPlain => 'Bad';
 }

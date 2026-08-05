@@ -187,14 +187,6 @@ class _MealVerificationAttemptState {
   static const empty = _MealVerificationAttemptState(failedCount: 0);
 }
 
-/// 교감 상태 메시지 창 queue 항목. [onDismissed] 는 이 메시지가 닫힌 직후 1회 호출된다.
-class _InteractionStatusEntry {
-  const _InteractionStatusEntry(this.message, {this.onDismissed});
-
-  final String message;
-  final VoidCallback? onDismissed;
-}
-
 /// `delete-auth-user` Edge Function 응답 검증 결과 (민감 정보 미포함).
 class _DeleteAccountResult {
   const _DeleteAccountResult({
@@ -276,30 +268,6 @@ String _localizedMealFeedbackPhrase(String code, AppLocalizations l10n) {
   }
 }
 
-/// 영어 교감 문장 삽입용 소문자 동사구 (let’s {feedback}).
-String _localizedMealFeedbackActionPhrase(String code) {
-  switch (code) {
-    case 'protein_up':
-      return 'increase protein';
-    case 'protein_down':
-      return 'reduce protein';
-    case 'carbohydrates_up':
-      return 'increase carbohydrates';
-    case 'carbohydrates_down':
-      return 'reduce carbohydrates';
-    case 'fat_up':
-      return 'increase fat';
-    case 'fat_down':
-      return 'reduce fat';
-    case 'dietary_fiber_up':
-      return 'increase dietary fiber';
-    case 'dietary_fiber_down':
-      return 'reduce dietary fiber';
-    default:
-      return '';
-  }
-}
-
 String _joinFeedbackPhrases(List<String> phrases, {required bool isEnglish}) {
   final parts = phrases.where((p) => p.trim().isNotEmpty).toList();
   if (parts.isEmpty) return '';
@@ -326,32 +294,6 @@ String? _localizedMealFeedbackFromCodes(
   return joined.isEmpty ? null : joined;
 }
 
-String? _localizedMealFeedbackForInteraction(
-  List<String> codes,
-  AppLocalizations l10n, {
-  required bool isEnglish,
-}) {
-  if (isEnglish) {
-    final phrases = codes
-        .map(_localizedMealFeedbackActionPhrase)
-        .where((p) => p.isNotEmpty)
-        .toList();
-    final joined = _joinFeedbackPhrases(phrases, isEnglish: true);
-    return joined.isEmpty ? null : joined;
-  }
-  return _localizedMealFeedbackFromCodes(codes, l10n, isEnglish: false);
-}
-
-String _lowercaseFirstAsciiLetter(String text) {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty) return trimmed;
-  final first = trimmed.codeUnitAt(0);
-  if (first >= 65 && first <= 90) {
-    return '${String.fromCharCode(first + 32)}${trimmed.substring(1)}';
-  }
-  return trimmed;
-}
-
 bool _isDisallowedFallbackFeedback(String text, {required bool isEnglish}) {
   final lower = text.toLowerCase();
   final banned = isEnglish
@@ -376,7 +318,7 @@ String _formatFeedbackForEnglishSentence(String feedback) {
       .replaceAll(RegExp(r'\band\s+and\b', caseSensitive: false), 'and');
 
   if (cleaned.isEmpty) return '';
-  if (!cleaned.contains(',')) return _lowercaseFirstAsciiLetter(cleaned);
+  if (!cleaned.contains(',')) return cleaned;
 
   final parts = cleaned
       .split(',')
@@ -389,45 +331,12 @@ String _formatFeedbackForEnglishSentence(String feedback) {
       .where((part) => part.isNotEmpty)
       .toList();
 
-  if (parts.length <= 1) {
-    return parts.isEmpty ? cleaned : _lowercaseFirstAsciiLetter(parts.first);
-  }
-  final normalized = parts.map(_lowercaseFirstAsciiLetter).toList();
-  if (normalized.length == 2) return '${normalized[0]} and ${normalized[1]}';
-  return '${normalized.sublist(0, normalized.length - 1).join(', ')}, and ${normalized.last}';
+  if (parts.length <= 1) return cleaned;
+  if (parts.length == 2) return '${parts[0]} and ${parts[1]}';
+  return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}';
 }
 
-bool _isHangulSyllableCodeUnit(int codeUnit) {
-  return codeUnit >= 0xAC00 && codeUnit <= 0xD7A3;
-}
-
-bool _hasKoreanFinalConsonant(String text) {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty) return false;
-  final codeUnit = trimmed.runes.last;
-  if (!_isHangulSyllableCodeUnit(codeUnit)) return false;
-  return (codeUnit - 0xAC00) % 28 != 0;
-}
-
-/// 이름 + 이/가 (비한글 마지막 글자는 `가` fallback).
-String _petNameWithSubjectParticle(String name) {
-  final trimmed = name.trim();
-  if (trimmed.isEmpty) return trimmed;
-  final codeUnit = trimmed.runes.last;
-  if (!_isHangulSyllableCodeUnit(codeUnit)) return '$trimmed가';
-  return _hasKoreanFinalConsonant(trimmed) ? '$trimmed이' : '$trimmed가';
-}
-
-/// 이름 + 은/는 (비한글 마지막 글자는 `는` fallback).
-String _petNameWithTopicParticle(String name) {
-  final trimmed = name.trim();
-  if (trimmed.isEmpty) return trimmed;
-  final codeUnit = trimmed.runes.last;
-  if (!_isHangulSyllableCodeUnit(codeUnit)) return '$trimmed는';
-  return _hasKoreanFinalConsonant(trimmed) ? '$trimmed은' : '$trimmed는';
-}
-
-String _pickInteractionTemplate(List<String> templates) {
+String _pickMealTemplate(List<String> templates) {
   if (templates.isEmpty) return '';
   return templates[_mealMessageRandom.nextInt(templates.length)];
 }
@@ -439,23 +348,16 @@ String _buildAiStatusMessage({
   required String? feedbackText,
   required AppLocalizations l10n,
   required bool isEnglish,
-  required String petName,
-  required int affectionGain,
 }) {
-  final petNameSubject = isEnglish
-      ? petName
-      : _petNameWithSubjectParticle(petName);
-  final petNameTopic = isEnglish ? petName : _petNameWithTopicParticle(petName);
-
   switch (resultType) {
     case 'perfect':
-      return _pickInteractionTemplate([
-        l10n.mealPerfectMessage1(petNameSubject, affectionGain),
-        l10n.mealPerfectMessage2(petNameTopic, affectionGain),
+      return _pickMealTemplate([
+        l10n.mealPerfectMessage1,
+        l10n.mealPerfectMessage2,
       ]);
     case 'good':
       {
-        final fromCodes = _localizedMealFeedbackForInteraction(
+        final fromCodes = _localizedMealFeedbackFromCodes(
           feedbackCodes,
           l10n,
           isEnglish: isEnglish,
@@ -469,20 +371,16 @@ String _buildAiStatusMessage({
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
-          return _pickInteractionTemplate([
-            l10n.mealGoodFeedbackMessage1(
-              petNameSubject,
-              feedback,
-              affectionGain,
-            ),
-            l10n.mealGoodFeedbackMessage2(petName, feedback, affectionGain),
+          return _pickMealTemplate([
+            l10n.mealGoodFeedbackMessage1(feedback),
+            l10n.mealGoodFeedbackMessage2(feedback),
           ]);
         }
-        return l10n.mealGoodFallbackMessage(petNameSubject);
+        return l10n.mealGoodFallbackMessage;
       }
     case 'bad':
       {
-        final fromCodes = _localizedMealFeedbackForInteraction(
+        final fromCodes = _localizedMealFeedbackFromCodes(
           feedbackCodes,
           l10n,
           isEnglish: isEnglish,
@@ -496,12 +394,12 @@ String _buildAiStatusMessage({
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
-          return _pickInteractionTemplate([
-            l10n.mealBadFeedbackMessage1(petName, feedback, affectionGain),
-            l10n.mealBadFeedbackMessage2(petNameTopic, feedback, affectionGain),
+          return _pickMealTemplate([
+            l10n.mealBadFeedbackMessage1(feedback),
+            l10n.mealBadFeedbackMessage2(feedback),
           ]);
         }
-        return l10n.mealBadFallbackMessage(petName);
+        return l10n.mealBadFallbackMessage;
       }
     case 'uncertain':
     default:
@@ -569,13 +467,15 @@ Future<void> _precacheStartupLoadingLogo() async {
 
 final supabase = Supabase.instance.client;
 
-// 전역 Navigator key.
+// 전역 Navigator / ScaffoldMessenger key.
 //
 // HomePage 의 일시적인 BuildContext 변화(프로필 입력 → 첫 분양 → 마당 화면 전환,
-// BottomSheet/Dialog 트리 dispose 등) 와 Dialog 호출 타이밍이 겹치면
+// BottomSheet/Dialog 트리 dispose 등) 와 SnackBar/Dialog 호출 타이밍이 겹치면
 // `_dependents.isEmpty is not true` assertion 이 발생할 수 있다. 전역 key 를
-// 통해 화면 전환 타이밍과의 충돌을 줄인다.
+// 통해 SnackBar 를 띄워서 화면 전환 타이밍과의 충돌을 줄인다.
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 const String _kLocalePrefKey = 'vegepet_locale_code';
 
 /// 앱 설치 단위 기기 식별자(진단·확장용). 사용자 UUID/이메일을 담지 않는다.
@@ -629,6 +529,7 @@ class _VegePetAppState extends State<VegePetApp> {
         title: 'VegePet',
         debugShowCheckedModeBanner: false,
         navigatorKey: _rootNavigatorKey,
+        scaffoldMessengerKey: _rootScaffoldMessengerKey,
         locale: _locale,
         localizationsDelegates: const [
           AppLocalizations.delegate,
@@ -710,12 +611,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   static const double _kGameCanvasWidth = 844;
-
-  /// 교감 상태 메시지 창 (844×390 마당 좌표).
-  static const double _kInteractionStatusLeft = 182;
-  static const double _kInteractionStatusTop = 264;
-  static const double _kInteractionStatusWidth = 480;
-  static const double _kInteractionStatusHeight = 80;
   static const double _kGameCanvasHeight = 390;
 
   /// 분양 후 이름 짓기 패널 — 프로필 입력창과 동일 앵커 (286, 83).
@@ -776,20 +671,6 @@ class _HomePageState extends State<HomePage>
   String? _lastStatusMessage;
   int? _lastAffectionGain;
   String? _lastImagePath;
-
-  /// 교감 상태 메시지 창 (식단/놀아주기/쓰다듬기/성장).
-  String? _interactionStatusMessage;
-  VoidCallback? _interactionStatusCurrentOnDismissed;
-  bool _isInteractionStatusOpen = false;
-  bool _interactionStatusTransitionInProgress = false;
-  bool _interactionStatusDismissRequested = false;
-  int _interactionStatusGeneration = 0;
-  final List<_InteractionStatusEntry> _interactionStatusQueue =
-      <_InteractionStatusEntry>[];
-  final Set<String> _shownInteractionStatusEventKeys = <String>{};
-  late AnimationController _interactionStatusAnimationController;
-  late Animation<double> _interactionStatusOpacity;
-  late Animation<double> _interactionStatusScale;
 
   final TextEditingController _nicknameController = TextEditingController();
   final FocusNode _nicknameFocusNode = FocusNode();
@@ -924,7 +805,6 @@ class _HomePageState extends State<HomePage>
   bool _isToyMenuOpen = false;
   bool _isToyDropHovering = false;
   bool _isCompletingToyPlay = false;
-  int _toyPlayAttemptSeq = 0;
   bool _isPetInfoBannerOpen = false;
 
   /// 베지펫 정보창 ↔ 놀아주기 창 전환 애니메이션 진행 중.
@@ -1076,9 +956,6 @@ class _HomePageState extends State<HomePage>
 
   /// 현재 육성 펫 성숙기 달성 축하 안내 (240×116 · 마당 좌표계).
   bool _isMaturityCompleteNoticeOpen = false;
-
-  /// 성숙기 승급 시 캡처한 펫 이름 기준 안내 본문. 성장 메시지 dismiss 이후 모달에 사용한다.
-  String? _pendingMaturityNoticeBody;
 
   /// 도감 완성 후 랜덤 분양권 사용 안내 (240×116 · 마당 좌표계).
   bool _isPokedexCompleteTicketNoticeOpen = false;
@@ -1447,23 +1324,6 @@ class _HomePageState extends State<HomePage>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
-    _interactionStatusAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 220),
-      reverseDuration: const Duration(milliseconds: 180),
-    );
-    _interactionStatusOpacity = CurvedAnimation(
-      parent: _interactionStatusAnimationController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    _interactionStatusScale = Tween<double>(begin: 0.94, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _interactionStatusAnimationController,
-        curve: Curves.easeOutBack,
-        reverseCurve: Curves.easeInCubic,
-      ),
-    );
     _petNamingPanelEnterController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 220),
@@ -1519,7 +1379,6 @@ class _HomePageState extends State<HomePage>
     _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
     _yardConfirmOverlayFadeController.dispose();
-    _interactionStatusAnimationController.dispose();
     _petNamingPanelEnterController.dispose();
     _petShadowColorHexController.dispose();
     _pettingHeartColorHexController.dispose();
@@ -1676,8 +1535,6 @@ class _HomePageState extends State<HomePage>
     _randomTicketCount = 0;
     _selectedSpeciesId = null;
     _invalidateAnalysisCache(resetPeriod: true);
-    _pendingMaturityNoticeBody = null;
-    _resetInteractionStatusState();
   }
 
   /// 계정 전환 시 호출. 이전 user fetch/sync 결과를 무효화한다.
@@ -2013,6 +1870,7 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(AppLocalizations.of(context).snackLoginRequired);
       return;
     }
 
@@ -2046,6 +1904,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (!isValidTargetWeight) {
+      _showSnack(AppLocalizations.of(context).profileTargetWeightKgInvalid);
       _targetWeightFocusNode.requestFocus();
       return;
     }
@@ -2167,6 +2026,9 @@ class _HomePageState extends State<HomePage>
         _isProfileSetupClosing = false;
         _isProfileSetupPanelVisible = true;
       });
+      _showSnack(
+        AppLocalizations.of(context).snackProfileSaveFailed(e.toString()),
+      );
     }
   }
 
@@ -2230,6 +2092,7 @@ class _HomePageState extends State<HomePage>
     } catch (e, st) {
       debugPrint('settings language change failed: $e\n$st');
       if (!mounted) return;
+      _showSnack(AppLocalizations.of(context).snackLanguageChangeFailed);
     }
   }
 
@@ -2237,8 +2100,12 @@ class _HomePageState extends State<HomePage>
     final targetCode = _localeFromLanguageLabel(label).languageCode;
     final localeScope = _LocaleControllerScope.of(context);
     final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
+    final changedMessage = targetCode == 'en'
+        ? 'Language changed.'
+        : '언어가 변경되었어요.';
     await localeScope.setLocale(Locale(targetCode));
     if (!mounted) return;
+    _showSnack(changedMessage);
 
     if (_mealReminderPushEnabled) {
       try {
@@ -3397,7 +3264,6 @@ class _HomePageState extends State<HomePage>
   /// 삭제된 계정 reset 직후 stale UI·패널·알림을 즉시 내린다.
   void _dismissAllUiForDeletedAccountReset() {
     _instantCloseYardConfirmOverlays();
-    _resetInteractionStatusState();
     unawaited(_closeProfileSelectOverlay(notify: false, animated: false));
 
     _status = _ViewStatus.loading;
@@ -3821,8 +3687,10 @@ class _HomePageState extends State<HomePage>
 
     if (enabled) {
       await _startBackgroundMusicIfEnabled();
+      _showSnack(enabledMessage);
     } else {
       await _stopBackgroundMusic();
+      _showSnack(disabledMessage);
     }
 
     return true;
@@ -3843,7 +3711,10 @@ class _HomePageState extends State<HomePage>
     }
 
     if (enabled) {
-    } else {}
+      _showSnack(enabledMessage);
+    } else {
+      _showSnack(disabledMessage);
+    }
 
     return true;
   }
@@ -3883,7 +3754,9 @@ class _HomePageState extends State<HomePage>
             _mealReminderPushEnabled = false;
           }
           if (permissionDeniedMessage != null &&
-              permissionDeniedMessage.isNotEmpty) {}
+              permissionDeniedMessage.isNotEmpty) {
+            _showSnack(permissionDeniedMessage);
+          }
         } else {
           debugPrint(
             'meal reminder schedule skipped: notification permission denied',
@@ -3975,6 +3848,7 @@ class _HomePageState extends State<HomePage>
         } else {
           _mealReminderPushEnabled = false;
         }
+        _showSnack(permissionDeniedMessage);
         return false;
       }
 
@@ -3989,6 +3863,7 @@ class _HomePageState extends State<HomePage>
         notificationMessages: notificationMessages,
         permissionDeniedMessage: permissionDeniedMessage,
       );
+      _showSnack(enabledMessage);
       return true;
     }
 
@@ -3999,6 +3874,7 @@ class _HomePageState extends State<HomePage>
       _mealReminderPushEnabled = false;
     }
     await _cancelMealReminderNotifications();
+    _showSnack(disabledMessage);
     return true;
   }
 
@@ -4014,6 +3890,7 @@ class _HomePageState extends State<HomePage>
     } else {
       _noticeEventPushEnabled = enabled;
     }
+    _showSnack(enabled ? enabledMessage : disabledMessage);
     return true;
   }
 
@@ -4310,11 +4187,14 @@ class _HomePageState extends State<HomePage>
   Future<void> _linkAppleAccount() async {
     if (_isAppleLinkBusy || _isGoogleLinkBusy) return;
 
+    final l10n = AppLocalizations.of(context);
     final beforeUser = supabase.auth.currentUser;
     if (beforeUser == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_hasAnyLinkedAccount()) {
+      _showSnack(l10n.snackAccountAlreadyLinked);
       _safeSetState(_closeAccountLinkPanel);
       return;
     }
@@ -4327,6 +4207,7 @@ class _HomePageState extends State<HomePage>
       final credential = outcome.credential;
       if (credential == null) {
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       await _runExternalAccountAuthFlow(credential);
@@ -4342,6 +4223,7 @@ class _HomePageState extends State<HomePage>
       );
       debugPrint('apple_link:stack:$st');
       if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
     } finally {
       if (mounted) {
         _safeSetState(() => _isAppleLinkBusy = false);
@@ -4416,6 +4298,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _runExternalAccountAuthFlow(
     _ExternalAuthCredential credential,
   ) async {
+    final l10n = AppLocalizations.of(context);
     final provider = credential.provider;
     final providerKey = credential.providerKey;
     final beforeUserId = supabase.auth.currentUser?.id;
@@ -4458,6 +4341,7 @@ class _HomePageState extends State<HomePage>
           'failed:identity_not_found',
         );
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       _logAccountLink(providerKey, 'identity_verify', 'success');
@@ -4466,12 +4350,14 @@ class _HomePageState extends State<HomePage>
       if (afterUserId == null || afterUserId.isEmpty) {
         _logAccountLink(providerKey, 'uuid_check', 'failed:no_user');
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       if (!signedInExistingUser && afterUserId != beforeUserId) {
         // 신규 연결은 guest UUID 를 반드시 유지해야 한다.
         _logAccountLink(providerKey, 'uuid_check', 'failed:user_changed');
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       _logAccountLink(providerKey, 'uuid_check', 'success');
@@ -4596,6 +4482,7 @@ class _HomePageState extends State<HomePage>
           'aborted:post_check_failed linked=$stillLinked sameUser=$stillSameUser',
         );
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
 
@@ -4633,6 +4520,7 @@ class _HomePageState extends State<HomePage>
       }
 
       if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
     }
   }
 
@@ -4731,6 +4619,7 @@ class _HomePageState extends State<HomePage>
   ) async {
     if (!mounted) return;
     if (provider == _LinkedAccountProvider.none) return;
+    final l10n = AppLocalizations.of(context);
     _dismissFocus();
     _safeSetState(() {
       _linkedAccountProvider = provider;
@@ -4738,6 +4627,7 @@ class _HomePageState extends State<HomePage>
       _closeAccountLinkPanel();
       _isAccountLinkInviteNoticeOpen = false;
     });
+    _showSnack(l10n.snackAccountLinkCompleted);
     await _showAccountLinkSuccessNotice();
   }
 
@@ -5023,11 +4913,14 @@ class _HomePageState extends State<HomePage>
   Future<void> _linkGoogleAccount() async {
     if (_isGoogleLinkBusy || _isAppleLinkBusy) return;
 
+    final l10n = AppLocalizations.of(context);
     final beforeUser = supabase.auth.currentUser;
     if (beforeUser == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_hasAnyLinkedAccount()) {
+      _showSnack(l10n.snackAccountAlreadyLinked);
       _safeSetState(_closeAccountLinkPanel);
       return;
     }
@@ -5043,6 +4936,7 @@ class _HomePageState extends State<HomePage>
       final credential = outcome.credential;
       if (credential == null) {
         if (!mounted) return;
+        _showSnack(l10n.snackAccountLinkFailed);
         return;
       }
       await _runExternalAccountAuthFlow(credential);
@@ -5051,6 +4945,7 @@ class _HomePageState extends State<HomePage>
       _logGoogleLink('failed', '$kind:${_summarizeGoogleLinkError(e)}');
       debugPrint('google_link:stack:$st');
       if (!mounted) return;
+      _showSnack(l10n.snackAccountLinkFailed);
     } finally {
       if (mounted) {
         _safeSetState(() => _isGoogleLinkBusy = false);
@@ -6063,14 +5958,17 @@ class _HomePageState extends State<HomePage>
   Future<void> _logMeal(String slot) async {
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack('로그인이 필요해요.');
       return;
     }
     if (_activePet == null) {
+      _showSnack('먼저 펫을 분양받아주세요.');
       return;
     }
     if (_isLoggingMeal) return;
 
     if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
+      _showSnack('이미 해당 식단 인증을 완료했어요.');
       return;
     }
 
@@ -6097,6 +5995,7 @@ class _HomePageState extends State<HomePage>
       if (dup != null) {
         if (!mounted) return;
         setState(() => _isLoggingMeal = false);
+        _showSnack('이미 해당 식단 인증을 완료했어요.');
         await _fetchTodayMealLogs();
         if (mounted) setState(() {});
         return;
@@ -6126,12 +6025,15 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       setState(() => _isLoggingMeal = false);
 
+      _showSnack(slot == 'brunch' ? '아점 인증 완료 (+5)' : '저녁 인증 완료 (+5)');
+
       if (isFirstEver) {
         await _maybeShowAccountLinkInviteAfterFirstMeal();
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoggingMeal = false);
+      _showSnack('식단 인증 저장 실패: $e');
     }
   }
 
@@ -6165,41 +6067,21 @@ class _HomePageState extends State<HomePage>
   String? _stageGrowthMessage(String? beforeStage, String afterStage) {
     if (beforeStage == null || beforeStage == afterStage) return null;
     final l10n = AppLocalizations.of(context);
-    final petName = _activePetDisplayName(l10n);
-    final isEn = _isEnglishLocale;
-    final petNameSubject = isEn
-        ? petName
-        : _petNameWithSubjectParticle(petName);
-    final petNameTopic = isEn ? petName : _petNameWithTopicParticle(petName);
-
-    // DB 매핑은 child(=유년기). 스펙의 young 과 동일하게 취급.
-    final from = beforeStage == 'young' ? 'child' : beforeStage;
-    final to = afterStage == 'young' ? 'child' : afterStage;
-
-    if (from == 'baby' && to == 'child') {
-      return l10n.interactionGrowthBabyToYoung(petName);
+    switch (afterStage) {
+      case 'child':
+        return l10n.snackStageGrewToChild;
+      case 'grown':
+        return l10n.snackStageGrewToGrown;
+      case 'adult':
+        return l10n.snackStageGrewToAdult;
+      default:
+        return null;
     }
-    if (from == 'child' && to == 'grown') {
-      return l10n.interactionGrowthYoungToGrown(petNameSubject);
-    }
-    if (from == 'grown' && to == 'adult') {
-      return l10n.interactionGrowthGrownToAdult(petNameTopic);
-    }
-
-    // 단계 점프 시 최종 단계 기준 메시지.
-    if (to == 'child') return l10n.interactionGrowthBabyToYoung(petName);
-    if (to == 'grown') {
-      return l10n.interactionGrowthYoungToGrown(petNameSubject);
-    }
-    if (to == 'adult') {
-      return l10n.interactionGrowthGrownToAdult(petNameTopic);
-    }
-    return null;
   }
 
   /// affection 변경 후 _activePet 을 다시 조회한 상태에서 호출한다.
   /// - DB 의 stage 가 affection 기준과 다르면 stage 컬럼을 맞춰준다.
-  /// - 단계 변화가 있으면 교감 상태 메시지로 안내.
+  /// - 단계 변화가 있으면 SnackBar 로 안내.
   /// - 최초 adult 도달 시 [_handleAdultGraduationIfNeeded] 로 육성 완료 처리.
   Future<void> _syncStageAfterAffectionChange({
     required String? beforeStage,
@@ -6222,57 +6104,14 @@ class _HomePageState extends State<HomePage>
       }
     }
 
-    final petId = _activePet?['id']?.toString() ?? '';
-    final growthEventKey = (beforeStage != null && beforeStage != targetStage)
-        ? 'growth:$petId:$beforeStage:$targetStage'
-        : null;
-    final growthMessage = _stageGrowthMessage(beforeStage, targetStage);
-
-    // adult 도달은 성숙기 축하 modal 종료 후 교감 메시지로 안내한다.
-    // 여기서는 child/grown 전환만 즉시(또는 queue) 표시.
-    if (targetStage != 'adult' && growthMessage != null) {
-      await _showInteractionStatusMessage(
-        growthMessage,
-        eventKey: growthEventKey,
-      );
+    // adult 도달은 _handleAdultGraduationIfNeeded 안에서 별도 스낵바를 띄우므로
+    // 여기서는 child/grown 전환만 안내한다.
+    if (targetStage != 'adult') {
+      final message = _stageGrowthMessage(beforeStage, targetStage);
+      if (message != null && mounted) _showSnack(message);
     }
 
     await _handleAdultGraduationIfNeeded(beforeStage: beforeStage);
-
-    // 순서: 식단 메시지 → 성장 메시지 → 사용자 닫기 → 성숭기 완료 모달.
-    if (targetStage == 'adult' && growthMessage != null) {
-      if (_pendingMaturityNoticeBody != null) {
-        await _showInteractionStatusMessage(
-          growthMessage,
-          eventKey: growthEventKey,
-          onDismissed: _schedulePendingMaturityCompleteNoticeAfterFrame,
-        );
-      } else {
-        await _showInteractionStatusMessage(
-          growthMessage,
-          eventKey: growthEventKey,
-        );
-      }
-    } else if (targetStage == 'adult' && _pendingMaturityNoticeBody != null) {
-      // 성장 메시지가 없는 경우(예: 이미 표시된 이벤트) 바로 모달을 띄운다.
-      _presentPendingMaturityCompleteNotice();
-    }
-  }
-
-  /// 성장 메시지가 닫힌 다음 frame 에 성숭기 완료 모달을 띄운다.
-  void _schedulePendingMaturityCompleteNoticeAfterFrame() {
-    unawaited(
-      WidgetsBinding.instance.endOfFrame.then((_) {
-        if (!mounted) return;
-        _presentPendingMaturityCompleteNotice();
-      }),
-    );
-  }
-
-  /// [_pendingMaturityNoticeBody] 가 설정되어 있으면 성숭기 완료 모달을 띄운다.
-  void _presentPendingMaturityCompleteNotice() {
-    if (_pendingMaturityNoticeBody == null) return;
-    _showMaturityCompleteAlert();
   }
 
   /// 최초 성숙기(adult) 도달 처리.
@@ -6306,7 +6145,11 @@ class _HomePageState extends State<HomePage>
         params: {'p_user_pet_id': petId},
       );
     } catch (e) {
-      if (mounted) {}
+      if (mounted) {
+        _showSnack(
+          AppLocalizations.of(context).snackGraduationFailed(e.toString()),
+        );
+      }
       return;
     }
 
@@ -6336,17 +6179,11 @@ class _HomePageState extends State<HomePage>
 
     final l10n = AppLocalizations.of(context);
     if (alreadyGraduatedFlag) {
+      _showSnack(l10n.snackPetAlreadyGraduated);
       return;
     }
 
-    // Modal 은 즉시 띄우지 않고, 성장 메시지가 닫힌 다음에 띄운다.
-    final petName = _activePetDisplayName(l10n);
-    final petNameSubject = _isEnglishLocale
-        ? petName
-        : _petNameWithSubjectParticle(petName);
-    _pendingMaturityNoticeBody = l10n.maturityCompleteNoticeBody(
-      petNameSubject,
-    );
+    _showMaturityCompleteAlert();
   }
 
   bool _isCurrentPetMature() {
@@ -6369,7 +6206,6 @@ class _HomePageState extends State<HomePage>
       isOpen: () => _isMaturityCompleteNoticeOpen,
       markClosed: () => _isMaturityCompleteNoticeOpen = false,
     );
-    _pendingMaturityNoticeBody = null;
   }
 
   void _closeMaturityCompleteNoticeOverlay() {
@@ -6456,27 +6292,29 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_activePet == null) {
+      _showSnack(l10n.snackAdoptFirst);
       return;
     }
     if (_handleMaturePetBlockedInteraction()) return;
     if (_isInteracting) return;
 
     final isPlay = action == 'play';
+    final label = isPlay ? l10n.petActionPlay : l10n.petActionPet;
     final dateColumn = isPlay ? 'last_played_on' : 'last_petted_on';
-
-    if (isPlay && !_hasEligibleMealForToyPlay()) {
-      // 놀아주기 자격은 드롭 완료 경로에서 먼저 판정한다. 이중 방어.
-      return;
-    }
 
     final today = _todayDateStr();
     final lastUsedOn = _activePet![dateColumn]?.toString();
     if (lastUsedOn == today) {
+      _showSnack(
+        isPlay ? l10n.snackPlayedTodayAlready : l10n.snackPettedTodayAlready,
+      );
       return;
     }
 
@@ -6487,8 +6325,7 @@ class _HomePageState extends State<HomePage>
       final currentAffection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
       final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
 
-      final affectionGain = 1;
-      final nextAffection = currentAffection + affectionGain;
+      final nextAffection = currentAffection + 1;
       final nextStage = _stageFromAffection(nextAffection);
 
       await supabase
@@ -6504,19 +6341,7 @@ class _HomePageState extends State<HomePage>
 
       if (!mounted) return;
       setState(() => _isInteracting = false);
-
-      final eventPetId = petId.toString();
-      if (isPlay) {
-        await _showInteractionStatusMessage(
-          _interactionPlaySuccessMessage(affectionGain: affectionGain),
-          eventKey: 'play_success:$today:$eventPetId',
-        );
-      } else {
-        await _showInteractionStatusMessage(
-          _interactionPettingSuccessMessage(affectionGain: affectionGain),
-          eventKey: 'petting:$today:$eventPetId',
-        );
-      }
+      _showSnack(AppLocalizations.of(context).snackPlayActionSuccess(label));
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
 
@@ -6536,6 +6361,9 @@ class _HomePageState extends State<HomePage>
       }
       if (!mounted) return;
       setState(() => _isInteracting = false);
+      _showSnack(
+        AppLocalizations.of(context).snackPlayActionFailed(label, e.toString()),
+      );
     }
   }
 
@@ -6703,18 +6531,22 @@ class _HomePageState extends State<HomePage>
   Future<void> _adoptSelectedPet() async {
     _dismissFocus();
 
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_selectedSpeciesId == null) return;
     if (_activePet != null) {
+      _showSnack(l10n.snackAlreadyRaising);
       return;
     }
     if (_isAdopting || _isInitialAdoptionInFlight) return;
 
     final selectedSpeciesId = int.tryParse(_selectedSpeciesId!);
     if (selectedSpeciesId == null) {
+      _showSnack(l10n.snackPetSelectInvalid);
       return;
     }
     Map<String, dynamic>? selectedSpeciesRow;
@@ -6725,6 +6557,7 @@ class _HomePageState extends State<HomePage>
       }
     }
     if (selectedSpeciesRow == null || !isMvpSpeciesRow(selectedSpeciesRow)) {
+      _showSnack(l10n.snackPetSelectInvalid);
       return;
     }
 
@@ -6785,6 +6618,9 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionPanelVisible = true;
       });
+      _showSnack(
+        AppLocalizations.of(context).snackAdoptSaveFailed(e.toString()),
+      );
     } finally {
       if (mounted) {
         _safeSetState(() {
@@ -6849,8 +6685,12 @@ class _HomePageState extends State<HomePage>
 
       await _waitForUiSettle();
       if (!mounted) return;
+      _showSnack(AppLocalizations.of(context).snackNameSaved);
     } catch (e) {
       if (!mounted) return;
+      _showSnack(
+        AppLocalizations.of(context).snackNameSaveFailed(e.toString()),
+      );
 
       // 이름 저장에 실패하면 사용자가 다시 시도할 수 있도록 한 frame 양보 후
       // 같은 다이얼로그를 재호출한다.
@@ -6868,14 +6708,18 @@ class _HomePageState extends State<HomePage>
     try {
       await _fetchPetSpecies();
       if (mounted) setState(() {});
-    } catch (e) {}
+    } catch (e) {
+      _showSnack('분양 데이터 조회 실패: $e');
+    }
   }
 
   Future<void> _refreshProfile() async {
     try {
       await _fetchProfile();
       if (mounted) setState(() {});
-    } catch (e) {}
+    } catch (e) {
+      _showSnack('프로필 조회 실패: $e');
+    }
   }
 
   Future<void> _refreshActivePet() async {
@@ -6887,7 +6731,9 @@ class _HomePageState extends State<HomePage>
         _fetchRandomTicketCount(),
       ]);
       if (mounted) setState(() {});
-    } catch (e) {}
+    } catch (e) {
+      _showSnack('펫 정보 조회 실패: $e');
+    }
   }
 
   Future<void> _signOut() async {
@@ -6973,7 +6819,9 @@ class _HomePageState extends State<HomePage>
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
-    } catch (e) {}
+    } catch (e) {
+      _showSnack('로그아웃 실패: $e');
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -7023,6 +6871,7 @@ class _HomePageState extends State<HomePage>
 
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack('로그인 상태가 아니어서 초기화할 수 없어요.');
       return;
     }
 
@@ -7060,6 +6909,10 @@ class _HomePageState extends State<HomePage>
         debugPrint(
           'developer reset warning: pokedex_entries still remain after delete. '
           'count=$remainingPokedexCount',
+        );
+        _showSnack(
+          '도감 초기화가 완전히 처리되지 않았어요. Supabase RLS/RPC 확인 필요 '
+          '(pokedex_entries remain=$remainingPokedexCount)',
         );
       }
 
@@ -7186,8 +7039,10 @@ class _HomePageState extends State<HomePage>
         'activePet=${_activePet?['id']}, '
         'residentCount=${_residentPets.length}',
       );
+      _showSnack('개발용 초기화가 완료되었어요.');
     } catch (e) {
       if (!mounted) return;
+      _showSnack('개발용 초기화에 실패했어요: $e');
     }
   }
 
@@ -7202,6 +7057,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _debugAdjustAffection(int delta) async {
     if (_isDebugStageMutationInFlight) return;
     if (_activePet == null) {
+      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
       return;
     }
 
@@ -7221,11 +7077,13 @@ class _HomePageState extends State<HomePage>
       await _fetchActivePet(syncYard: false);
       if (!mounted) return;
       _safeSetState(() {});
+      _showSnack('[디버그] 애정도 $current → $next');
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
     } catch (e, st) {
       debugPrint('debug adjust affection failed: $e\n$st');
       if (!mounted) return;
+      _showSnack('[디버그] 애정도 조작 실패: $e');
     } finally {
       if (mounted) {
         _safeSetState(() => _isDebugStageMutationInFlight = false);
@@ -7245,6 +7103,7 @@ class _HomePageState extends State<HomePage>
     if (_isDebugStageMutationInFlight) return;
     final pet = _activePet;
     if (pet == null) {
+      _showSnack('활성 펫이 없어요. 먼저 분양을 완료해주세요.');
       return;
     }
 
@@ -7266,9 +7125,12 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       _scheduleSyncActivePetToYardGame();
       _safeSetState(() {});
+      _showSnack('[디버그] 세팅 완료 (affection=109, stage=grown, 졸업 플래그 초기화)');
     } catch (e, st) {
       debugPrint('debug set just before adult failed: $e\n$st');
-      if (mounted) {}
+      if (mounted) {
+        _showSnack('[디버그] 세팅 실패: $e');
+      }
     } finally {
       if (mounted) {
         _safeSetState(() => _isDebugStageMutationInFlight = false);
@@ -7291,8 +7153,10 @@ class _HomePageState extends State<HomePage>
       await _fetchRandomTicketCount();
       if (!mounted) return;
       setState(() {});
+      _showSnack('[디버그] 랜덤 분양권 수량: $_randomTicketCount');
     } catch (e) {
       if (!mounted) return;
+      _showSnack('[디버그] 분양권 조회 실패: $e');
     }
   }
 
@@ -7304,24 +7168,42 @@ class _HomePageState extends State<HomePage>
   Future<void> _debugUseRandomAdoptionTicket() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack('로그인 상태가 아니에요.');
       return;
     }
 
+    dynamic rpcResult;
     try {
-      await supabase.rpc(
+      rpcResult = await supabase.rpc(
         'use_random_adoption_ticket',
         params: {'p_user_id': user.id},
       );
     } catch (e) {
       if (!mounted) return;
+      _showSnack('[디버그] 분양권 사용 실패: $e');
       return;
     }
+
+    Map<String, dynamic>? payload;
+    if (rpcResult is Map) {
+      payload = Map<String, dynamic>.from(rpcResult);
+    } else if (rpcResult is List && rpcResult.isNotEmpty) {
+      final first = rpcResult.first;
+      if (first is Map) payload = Map<String, dynamic>.from(first);
+    }
+
+    final speciesId = payload?['pet_species_id'];
+    final remaining = payload?['ticket_remaining'];
 
     try {
       await _fetchRandomTicketCount();
     } catch (_) {}
     if (!mounted) return;
     setState(() {});
+
+    _showSnack(
+      '[디버그] 분양권 사용 완료! pet_species_id: ${speciesId ?? '-'} / 남은 수량: ${remaining ?? _randomTicketCount}',
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -7430,10 +7312,12 @@ class _HomePageState extends State<HomePage>
       await Future.wait(pending);
     } catch (e) {
       if (!mounted) return;
+      _showSnack(AppLocalizations.of(context).snackPokedexFetchFailed);
       return;
     }
     if (!mounted) return;
     if (_petSpecies.isEmpty) {
+      _showSnack(AppLocalizations.of(context).snackSpeciesFetchFailed);
       return;
     }
     await _waitForUiSettle();
@@ -7573,7 +7457,8 @@ class _HomePageState extends State<HomePage>
       _selectedAnalysisPeriod = AnalysisPeriod.sevenDays;
     }
     if (!mounted) return;
-    final shouldRefreshOpenPanel = _isAnalysisPanelOpen && !resetPeriod;
+    final shouldRefreshOpenPanel =
+        _isAnalysisPanelOpen && !resetPeriod;
     _safeSetState(() {
       if (resetPeriod) {
         _analysisSnapshot = AnalysisSnapshot.empty();
@@ -7583,7 +7468,10 @@ class _HomePageState extends State<HomePage>
     });
     if (shouldRefreshOpenPanel) {
       unawaited(
-        _fetchAnalysisData(period: _selectedAnalysisPeriod, force: true),
+        _fetchAnalysisData(
+          period: _selectedAnalysisPeriod,
+          force: true,
+        ),
       );
     }
   }
@@ -8189,6 +8077,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _onBagPanelUseTicketPressed() async {
     if (_isUsingRandomTicket) return;
     if (_effectiveRandomTicketCountForBag() <= 0) {
+      _showSnack(AppLocalizations.of(context).snackTicketEmpty);
       return;
     }
     _dismissFocus();
@@ -9182,10 +9071,13 @@ class _HomePageState extends State<HomePage>
     if (_isUsingRandomTicket) return;
 
     final user = supabase.auth.currentUser;
+    final l10n = AppLocalizations.of(context);
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_effectiveRandomTicketCountForBag() <= 0) {
+      _showSnack(l10n.snackTicketEmpty);
       return;
     }
 
@@ -9206,6 +9098,7 @@ class _HomePageState extends State<HomePage>
         currentPet['is_resident'] == true &&
         currentPet['graduated_at'] != null;
     if (currentPet != null && !isCurrentGraduated) {
+      _showSnack(l10n.snackTicketBlockedDuringGrowth);
       return;
     }
 
@@ -9221,6 +9114,7 @@ class _HomePageState extends State<HomePage>
         );
       } catch (e) {
         if (!mounted) return;
+        _showSnack(l10n.snackTicketUseFailed(e.toString()));
         return;
       }
 
@@ -9238,6 +9132,7 @@ class _HomePageState extends State<HomePage>
           : int.tryParse(speciesIdRaw?.toString() ?? '');
       if (speciesId == null) {
         if (!mounted) return;
+        _showSnack(l10n.snackAdoptError);
         return;
       }
 
@@ -9267,6 +9162,7 @@ class _HomePageState extends State<HomePage>
             .maybeSingle();
         if (existingPokedex != null) {
           if (!mounted) return;
+          _showSnack(l10n.snackTicketDuplicatePokedex);
           // 분양권 수량은 RPC 단계에서 이미 차감됐을 수 있으므로 재조회만 해둔다.
           await _fetchRandomTicketCount();
           if (mounted) setState(() {});
@@ -9286,6 +9182,7 @@ class _HomePageState extends State<HomePage>
               .eq('id', currentPet['id']);
         } catch (e) {
           if (!mounted) return;
+          _showSnack(l10n.snackOldPetDeactivateFailed(e.toString()));
           return;
         }
       }
@@ -9304,6 +9201,7 @@ class _HomePageState extends State<HomePage>
         });
       } catch (e) {
         if (!mounted) return;
+        _showSnack(l10n.snackNewPetAdoptSaveFailed(e.toString()));
         return;
       }
 
@@ -9322,6 +9220,8 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       _safeSetState(() {});
 
+      _showSnack(l10n.snackNewPetAdopted);
+
       // 성공 분기만: 게임메뉴 바깥 탭 가방 닫기와 동일하게 중앙 페이드 → 마당
       await _dismissBagPanelAfterTicketAdoptSuccessLikeBackdrop();
       if (!mounted) return;
@@ -9334,6 +9234,18 @@ class _HomePageState extends State<HomePage>
         _isUsingRandomTicket = false;
       }
     }
+  }
+
+  // ScaffoldMessenger.of(context) 를 직접 사용하면 화면 전환과 setState 가 겹칠 때
+  // dispose 타이밍 오류가 날 수 있다. 전역 scaffoldMessengerKey 를 통해
+  // post frame 에 띄우고, 이전 SnackBar 가 쌓여 있으면 즉시 제거한다.
+  void _showSnack(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final messenger = _rootScaffoldMessengerKey.currentState;
+      if (messenger == null) return;
+      messenger.clearSnackBars();
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    });
   }
 
   // ----- 화면 전환 안정화용 helper -----
@@ -9705,338 +9617,6 @@ class _HomePageState extends State<HomePage>
     unawaited(_yardConfirmOverlayFadeController.forward());
   }
 
-  /// 교감 상태 메시지 창 상태를 즉시 초기화한다.
-  void _resetInteractionStatusState({bool resetController = true}) {
-    _interactionStatusGeneration++;
-    _interactionStatusMessage = null;
-    _isInteractionStatusOpen = false;
-    _interactionStatusTransitionInProgress = false;
-    _interactionStatusDismissRequested = false;
-    _interactionStatusQueue.clear();
-    _shownInteractionStatusEventKeys.clear();
-    if (resetController) {
-      _interactionStatusAnimationController.stop();
-      _interactionStatusAnimationController.value = 0;
-    }
-  }
-
-  bool _hasBlockingYardModalOpen() {
-    return _isWithdrawConfirmOpen ||
-        _isWithdrawFinalConfirmOpen ||
-        _isWithdrawErrorNoticeOpen ||
-        _isNameInterlockNoticeOpen ||
-        _isProfileSelectMissingNoticeOpen ||
-        _isAccountLinkInviteNoticeOpen ||
-        _isAccountLinkSuccessNoticeOpen ||
-        _isMealRecognitionFailureNoticeOpen ||
-        _isMealVerificationLimitNoticeOpen ||
-        _isLinkedAccountAddressNoticeOpen ||
-        _isDuplicatePetNameNoticeOpen ||
-        _isMaturityCompleteNoticeOpen ||
-        _isPokedexCompleteTicketNoticeOpen ||
-        _isRemoteAccountLinkedLogoutNoticeOpen ||
-        _isRandomTicketUseConfirmOpen;
-  }
-
-  String? _activePetDisplayNickname() {
-    final name = _activePet?['nickname']?.toString().trim();
-    if (name == null || name.isEmpty) return null;
-    return name;
-  }
-
-  String _activePetDisplayName(AppLocalizations l10n) {
-    return _activePetDisplayNickname() ?? l10n.interactionPetNameFallback;
-  }
-
-  bool _hasEligibleMealForToyPlay() {
-    return _todayMealLogs.any((row) {
-      final resultType = row['result_type']?.toString().trim().toLowerCase();
-      return resultType == 'perfect' || resultType == 'good';
-    });
-  }
-
-  String _interactionPlaySuccessMessage({required int affectionGain}) {
-    final l10n = AppLocalizations.of(context);
-    final petName = _activePetDisplayName(l10n);
-    final petNameTopic = _isEnglishLocale
-        ? petName
-        : _petNameWithTopicParticle(petName);
-    return _pickInteractionTemplate([
-      l10n.interactionPlaySuccess1(petNameTopic, affectionGain),
-      l10n.interactionPlaySuccess2(petNameTopic, affectionGain),
-    ]);
-  }
-
-  String _interactionPlayFailureMessage() {
-    final l10n = AppLocalizations.of(context);
-    final petName = _activePetDisplayName(l10n);
-    final petNameTopic = _isEnglishLocale
-        ? petName
-        : _petNameWithTopicParticle(petName);
-    return _pickInteractionTemplate([
-      l10n.interactionPlayFailure1(petNameTopic),
-      l10n.interactionPlayFailure2(petNameTopic),
-    ]);
-  }
-
-  String _interactionPettingSuccessMessage({required int affectionGain}) {
-    final l10n = AppLocalizations.of(context);
-    final petName = _activePetDisplayName(l10n);
-    final petNameSubject = _isEnglishLocale
-        ? petName
-        : _petNameWithSubjectParticle(petName);
-    final family = _activePetFamily();
-    if (family == 'cat') {
-      return _pickInteractionTemplate([
-        l10n.interactionPettingCat1(petNameSubject, affectionGain),
-        l10n.interactionPettingCat2(petName, affectionGain),
-      ]);
-    }
-    // dog 및 미분류는 강아지 문구 사용.
-    return _pickInteractionTemplate([
-      l10n.interactionPettingDog1(petNameSubject, affectionGain),
-      l10n.interactionPettingDog2(petName, affectionGain),
-    ]);
-  }
-
-  void _enqueueInteractionStatusMessage(
-    String message, {
-    VoidCallback? onDismissed,
-  }) {
-    if (onDismissed == null &&
-        _interactionStatusQueue.isNotEmpty &&
-        _interactionStatusQueue.last.message == message) {
-      return;
-    }
-    _interactionStatusQueue.add(
-      _InteractionStatusEntry(message, onDismissed: onDismissed),
-    );
-  }
-
-  /// 중요한 modal 이 열릴 때 현재 교감 메시지를 queue 앞으로 되돌린다.
-  void _stashInteractionStatusForBlockingModal() {
-    if (!_isInteractionStatusOpen && !_interactionStatusTransitionInProgress) {
-      return;
-    }
-    final current = _interactionStatusMessage?.trim();
-    final currentOnDismissed = _interactionStatusCurrentOnDismissed;
-    if (current != null && current.isNotEmpty) {
-      if (_interactionStatusQueue.isEmpty ||
-          _interactionStatusQueue.first.message != current) {
-        _interactionStatusQueue.insert(
-          0,
-          _InteractionStatusEntry(current, onDismissed: currentOnDismissed),
-        );
-      }
-    }
-    _interactionStatusGeneration++;
-    _interactionStatusMessage = null;
-    _interactionStatusCurrentOnDismissed = null;
-    _isInteractionStatusOpen = false;
-    _interactionStatusTransitionInProgress = false;
-    _interactionStatusDismissRequested = false;
-    _interactionStatusAnimationController.stop();
-    _interactionStatusAnimationController.value = 0;
-  }
-
-  Future<void> _presentNextInteractionStatusIfIdle() async {
-    if (!mounted) return;
-    if (_hasBlockingYardModalOpen()) return;
-    if (_isInteractionStatusOpen || _interactionStatusTransitionInProgress) {
-      return;
-    }
-    if (_interactionStatusQueue.isEmpty) return;
-    final next = _interactionStatusQueue.removeAt(0);
-    await _showInteractionStatusMessage(
-      next.message,
-      onDismissed: next.onDismissed,
-    );
-  }
-
-  Future<void> _showInteractionStatusMessage(
-    String rawMessage, {
-    String? eventKey,
-    bool presentImmediately = true,
-    VoidCallback? onDismissed,
-  }) async {
-    final message = rawMessage.trim();
-    if (message.isEmpty) return;
-
-    if (eventKey != null) {
-      if (_shownInteractionStatusEventKeys.contains(eventKey)) return;
-      _shownInteractionStatusEventKeys.add(eventKey);
-    }
-
-    if (!presentImmediately) {
-      _enqueueInteractionStatusMessage(message, onDismissed: onDismissed);
-      return;
-    }
-
-    if (_hasBlockingYardModalOpen() ||
-        _isInteractionStatusOpen ||
-        _interactionStatusTransitionInProgress) {
-      _enqueueInteractionStatusMessage(message, onDismissed: onDismissed);
-      return;
-    }
-
-    final generation = ++_interactionStatusGeneration;
-    _interactionStatusDismissRequested = false;
-
-    _safeSetState(() {
-      _interactionStatusMessage = message;
-      _interactionStatusCurrentOnDismissed = onDismissed;
-      _isInteractionStatusOpen = true;
-      _interactionStatusTransitionInProgress = true;
-    });
-
-    _interactionStatusAnimationController.stop();
-    _interactionStatusAnimationController.value = 0;
-    await _interactionStatusAnimationController.forward();
-
-    if (!mounted) return;
-    if (generation != _interactionStatusGeneration) return;
-
-    _safeSetState(() {
-      _interactionStatusTransitionInProgress = false;
-    });
-
-    if (_interactionStatusDismissRequested) {
-      _interactionStatusDismissRequested = false;
-      await _hideInteractionStatusMessage();
-    }
-  }
-
-  Future<void> _hideInteractionStatusMessage() async {
-    if (!_isInteractionStatusOpen) return;
-    if (_interactionStatusTransitionInProgress) {
-      _interactionStatusDismissRequested = true;
-      return;
-    }
-
-    final generation = ++_interactionStatusGeneration;
-    final dismissedCallback = _interactionStatusCurrentOnDismissed;
-
-    _safeSetState(() {
-      _interactionStatusTransitionInProgress = true;
-    });
-
-    await _interactionStatusAnimationController.reverse();
-
-    if (!mounted) return;
-    if (generation != _interactionStatusGeneration) return;
-
-    final nextEntry = _interactionStatusQueue.isEmpty
-        ? null
-        : _interactionStatusQueue.removeAt(0);
-
-    _safeSetState(() {
-      _interactionStatusMessage = null;
-      _interactionStatusCurrentOnDismissed = null;
-      _isInteractionStatusOpen = false;
-      _interactionStatusTransitionInProgress = false;
-      _interactionStatusDismissRequested = false;
-    });
-
-    dismissedCallback?.call();
-
-    if (nextEntry == null) return;
-    if (_hasBlockingYardModalOpen()) {
-      _enqueueInteractionStatusMessage(
-        nextEntry.message,
-        onDismissed: nextEntry.onDismissed,
-      );
-      return;
-    }
-
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    if (!mounted) return;
-    await _showInteractionStatusMessage(
-      nextEntry.message,
-      onDismissed: nextEntry.onDismissed,
-    );
-  }
-
-  Widget _buildInteractionStatusMessageOverlay() {
-    if (!_isInteractionStatusOpen && !_interactionStatusTransitionInProgress) {
-      return const SizedBox.shrink();
-    }
-    final message = _interactionStatusMessage?.trim() ?? '';
-    if (message.isEmpty) return const SizedBox.shrink();
-
-    final panel = ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                message,
-                textAlign: TextAlign.left,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFFFFFFFF),
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    return Positioned.fill(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                unawaited(_hideInteractionStatusMessage());
-              },
-              child: const SizedBox.expand(),
-            ),
-          ),
-          Positioned(
-            left: _kInteractionStatusLeft,
-            top: _kInteractionStatusTop,
-            width: _kInteractionStatusWidth,
-            height: _kInteractionStatusHeight,
-            child: FadeTransition(
-              opacity: _interactionStatusOpacity,
-              child: ScaleTransition(
-                scale: _interactionStatusScale,
-                alignment: Alignment.center,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    unawaited(_hideInteractionStatusMessage());
-                  },
-                  child: Semantics(
-                    liveRegion: true,
-                    label: message,
-                    child: panel,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 마당 240×116 공통 알림창 open 플래그를 모두 false 로 리셋한다.
   void _resetYardConfirmOverlayOpenFlags() {
     _isWithdrawConfirmOpen = false;
@@ -10081,7 +9661,6 @@ class _HomePageState extends State<HomePage>
     if (instantCloseOtherYardNotices) {
       _instantCloseYardConfirmOverlays();
     }
-    _stashInteractionStatusForBlockingModal();
     _safeSetState(markOpen);
     _playYardConfirmOverlayEnter();
   }
@@ -10099,7 +9678,6 @@ class _HomePageState extends State<HomePage>
     if (instantCloseOtherYardNotices) {
       _instantCloseYardConfirmOverlays();
     }
-    _stashInteractionStatusForBlockingModal();
     _safeSetState(markOpen);
     _playYardConfirmOverlayEnter();
   }
@@ -10133,9 +9711,6 @@ class _HomePageState extends State<HomePage>
       } else {
         setClosed();
       }
-      if (!_hasBlockingYardModalOpen()) {
-        unawaited(_presentNextInteractionStatusIfIdle());
-      }
       return;
     }
     if (_yardConfirmOverlayFadeController.status == AnimationStatus.reverse) {
@@ -10144,9 +9719,6 @@ class _HomePageState extends State<HomePage>
     await _yardConfirmOverlayFadeController.reverse();
     if (!mounted) return;
     _safeSetState(setClosed);
-    if (!_hasBlockingYardModalOpen()) {
-      unawaited(_presentNextInteractionStatusIfIdle());
-    }
   }
 
   Future<void> _hideWithdrawConfirmNotice() async {
@@ -10668,7 +10240,6 @@ class _HomePageState extends State<HomePage>
         _buildPokedexMaturePetDetailGlobalOverlay(),
         _buildAccountLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
-        _buildInteractionStatusMessageOverlay(),
         _buildRandomTicketUseConfirmGlobalOverlay(),
         _buildWithdrawConfirmGlobalOverlay(),
         _buildWithdrawFinalConfirmGlobalOverlay(),
@@ -10884,18 +10455,11 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildMaturityCompleteNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    final petName = _activePetDisplayName(l10n);
-    final petNameSubject = _isEnglishLocale
-        ? petName
-        : _petNameWithSubjectParticle(petName);
-    final body =
-        _pendingMaturityNoticeBody ??
-        l10n.maturityCompleteNoticeBody(petNameSubject);
     return _buildVegePetOneButtonNoticeOverlay(
       VegePetNoticeConfig(
         isOpen: _isMaturityCompleteNoticeOpen,
         title: l10n.maturityCompleteNoticeTitle,
-        body: body,
+        body: l10n.maturityCompleteNoticeBody,
         primaryLabel: l10n.confirmLabel,
         onPrimaryTap: _closeMaturityCompleteNoticeOverlay,
         outsideDismissible: false,
@@ -12076,6 +11640,7 @@ class _HomePageState extends State<HomePage>
                     const ClipboardData(text: _kCustomerCenterEmail),
                   );
                   if (!mounted) return;
+                  _showSnack(AppLocalizations.of(context).emailCopied);
                 },
                 borderRadius: BorderRadius.circular(16),
                 child: Ink(
@@ -15335,6 +14900,7 @@ class _HomePageState extends State<HomePage>
     if (action == 'play') {
       final err = _validateToyPlayEligibility();
       if (err != null) {
+        _showSnack(err);
         return;
       }
       await _openToyPlaySheet(fromPetBanner: true);
@@ -16735,6 +16301,7 @@ class _HomePageState extends State<HomePage>
     if (_handleMaturePetBlockedInteraction()) return;
     final err = _validateToyPlayEligibility();
     if (err != null) {
+      _showSnack(err);
       return;
     }
 
@@ -16763,21 +16330,19 @@ class _HomePageState extends State<HomePage>
   Future<void> _completeToyMenuDrop(BagItem toy) async {
     if (_isCompletingToyPlay) return;
 
+    final l10n = AppLocalizations.of(context);
     final family = _activePetFamily();
     if (toy.targetPetFamily != family) {
+      _showSnack(l10n.snackToyNotUsable);
       return;
     }
 
     final today = _todayDateStr();
     if (_activePet?['last_played_on']?.toString() == today) {
       _closeToyMenuInstant();
+      _showSnack(l10n.snackPlayedTodayAlready);
       return;
     }
-
-    final generation = _userDataGeneration;
-    final userId = supabase.auth.currentUser?.id;
-    final petId = _activePet?['id']?.toString() ?? '';
-    final attemptId = ++_toyPlayAttemptSeq;
 
     _petToySwapController.value = 0;
     _safeSetState(() {
@@ -16789,31 +16354,10 @@ class _HomePageState extends State<HomePage>
     });
 
     try {
-      await _fetchTodayMealLogs();
-      if (!mounted) return;
-      if (generation != _userDataGeneration) return;
-      if (userId != supabase.auth.currentUser?.id) return;
-
-      if (!_hasEligibleMealForToyPlay()) {
-        await _showInteractionStatusMessage(
-          _interactionPlayFailureMessage(),
-          eventKey: 'play_failure:$today:$petId:$attemptId',
-        );
-        return;
-      }
-
       await _interactPet('play');
     } finally {
       if (mounted) {
-        _safeSetState(() {
-          _isCompletingToyPlay = false;
-          _isToyDropHovering = false;
-          _isInteracting = false;
-        });
-      } else {
-        _isCompletingToyPlay = false;
-        _isToyDropHovering = false;
-        _isInteracting = false;
+        _safeSetState(() => _isCompletingToyPlay = false);
       }
     }
   }
@@ -17248,16 +16792,20 @@ class _HomePageState extends State<HomePage>
   /// 먹이주기 시트에서 "아점/저녁 식단 사진 올리기" 버튼을 눌렀을 때의 메인 엔트리.
   Future<void> _uploadMealPhotoAndEvaluate(String slot) async {
     if (_isDeletingAccount) return;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     if (_activePet == null) {
+      _showSnack(l10n.snackAdoptFirst);
       return;
     }
     if (_isUploadingMeal) return;
 
     if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
+      _showSnack(l10n.snackMealAlreadyCertified);
       return;
     }
 
@@ -17300,6 +16848,7 @@ class _HomePageState extends State<HomePage>
       final imagePath = await _uploadPhotoToStorage(slot: slot, file: photo);
       if (imagePath == null) {
         if (!mounted) return;
+        _showSnack(l10n.snackMealUploadFailed);
         return;
       }
 
@@ -17313,6 +16862,7 @@ class _HomePageState extends State<HomePage>
       );
       if (result == null || result['ok'] != true) {
         if (!mounted) return;
+        _showSnack(l10n.snackMealAiFailed);
         return;
       }
 
@@ -17335,6 +16885,7 @@ class _HomePageState extends State<HomePage>
         final persisted = await _verifyPersistedTodayMealLog(slot: slot);
         if (persisted == null) {
           if (!mounted) return;
+          _showSnack(l10n.snackMealAiFailed);
           return;
         }
         debugPrint('meal_photo:meal_log_refresh_success');
@@ -17383,8 +16934,10 @@ class _HomePageState extends State<HomePage>
       }
 
       if (!mounted) return;
+      _showSnack(l10n.snackMealAiFailed);
     } catch (e) {
       if (!mounted) return;
+      _showSnack(l10n.snackMealUnknownError(e.toString()));
     } finally {
       if (mounted) {
         _safeSetState(() {
@@ -17423,6 +16976,9 @@ class _HomePageState extends State<HomePage>
       );
     } catch (e) {
       if (!mounted) return null;
+      _showSnack(
+        AppLocalizations.of(context).snackCameraUnavailable(e.toString()),
+      );
       xfile = null;
     } finally {
       await _lockLandscapeOrientation();
@@ -17555,6 +17111,14 @@ class _HomePageState extends State<HomePage>
       'blocked_at': null,
     });
 
+    final statusMessage = _buildAiStatusMessage(
+      resultType: resultType,
+      feedbackCodes: feedbackCodes,
+      feedbackText: feedbackText,
+      l10n: l10n,
+      isEnglish: _isEnglishLocale,
+    );
+
     final beforeStage = _activePet?['stage']?.toString();
     await Future.wait([
       _fetchTodayMealLogs(),
@@ -17563,45 +17127,13 @@ class _HomePageState extends State<HomePage>
     ]);
 
     if (!mounted) return;
-    final petName = _activePetDisplayName(l10n);
-    final statusMessage = _buildAiStatusMessage(
-      resultType: resultType,
-      feedbackCodes: feedbackCodes,
-      feedbackText: feedbackText,
-      l10n: l10n,
-      isEnglish: _isEnglishLocale,
-      petName: petName,
-      affectionGain: gain,
-    );
-
     _safeSetState(() {
       _lastResultType = resultType;
       _lastFeedbackText = feedbackText;
       _lastAffectionGain = gain;
       _lastStatusMessage = statusMessage;
     });
-    if (resultType == 'perfect' ||
-        resultType == 'good' ||
-        resultType == 'bad') {
-      await _showInteractionStatusMessage(
-        statusMessage,
-        eventKey: 'meal:${_todayDateStr()}:$slot:$resultType',
-        presentImmediately: false,
-      );
-    }
-
-    if (mounted) {
-      _safeSetState(() {
-        _isUploadingMeal = false;
-        _uploadingSlot = null;
-      });
-    } else {
-      _isUploadingMeal = false;
-      _uploadingSlot = null;
-    }
-
-    await _dismissMealPanelToYard();
-    await _presentNextInteractionStatusIfIdle();
+    _showSnack(statusMessage);
 
     if (gain > 0 && !_isCurrentPetMature()) {
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
@@ -17748,34 +17280,6 @@ class _HomePageState extends State<HomePage>
       }
       _petMealSwapInProgress = false;
       _mealOpenedFromPetBanner = false;
-    });
-  }
-
-  /// 식단 인증이 정상 완료됐을 때, 외부 탭 종료와 동일한 모션으로 먹이주기 창을 닫는다.
-  Future<void> _dismissMealPanelToYard() async {
-    if (_petMealSwapInProgress) return;
-    if (!_isMealPanelOpen) return;
-
-    _dismissFocus();
-    await _closeProfileSelectOverlay(notify: false, animated: false);
-
-    _safeSetState(() => _petChildPanelDismissingToYard = true);
-
-    _petMealSwapController.value = 1.0;
-    _safeSetState(() {
-      _petMealSwapInProgress = true;
-      _mealOpenedFromPetBanner = false;
-      _isPetInfoBannerOpen = false;
-    });
-
-    await _petMealSwapController.reverse(from: 1.0);
-    if (!mounted) return;
-    _safeSetState(() {
-      _isMealPanelOpen = false;
-      _petMealSwapInProgress = false;
-      _mealOpenedFromPetBanner = false;
-      _isPetInfoBannerOpen = false;
-      _petChildPanelDismissingToYard = false;
     });
   }
 
@@ -18612,8 +18116,10 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _persistGameMenuProfilePatch(Map<String, dynamic> patch) async {
     if (_isSavingProfilePanel) return;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return;
     }
     _safeSetState(() => _isSavingProfilePanel = true);
@@ -18635,6 +18141,7 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {});
     } catch (e) {
       if (!mounted) return;
+      _showSnack(l10n.snackProfileSaveFailed(e.toString()));
       try {
         await _fetchProfile();
       } catch (_) {}
@@ -18706,6 +18213,7 @@ class _HomePageState extends State<HomePage>
     final evaluated = _evaluateTargetWeightInput();
     if (!evaluated.isValid) {
       if (!mounted) return;
+      _showSnack(AppLocalizations.of(context).profileTargetWeightKgInvalid);
       return;
     }
     if (!_isTargetWeightPanelDirty()) {
@@ -18742,8 +18250,10 @@ class _HomePageState extends State<HomePage>
     await _closeProfileSelectOverlay(animated: true);
 
     if (!mounted) return false;
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return false;
     }
 
@@ -18755,17 +18265,21 @@ class _HomePageState extends State<HomePage>
       return false;
     }
     if (_selectedGender == null) {
+      _showSnack(l10n.snackSelectGender);
       return false;
     }
     if (_selectedAgeRange == null) {
+      _showSnack(l10n.snackSelectAgeRange);
       return false;
     }
     if (_selectedDietGoal == null) {
+      _showSnack(l10n.snackSelectDietGoal);
       return false;
     }
 
     final evaluatedTarget = _evaluateTargetWeightInput();
     if (!evaluatedTarget.isValid) {
+      _showSnack(l10n.profileTargetWeightKgInvalid);
       _openKeyboardAccessoryEditor(
         key: 'profile_target_weight_kg',
         controller: _targetWeightController,
@@ -18825,6 +18339,7 @@ class _HomePageState extends State<HomePage>
       debugPrint('profile panel autosave failed: $e\n$st');
       if (mounted) {
         _safeSetState(() => _isSavingProfilePanel = false);
+        _showSnack(l10n.snackProfileSaveFailed(e.toString()));
       } else {
         _isSavingProfilePanel = false;
       }
@@ -18850,6 +18365,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _openProfilePanelFromGameMenu() async {
     if (!await _guardAccountAliveBeforeUserAction('open profile panel')) return;
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
@@ -18857,6 +18373,7 @@ class _HomePageState extends State<HomePage>
     _instantResetAnalysisPanelIfOpen();
     final user = supabase.auth.currentUser;
     if (user == null || _profile == null) {
+      _showSnack(l10n.snackProfileLoadFailed);
       return;
     }
     _gameDietDiarySwapController.stop();
@@ -19278,7 +18795,9 @@ class _HomePageState extends State<HomePage>
           onMonthChanged: (m) {
             _safeSetState(() => _diaryVisibleMonth = m);
           },
-          onSavedSuccess: () {},
+          onSavedSuccess: () {
+            _showSnack(AppLocalizations.of(context).dietDiarySavedSnackbar);
+          },
           signedUrlBuilder: _signedMealPhotoUrl,
           onPhotoTap: _showMealPhotoPreview,
           fetchNote: _fetchMealDiaryNote,
@@ -19653,7 +19172,9 @@ class _HomePageState extends State<HomePage>
   Future<void> _onMenuTap(String label) async {
     if (label == '식단일지') {
       await _openDietDiaryFromGameMenu();
-    } else {}
+    } else {
+      _showSnack(AppLocalizations.of(context).snackComingLater(label));
+    }
   }
 
   Future<void> _openSettingsFromGameMenu() async {
@@ -20588,6 +20109,7 @@ class _HomePageState extends State<HomePage>
     await _waitForUiSettle();
     if (!mounted) return;
 
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
       await _showWithdrawErrorNotice();
@@ -20633,6 +20155,7 @@ class _HomePageState extends State<HomePage>
 
       if (!mounted) return;
       _ensureFreshGuestProfileSetupVisible();
+      _showSnack(l10n.snackWithdrawCompleted);
     } catch (e, st) {
       debugPrint(
         'withdraw account unexpected failure: '
@@ -20674,6 +20197,7 @@ class _HomePageState extends State<HomePage>
     final user = supabase.auth.currentUser;
     final currentProfile = _profile;
     if (user == null || currentProfile == null) {
+      _showSnack('프로필 정보를 불러올 수 없어요.');
       return;
     }
 
@@ -20718,12 +20242,15 @@ class _HomePageState extends State<HomePage>
                 final resolutionText = resolutionController.text.trim();
 
                 if (nickname.isEmpty) {
+                  _showSnack('이름을 입력해주세요.');
                   return;
                 }
                 if (selectedGender == null) {
+                  _showSnack('성별을 선택해주세요.');
                   return;
                 }
                 if (selectedDietGoal == null) {
+                  _showSnack('식단 목적을 선택해주세요.');
                   return;
                 }
 
@@ -20753,9 +20280,11 @@ class _HomePageState extends State<HomePage>
                   _safeSetState(() {});
                   await _waitForUiSettle();
                   if (!mounted) return;
+                  _showSnack('프로필이 저장되었어요!');
                 } catch (e) {
                   if (!mounted) return;
                   setSheetState(() => isSaving = false);
+                  _showSnack('프로필 저장 실패: $e');
                 }
               }
 
@@ -21114,8 +20643,10 @@ class _HomePageState extends State<HomePage>
     required String? weightText,
     required String noteText,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final user = supabase.auth.currentUser;
     if (user == null) {
+      _showSnack(l10n.snackLoginRequired);
       return false;
     }
 
@@ -21124,6 +20655,7 @@ class _HomePageState extends State<HomePage>
     if (wRaw.isNotEmpty) {
       final parsed = double.tryParse(wRaw.replaceAll(',', '.'));
       if (parsed == null) {
+        _showSnack(l10n.snackWeightNumberOnly);
         return false;
       }
       currentWeightKg = parsed;
@@ -21146,41 +20678,16 @@ class _HomePageState extends State<HomePage>
       _invalidateAnalysisCache();
       return true;
     } catch (e) {
+      _showSnack(l10n.snackDiarySaveFailed(e.toString()));
       return false;
-    }
-  }
-
-  /// resultType/memo → 식단일지 사진 미리보기 하단 바 문구.
-  String? _mealDiaryPhotoResultLabel(String? resultType, String? memo) {
-    final l10n = AppLocalizations.of(context);
-    final trimmedMemo = memo?.trim();
-    switch (resultType?.trim().toLowerCase()) {
-      case 'perfect':
-        return l10n.mealDiaryPhotoResultPerfect;
-      case 'good':
-        return (trimmedMemo != null && trimmedMemo.isNotEmpty)
-            ? l10n.mealDiaryPhotoResultGood(trimmedMemo)
-            : l10n.mealDiaryPhotoResultGoodPlain;
-      case 'bad':
-        return (trimmedMemo != null && trimmedMemo.isNotEmpty)
-            ? l10n.mealDiaryPhotoResultBad(trimmedMemo)
-            : l10n.mealDiaryPhotoResultBadPlain;
-      default:
-        return null;
     }
   }
 
   // 식단 사진을 Dialog 위에 크게 띄워서 보여준다.
   // - InteractiveViewer 로 핀치/드래그 확대 가능
   // - 바깥 터치 또는 우상단 X 로 닫기
-  // - resultType/memo 가 있으면 사진 하단에 당시 식단 결과·피드백 바를 표시한다.
-  Future<void> _showMealPhotoPreview(
-    String imageUrl, {
-    String? resultType,
-    String? memo,
-  }) async {
+  Future<void> _showMealPhotoPreview(String imageUrl) async {
     if (!mounted) return;
-    final resultLabel = _mealDiaryPhotoResultLabel(resultType, memo);
     await showDialog<void>(
       context: _rootNavigatorKey.currentContext ?? context,
       barrierDismissible: true,
@@ -21208,29 +20715,6 @@ class _HomePageState extends State<HomePage>
                   ),
                 ),
               ),
-              if (resultLabel != null)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    color: const Color(0xFFCFE8B4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    child: Text(
-                      resultLabel,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontFamily: 'Pretendard',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF2E4B1F),
-                      ),
-                    ),
-                  ),
-                ),
               Positioned(
                 top: 4,
                 right: 4,
@@ -22486,12 +21970,7 @@ class _DietDiarySheetPanel extends StatefulWidget {
   final ValueChanged<DateTime> onMonthChanged;
   final VoidCallback onSavedSuccess;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
-  final Future<void> Function(
-    String imageUrl, {
-    String? resultType,
-    String? memo,
-  })
-  onPhotoTap;
+  final Future<void> Function(String imageUrl) onPhotoTap;
   final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
   final Future<bool> Function({
     required DateTime date,
@@ -22998,12 +22477,7 @@ class _DietDiaryDetailPanel extends StatefulWidget {
   })?
   buildKeyboardTriggerField;
   final Future<String?> Function(String? imagePath) signedUrlBuilder;
-  final Future<void> Function(
-    String imageUrl, {
-    String? resultType,
-    String? memo,
-  })
-  onPhotoTap;
+  final Future<void> Function(String imageUrl) onPhotoTap;
   final Future<Map<String, dynamic>?> Function(String dateKey) fetchNote;
   final Future<bool> Function({
     required DateTime date,
@@ -23373,18 +22847,10 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                           _photoSlot(
                             label: l10n.diaryPhotoBrunchLabel,
                             url: _brunchUrl,
-                            resultType: _logForSlot(
-                              'brunch',
-                            )?['result_type']?.toString(),
-                            memo: _logForSlot('brunch')?['memo']?.toString(),
                           ),
                           _photoSlot(
                             label: l10n.diaryPhotoDinnerLabel,
                             url: _dinnerUrl,
-                            resultType: _logForSlot(
-                              'dinner',
-                            )?['result_type']?.toString(),
-                            memo: _logForSlot('dinner')?['memo']?.toString(),
                           ),
                         ],
                       ),
@@ -23592,12 +23058,7 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
     );
   }
 
-  Widget _photoSlot({
-    required String label,
-    required String? url,
-    String? resultType,
-    String? memo,
-  }) {
+  Widget _photoSlot({required String label, required String? url}) {
     final hasPhoto = url != null && url.isNotEmpty;
 
     return SizedBox(
@@ -23605,9 +23066,7 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
       height: 96,
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        onTap: hasPhoto
-            ? () => widget.onPhotoTap(url, resultType: resultType, memo: memo)
-            : null,
+        onTap: hasPhoto ? () => widget.onPhotoTap(url) : null,
         child: Container(
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.40),

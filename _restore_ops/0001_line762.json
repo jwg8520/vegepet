@@ -1,0 +1,10 @@
+{
+  "lineNo": 762,
+  "callIndex": 1,
+  "name": "StrReplace",
+  "path": "d:\\CURSOR_VegePet\\vegepet\\lib\\main.dart",
+  "old_string": "  static const double _kGameCanvasWidth = 844;",
+  "new_string": "  static const double _kGameCanvasWidth = 844;\n\n  /// 교감 상태 메시지 창 (844×390 마당 좌표).\n  static const double _kInteractionStatusLeft = 182;\n  static const double _kInteractionStatusTop = 264;\n  static const double _kInteractionStatusWidth = 480;\n  static const double _kInteractionStatusHeight = 80;",
+  "replace_all": null,
+  "contents": null
+}
