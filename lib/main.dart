@@ -742,9 +742,9 @@ class _HomePageState extends State<HomePage>
   double _startupLoadingOpacity = 1.0;
   Timer? _startupLoadingTimer;
   bool _startupLoadingCompleting = false;
+  bool _isRetryingBootstrap = false;
 
   _ViewStatus _status = _ViewStatus.loading;
-  String? _errorMessage;
 
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _petSpecies = [];
@@ -1076,6 +1076,10 @@ class _HomePageState extends State<HomePage>
 
   /// 현재 육성 펫 성숙기 달성 축하 안내 (240×116 · 마당 좌표계).
   bool _isMaturityCompleteNoticeOpen = false;
+
+  /// 네트워크·저장·조회 실패 공통 안내 (240×116 · 마당 좌표계).
+  /// 부트스트랩「실행 오류」와는 별개.
+  bool _isCommunicationErrorNoticeOpen = false;
 
   /// 성숙기 승급 시 캡처한 펫 이름 기준 안내 본문. 성장 메시지 dismiss 이후 모달에 사용한다.
   String? _pendingMaturityNoticeBody;
@@ -1766,7 +1770,6 @@ class _HomePageState extends State<HomePage>
 
     _safeSetState(() {
       _status = _ViewStatus.ready;
-      _errorMessage = null;
 
       _profile = null;
       _activePet = null;
@@ -1840,7 +1843,6 @@ class _HomePageState extends State<HomePage>
 
     _safeSetState(() {
       _status = _ViewStatus.ready;
-      _errorMessage = null;
       _isProfileSetupPanelVisible = true;
       _isProfileSetupClosing = false;
       _isInitialAdoptionPanelVisible = false;
@@ -2167,6 +2169,8 @@ class _HomePageState extends State<HomePage>
         _isProfileSetupClosing = false;
         _isProfileSetupPanelVisible = true;
       });
+      debugPrint('profile save failed type=${e.runtimeType}');
+      _showCommunicationErrorNotice();
     }
   }
 
@@ -2494,7 +2498,6 @@ class _HomePageState extends State<HomePage>
   Future<void> _bootstrap() async {
     setState(() {
       _status = _ViewStatus.loading;
-      _errorMessage = null;
       // 부트스트랩 재조회 전에 이전 세션·탈퇴 직후 찌꺼기가 화면에 남지 않도록 캐시만 선비움.
       // (실 데이터는 아래 fetch 들로 다시 채움 — 깜빡임은 짧은 로딩 상태로 흡수)
       _pokedexEntries = [];
@@ -2548,16 +2551,40 @@ class _HomePageState extends State<HomePage>
       }
 
       if (!mounted) return;
+      debugPrint('bootstrap failed: $e');
       setState(() {
         _status = _ViewStatus.error;
-        _errorMessage = e.toString();
       });
+      _playYardConfirmOverlayEnter();
       unawaited(_hideStartupLoadingOverlayOnError());
     } finally {
       if (completeStartupLoadingWhenYardReady) {
         unawaited(_completeStartupLoadingWhenYardReady());
       }
+      _isRetryingBootstrap = false;
     }
+  }
+
+  /// 부트스트랩 실패 알림의 「재실행」— 프로세스 종료 없이 시작 흐름만 다시 탄다.
+  Future<void> _retryBootstrap() async {
+    if (_isRetryingBootstrap) return;
+    _isRetryingBootstrap = true;
+
+    if (!mounted) {
+      _isRetryingBootstrap = false;
+      return;
+    }
+
+    _yardConfirmOverlayFadeController.stop();
+    _yardConfirmOverlayFadeController.value = 0;
+
+    setState(() {
+      _status = _ViewStatus.loading;
+    });
+    _startStartupFakeProgress();
+    if (mounted) setState(() {});
+
+    await _bootstrap();
   }
 
   Future<void> _bootstrapOptionalServices() async {
@@ -5524,10 +5551,10 @@ class _HomePageState extends State<HomePage>
           .toList();
     } catch (e, st) {
       debugPrint('fetch pokedex base entries failed: $e\n$st');
-      _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
+      // 실패 시 기존 도감 목록을 빈 목록으로 덮지 않는다.
       if (mounted) {
         _safeSetState(() {});
+        _showCommunicationErrorNotice();
       }
       return;
     }
@@ -6364,6 +6391,29 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  /// 서버 통신·저장·조회 실패 공통 알림. 상세 오류는 화면에 노출하지 않는다.
+  void _showCommunicationErrorNotice() {
+    if (!mounted) return;
+    _showYardNoticeSync(
+      isOpen: () => _isCommunicationErrorNoticeOpen,
+      markOpen: () => _isCommunicationErrorNoticeOpen = true,
+    );
+  }
+
+  Future<void> _hideCommunicationErrorNotice() async {
+    await _hideYardNotice(
+      isOpen: () => _isCommunicationErrorNoticeOpen,
+      markClosed: () => _isCommunicationErrorNoticeOpen = false,
+    );
+  }
+
+  void _closeCommunicationErrorNoticeOverlay() {
+    _requestHideYardNotice(
+      isOpen: () => _isCommunicationErrorNoticeOpen,
+      hide: _hideCommunicationErrorNotice,
+    );
+  }
+
   Future<void> _hideMaturityCompleteNotice() async {
     await _hideYardNotice(
       isOpen: () => _isMaturityCompleteNoticeOpen,
@@ -6536,6 +6586,8 @@ class _HomePageState extends State<HomePage>
       }
       if (!mounted) return;
       setState(() => _isInteracting = false);
+      debugPrint('interact pet failed type=${e.runtimeType}');
+      _showCommunicationErrorNotice();
     }
   }
 
@@ -6631,7 +6683,9 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _onYardPetTapped() async {
     if (_isYardPetTapBlocked()) return;
-    if (_handleMaturePetBlockedInteraction()) return;
+    // 성숙기: 마당 터치는 조용히 무시 (축하 알림/쓰다듬기/애정도 없음).
+    // 먹이주기 버튼의 축하 알림은 _handleMaturePetBlockedInteraction 경로 유지.
+    if (_isCurrentPetMature()) return;
     if (_isActivePetPettedToday()) return;
 
     _ensurePettingTapTarget();
@@ -6785,6 +6839,8 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionPanelVisible = true;
       });
+      debugPrint('adopt selected pet failed type=${e.runtimeType}');
+      _showCommunicationErrorNotice();
     } finally {
       if (mounted) {
         _safeSetState(() {
@@ -7722,7 +7778,8 @@ class _HomePageState extends State<HomePage>
         _analysisLoadError = null;
       });
     } catch (e, st) {
-      debugPrint('fetch analysis data failed: $e\n$st');
+      debugPrint('fetch analysis data failed type=${e.runtimeType}');
+      debugPrint('$st');
       if (!mounted) return;
       if (requestGeneration != _analysisRequestGeneration) return;
       if (requestedUserId != supabase.auth.currentUser?.id) return;
@@ -7732,6 +7789,7 @@ class _HomePageState extends State<HomePage>
         _isAnalysisLoading = false;
         _analysisLoadError = 'failed';
       });
+      _showCommunicationErrorNotice();
     }
   }
 
@@ -9221,6 +9279,8 @@ class _HomePageState extends State<HomePage>
         );
       } catch (e) {
         if (!mounted) return;
+        debugPrint('random ticket rpc failed type=${e.runtimeType}');
+        _showCommunicationErrorNotice();
         return;
       }
 
@@ -9238,6 +9298,8 @@ class _HomePageState extends State<HomePage>
           : int.tryParse(speciesIdRaw?.toString() ?? '');
       if (speciesId == null) {
         if (!mounted) return;
+        debugPrint('random ticket rpc missing speciesId');
+        _showCommunicationErrorNotice();
         return;
       }
 
@@ -9286,6 +9348,8 @@ class _HomePageState extends State<HomePage>
               .eq('id', currentPet['id']);
         } catch (e) {
           if (!mounted) return;
+          debugPrint('random ticket deactivate failed type=${e.runtimeType}');
+          _showCommunicationErrorNotice();
           return;
         }
       }
@@ -9304,6 +9368,8 @@ class _HomePageState extends State<HomePage>
         });
       } catch (e) {
         if (!mounted) return;
+        debugPrint('random ticket insert failed type=${e.runtimeType}');
+        _showCommunicationErrorNotice();
         return;
       }
 
@@ -9733,6 +9799,7 @@ class _HomePageState extends State<HomePage>
         _isLinkedAccountAddressNoticeOpen ||
         _isDuplicatePetNameNoticeOpen ||
         _isMaturityCompleteNoticeOpen ||
+        _isCommunicationErrorNoticeOpen ||
         _isPokedexCompleteTicketNoticeOpen ||
         _isRemoteAccountLinkedLogoutNoticeOpen ||
         _isRandomTicketUseConfirmOpen;
@@ -9995,44 +10062,25 @@ class _HomePageState extends State<HomePage>
       ),
     );
 
-    return Positioned.fill(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                unawaited(_hideInteractionStatusMessage());
-              },
-              child: const SizedBox.expand(),
-            ),
+    // 메시지 창 자체 탭만 닫힘. 외부 영역은 통과시켜 마당 조작을 막지 않는다.
+    return Positioned(
+      left: _kInteractionStatusLeft,
+      top: _kInteractionStatusTop,
+      width: _kInteractionStatusWidth,
+      height: _kInteractionStatusHeight,
+      child: FadeTransition(
+        opacity: _interactionStatusOpacity,
+        child: ScaleTransition(
+          scale: _interactionStatusScale,
+          alignment: Alignment.center,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              unawaited(_hideInteractionStatusMessage());
+            },
+            child: Semantics(liveRegion: true, label: message, child: panel),
           ),
-          Positioned(
-            left: _kInteractionStatusLeft,
-            top: _kInteractionStatusTop,
-            width: _kInteractionStatusWidth,
-            height: _kInteractionStatusHeight,
-            child: FadeTransition(
-              opacity: _interactionStatusOpacity,
-              child: ScaleTransition(
-                scale: _interactionStatusScale,
-                alignment: Alignment.center,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    unawaited(_hideInteractionStatusMessage());
-                  },
-                  child: Semantics(
-                    liveRegion: true,
-                    label: message,
-                    child: panel,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -10051,6 +10099,7 @@ class _HomePageState extends State<HomePage>
     _isLinkedAccountAddressNoticeOpen = false;
     _isDuplicatePetNameNoticeOpen = false;
     _isMaturityCompleteNoticeOpen = false;
+    _isCommunicationErrorNoticeOpen = false;
     _isPokedexCompleteTicketNoticeOpen = false;
     _isRemoteAccountLinkedLogoutNoticeOpen = false;
     _isRandomTicketUseConfirmOpen = false;
@@ -10657,8 +10706,6 @@ class _HomePageState extends State<HomePage>
         _buildTopHudLayer(),
         if (_status == _ViewStatus.loading && !_showStartupLoadingOverlay)
           _buildInYardLoadingOverlay(),
-        if (_status == _ViewStatus.error)
-          _buildInYardErrorOverlay(message: _errorMessage, onRetry: _bootstrap),
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
@@ -10682,9 +10729,11 @@ class _HomePageState extends State<HomePage>
         _buildNameInterlockNoticeGlobalOverlay(),
         _buildProfileSelectMissingNoticeGlobalOverlay(),
         _buildMaturityCompleteNoticeGlobalOverlay(),
+        _buildCommunicationErrorNoticeGlobalOverlay(),
         _buildPokedexCompleteTicketNoticeGlobalOverlay(),
         _buildRemoteAccountLinkedLogoutNoticeGlobalOverlay(),
         if (_showStartupLoadingOverlay) _buildStartupLoadingOverlay(),
+        _buildBootstrapErrorNoticeGlobalOverlay(),
       ],
     );
   }
@@ -10902,6 +10951,46 @@ class _HomePageState extends State<HomePage>
         bodyFontSizeEn: 9,
         bodyMaxLinesEn: 3,
         bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        blockDialogPointerWithGestureDetector: false,
+      ),
+    );
+  }
+
+  Widget _buildCommunicationErrorNoticeGlobalOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      VegePetNoticeConfig(
+        isOpen: _isCommunicationErrorNoticeOpen,
+        title: l10n.communicationErrorTitle,
+        body: l10n.communicationErrorBody,
+        primaryLabel: l10n.commonOk,
+        onPrimaryTap: _closeCommunicationErrorNoticeOverlay,
+        outsideDismissible: false,
+        bodyFontSizeEn: 9,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 2,
+        bodyOverflow: TextOverflow.visible,
+        blockDialogPointerWithGestureDetector: false,
+      ),
+    );
+  }
+
+  Widget _buildBootstrapErrorNoticeGlobalOverlay() {
+    final l10n = AppLocalizations.of(context);
+    return _buildVegePetOneButtonNoticeOverlay(
+      VegePetNoticeConfig(
+        isOpen: _status == _ViewStatus.error,
+        title: l10n.bootstrapErrorTitle,
+        body: l10n.bootstrapErrorBody,
+        primaryLabel: l10n.bootstrapErrorRetry,
+        onPrimaryTap: () {
+          unawaited(_retryBootstrap());
+        },
+        outsideDismissible: false,
+        bodyFontSizeEn: 9,
+        bodyMaxLinesEn: 3,
+        bodyMaxLinesKo: 3,
         bodyOverflow: TextOverflow.visible,
         blockDialogPointerWithGestureDetector: false,
       ),
@@ -12676,45 +12765,6 @@ class _HomePageState extends State<HomePage>
           const CircularProgressIndicator(),
           const SizedBox(height: 14),
           Text(l10n.inYardLoading),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInYardErrorOverlay({
-    required String? message,
-    required VoidCallback onRetry,
-  }) {
-    final l10n = AppLocalizations.of(context);
-    return _buildCenteredOverlayCard(
-      width: 380,
-      height: 220,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 44, color: Colors.redAccent),
-          const SizedBox(height: 10),
-          Text(
-            l10n.inYardErrorTitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: Text(l10n.retry),
-          ),
-          if (message != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-          ],
         ],
       ),
     );
@@ -16795,6 +16845,29 @@ class _HomePageState extends State<HomePage>
       if (userId != supabase.auth.currentUser?.id) return;
 
       if (!_hasEligibleMealForToyPlay()) {
+        // 실패도 성공과 동일하게 당일 놀아주기를 소모한다 (재시도·드래그 불가).
+        final activePetId = _activePet?['id'];
+        if (activePetId != null) {
+          try {
+            await supabase
+                .from('user_pets')
+                .update({'last_played_on': today})
+                .eq('id', activePetId);
+            if (!mounted) return;
+            if (generation != _userDataGeneration) return;
+            if (userId != supabase.auth.currentUser?.id) return;
+            await _fetchActivePet();
+          } catch (e) {
+            if (!mounted) return;
+            debugPrint(
+              'play ineligible last_played_on update failed type=${e.runtimeType}',
+            );
+            _showCommunicationErrorNotice();
+            return;
+          }
+        }
+        if (!mounted) return;
+        if (generation != _userDataGeneration) return;
         await _showInteractionStatusMessage(
           _interactionPlayFailureMessage(),
           eventKey: 'play_failure:$today:$petId:$attemptId',
@@ -17300,6 +17373,8 @@ class _HomePageState extends State<HomePage>
       final imagePath = await _uploadPhotoToStorage(slot: slot, file: photo);
       if (imagePath == null) {
         if (!mounted) return;
+        debugPrint('meal_photo:storage_upload_failed');
+        _showCommunicationErrorNotice();
         return;
       }
 
@@ -17313,6 +17388,8 @@ class _HomePageState extends State<HomePage>
       );
       if (result == null || result['ok'] != true) {
         if (!mounted) return;
+        debugPrint('meal_photo:evaluate_invoke_failed');
+        _showCommunicationErrorNotice();
         return;
       }
 
@@ -17335,6 +17412,8 @@ class _HomePageState extends State<HomePage>
         final persisted = await _verifyPersistedTodayMealLog(slot: slot);
         if (persisted == null) {
           if (!mounted) return;
+          debugPrint('meal_photo:persist_verify_failed');
+          _showCommunicationErrorNotice();
           return;
         }
         debugPrint('meal_photo:meal_log_refresh_success');
@@ -17383,8 +17462,12 @@ class _HomePageState extends State<HomePage>
       }
 
       if (!mounted) return;
+      debugPrint('meal_photo:unexpected_evaluate_status');
+      _showCommunicationErrorNotice();
     } catch (e) {
       if (!mounted) return;
+      debugPrint('meal_photo:flow_failed type=${e.runtimeType}');
+      _showCommunicationErrorNotice();
     } finally {
       if (mounted) {
         _safeSetState(() {
@@ -18648,6 +18731,8 @@ class _HomePageState extends State<HomePage>
         }
         _safeSetState(() {});
       }
+      debugPrint('profile patch failed type=${e.runtimeType}');
+      _showCommunicationErrorNotice();
     } finally {
       if (mounted) {
         _safeSetState(() => _isSavingProfilePanel = false);
@@ -18828,6 +18913,7 @@ class _HomePageState extends State<HomePage>
       } else {
         _isSavingProfilePanel = false;
       }
+      _showCommunicationErrorNotice();
       return false;
     }
   }
@@ -21048,13 +21134,13 @@ class _HomePageState extends State<HomePage>
       _diaryLogsCachedMonthKey =
           '${month.year}-${month.month.toString().padLeft(2, '0')}';
     } catch (e) {
-      debugPrint('fetch diary month logs failed: $e');
+      debugPrint('fetch diary month logs failed type=${e.runtimeType}');
       if (generation != _userDataGeneration) return;
       if (requestedUserId != supabase.auth.currentUser?.id) return;
-      _diaryLogsByDate = {};
-      _diaryCurrentWeightByDate = {};
-      _diaryHasNoteTextByDate = {};
-      _diaryLogsCachedMonthKey = null;
+      // 실패 시 기존 캐시를 빈 목록으로 덮지 않는다.
+      if (mounted) {
+        _showCommunicationErrorNotice();
+      }
     }
   }
 
@@ -21146,6 +21232,10 @@ class _HomePageState extends State<HomePage>
       _invalidateAnalysisCache();
       return true;
     } catch (e) {
+      debugPrint('save meal diary note failed type=${e.runtimeType}');
+      if (mounted) {
+        _showCommunicationErrorNotice();
+      }
       return false;
     }
   }
@@ -21214,7 +21304,12 @@ class _HomePageState extends State<HomePage>
                   right: 0,
                   bottom: 0,
                   child: Container(
-                    color: const Color(0xFFCFE8B4),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFCFE8B4),
+                      borderRadius: BorderRadius.vertical(
+                        bottom: Radius.circular(28),
+                      ),
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 10,

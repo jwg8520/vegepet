@@ -100,6 +100,12 @@
   "start": "Start",
   "inYardLoading": "Loading...",
   "inYardErrorTitle": "Something went wrong while preparing the app.",
+  "bootstrapErrorTitle": "Startup Error",
+  "bootstrapErrorBody": "An error occurred while starting the app. Please check your network connection.",
+  "bootstrapErrorRetry": "Try Again",
+  "communicationErrorTitle": "Connection Error",
+  "communicationErrorBody": "We couldn't complete the request. Please try again in a moment.",
+  "commonOk": "OK",
   "retry": "Retry",
   "initialAdoptionTitle": "Adopt a Baby VegePet!",
   "initialAdoptionDescription": "VegePets grow by enjoying your healthy meals.",
@@ -291,21 +297,21 @@
   "snackPettedTodayAlready": "You already petted your VegePet today.",
   "snackPetFetchFailed": "Failed to load pet info: {error}",
   "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
-  "mealPerfectMessage1": "{petNameSubject} happily enjoyed the meal! (Perfect +{affectionGain}💕)",
+  "mealPerfectMessage1": "{petNameSubject} happily enjoyed the meal! Perfect +{affectionGain}💕",
   "@mealPerfectMessage1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "mealPerfectMessage2": "{petNameTopic} seems even healthier now! (Perfect +{affectionGain}💕)",
+  "mealPerfectMessage2": "{petNameTopic} seems even healthier now! Perfect +{affectionGain}💕",
   "@mealPerfectMessage2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage1": "{petNameSubject} really enjoyed the meal. Next time, let’s {feedback}. (Good +{affectionGain}💕)",
+  "mealGoodFeedbackMessage1": "{petNameSubject} really enjoyed the meal. Next time, let’s {feedback}. Good +{affectionGain}💕",
   "@mealGoodFeedbackMessage1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
@@ -313,7 +319,7 @@
       "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage2": "{petName} seems to be getting healthier. Next time, let’s prepare the meal with this in mind: {feedback}. (Good +{affectionGain}💕)",
+  "mealGoodFeedbackMessage2": "{petName} seems to be getting healthier. Next time, let’s prepare the meal with this in mind: {feedback}. Good +{affectionGain}💕",
   "@mealGoodFeedbackMessage2": {
     "placeholders": {
       "petName": {"type": "String"},
@@ -327,7 +333,7 @@
       "petNameSubject": {"type": "String"}
     }
   },
-  "mealBadFeedbackMessage1": "{petName} doesn’t seem very happy with the meal. Next time, let’s {feedback}. (Bad +{affectionGain})",
+  "mealBadFeedbackMessage1": "{petName} doesn’t seem very happy with the meal. Next time, let’s {feedback}. Bad +{affectionGain}",
   "@mealBadFeedbackMessage1": {
     "placeholders": {
       "petName": {"type": "String"},
@@ -335,7 +341,7 @@
       "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFeedbackMessage2": "{petNameTopic} seems low on energy. Let’s prepare the next meal with this in mind: {feedback}. (Bad +{affectionGain})",
+  "mealBadFeedbackMessage2": "{petNameTopic} seems low on energy. Let’s prepare the next meal with this in mind: {feedback}. Bad +{affectionGain}",
   "@mealBadFeedbackMessage2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
@@ -435,55 +441,55 @@
   "analysisRetry": "Retry",
   "analysisNoRecord": "No records",
   "interactionPetNameFallback": "VegePet",
-  "interactionPettingCat1": "{petNameSubject} is purring happily..! (+{affectionGain}❤️)",
+  "interactionPettingCat1": "{petNameSubject} is purring happily..! +{affectionGain}❤️",
   "@interactionPettingCat1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingCat2": "{petName} starts kneading! (+{affectionGain}❤️)",
+  "interactionPettingCat2": "{petName} starts kneading! +{affectionGain}❤️",
   "@interactionPettingCat2": {
     "placeholders": {
       "petName": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingDog1": "{petNameSubject} is grinning from ear to ear! (+{affectionGain}❤️)",
+  "interactionPettingDog1": "{petNameSubject} is grinning from ear to ear! +{affectionGain}❤️",
   "@interactionPettingDog1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingDog2": "{petName} activates tail-copter mode! (+{affectionGain}❤️)",
+  "interactionPettingDog2": "{petName} activates tail-copter mode! +{affectionGain}❤️",
   "@interactionPettingDog2": {
     "placeholders": {
       "petName": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlaySuccess1": "{petNameTopic} looks incredibly excited! (+{affectionGain}❤️)",
+  "interactionPlaySuccess1": "{petNameTopic} looks incredibly excited! +{affectionGain}❤️",
   "@interactionPlaySuccess1": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlaySuccess2": "{petNameTopic} seems to love playing with you! (+{affectionGain}❤️)",
+  "interactionPlaySuccess2": "{petNameTopic} seems to love playing with you! +{affectionGain}❤️",
   "@interactionPlaySuccess2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlayFailure1": "{petNameTopic} doesn’t seem to feel like playing. Let’s try again tomorrow.",
+  "interactionPlayFailure1": "{petNameTopic} doesn’t seem to feel like playing.. Let’s try again tomorrow.",
   "@interactionPlayFailure1": {
     "placeholders": {
       "petNameTopic": {"type": "String"}
     }
   },
-  "interactionPlayFailure2": "{petNameTopic} seems too tired to respond. Let’s try playing again tomorrow.",
+  "interactionPlayFailure2": "{petNameTopic} seems too tired to respond.. Let’s try playing again tomorrow.",
   "@interactionPlayFailure2": {
     "placeholders": {
       "petNameTopic": {"type": "String"}
