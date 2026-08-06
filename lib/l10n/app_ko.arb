@@ -74,8 +74,8 @@
   "petInfoCurrentAffection": "현재 애정도",
   "petInfoStageComplete": "성숙기 달성 완료",
   "petInfoUntilAdult": "성숙기까지",
-  "petInfoUntilGrown": "성장기까지",
-  "petInfoUntilChild": "유년기까지",
+  "petInfoUntilTeen": "성장기까지",
+  "petInfoUntilYoung": "유년기까지",
   "petInfoFeedShort": "먹이주기",
   "petInfoMealCheckBubble": "식단 인증!",
   "gameMenuTooltip": "게임 메뉴",
@@ -89,6 +89,9 @@
   "menuLabelStory": "스토리",
   "menuLabelHelp": "도움말",
   "menuLabelSettings": "설정",
+  "menuLabelSocialContribution": "사회공헌",
+  "socialContributionMainMessage": "\"아보펫은 광고 수익의 15%를\n유기 동물 보호 활동에 사용합니다.\"",
+  "socialContributionWebsiteHint": "자세한 사항은 공식 홈페이지를 참고해 주세요.",
   "profileSetupTitle": "프로필을 입력해주세요!",
   "nickname": "닉네임",
   "gender": "성별",
@@ -116,7 +119,7 @@
   "mealPanelTodayCertLabel": "오늘의 식단 인증!",
   "mealPanelBrunchButton": "아점 식단",
   "mealPanelDinnerButton": "저녁 식단",
-  "mealPanelFootnote1": "• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시",
+  "mealPanelFootnote1": "• 아점 : 06 ~ 16시 / 저녁 : 17 ~ 23시",
   "mealPanelFootnote2": "• 실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.",
   "mealPanelFootnote3": "• 촬영된 식단 사진은 식단 일지에서 조회 가능해요.",
   "mealPanelUploading": "판정 중...",
@@ -165,14 +168,14 @@
   "nameInterlockMain": "다시 입력해주세요.",
   "nameInterlockSub": "※ 2 ~ 8글자 제한 / 특수 문자 금지!",
   "stageBaby": "유아기",
-  "stageChild": "유년기",
-  "stageGrown": "성장기",
+  "stageYoung": "유년기",
+  "stageTeen": "성장기",
   "stageAdult": "성숙기",
   "familyDog": "강아지",
   "familyCat": "고양이",
   "defaultPetName": "펫",
   "adoptionTitleAlt": "베지펫을 분양 받을 차례에요!",
-  "adoptionReceiveButtonExclaim": "분양받기!",
+  "adoptionReceiveButtonExclaim": "분양받기",
   "snackLoginRequired": "로그인이 필요해요.",
   "snackAccountAlreadyLinked": "이미 계정 연동이 완료되어 있어요.",
   "snackAccountLinkCompleted": "계정 연동이 완료되었어요.",
@@ -286,8 +289,8 @@
   "snackWeightNumberOnly": "체중은 숫자로 입력해주세요.",
   "snackDiarySaveFailed": "식단일지 저장 실패: {error}",
   "@snackDiarySaveFailed": {"placeholders": {"error": {"type": "String"}}},
-  "snackStageGrewToChild": "베지펫이 유년기로 성장했어요!",
-  "snackStageGrewToGrown": "베지펫이 성장기로 자랐어요!",
+  "snackStageGrewToYoung": "베지펫이 유년기로 성장했어요!",
+  "snackStageGrewToTeen": "베지펫이 성장기로 자랐어요!",
   "snackStageGrewToAdult": "베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!",
   "snackGraduationFailed": "성숙기 전환 처리 실패: {error}",
   "@snackGraduationFailed": {"placeholders": {"error": {"type": "String"}}},
@@ -501,14 +504,14 @@
       "petName": {"type": "String"}
     }
   },
-  "interactionGrowthYoungToGrown": "... 어라? {petNameSubject} 다소 늠름해진 것 같다!",
-  "@interactionGrowthYoungToGrown": {
+  "interactionGrowthYoungToTeen": "... 어라? {petNameSubject} 다소 늠름해진 것 같다!",
+  "@interactionGrowthYoungToTeen": {
     "placeholders": {
       "petNameSubject": {"type": "String"}
     }
   },
-  "interactionGrowthGrownToAdult": "{petNameTopic} 이제 어엿한 어른이 된 것 같다!",
-  "@interactionGrowthGrownToAdult": {
+  "interactionGrowthTeenToAdult": "{petNameTopic} 이제 어엿한 어른이 된 것 같다!",
+  "@interactionGrowthTeenToAdult": {
     "placeholders": {
       "petNameTopic": {"type": "String"}
     }

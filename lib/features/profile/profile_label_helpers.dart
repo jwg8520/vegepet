@@ -186,6 +186,8 @@ String menuLabelForKey(String key, AppLocalizations l10n) {
       return l10n.menuLabelHelp;
     case 'settings':
       return l10n.menuLabelSettings;
+    case 'socialContribution':
+      return l10n.menuLabelSocialContribution;
     default:
       return key;
   }

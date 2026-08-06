@@ -233,10 +233,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get petInfoUntilAdult => '성숙기까지';
 
   @override
-  String get petInfoUntilGrown => '성장기까지';
+  String get petInfoUntilTeen => '성장기까지';
 
   @override
-  String get petInfoUntilChild => '유년기까지';
+  String get petInfoUntilYoung => '유년기까지';
 
   @override
   String get petInfoFeedShort => '먹이주기';
@@ -276,6 +276,16 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get menuLabelSettings => '설정';
+
+  @override
+  String get menuLabelSocialContribution => '사회공헌';
+
+  @override
+  String get socialContributionMainMessage =>
+      '\"아보펫은 광고 수익의 15%를\n유기 동물 보호 활동에 사용합니다.\"';
+
+  @override
+  String get socialContributionWebsiteHint => '자세한 사항은 공식 홈페이지를 참고해 주세요.';
 
   @override
   String get profileSetupTitle => '프로필을 입력해주세요!';
@@ -359,7 +369,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get mealPanelDinnerButton => '저녁 식단';
 
   @override
-  String get mealPanelFootnote1 => '• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시';
+  String get mealPanelFootnote1 => '• 아점 : 06 ~ 16시 / 저녁 : 17 ~ 23시';
 
   @override
   String get mealPanelFootnote2 => '• 실시간 카메라로 촬영된 사진만 AI 판정에 사용돼요.';
@@ -510,10 +520,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get stageBaby => '유아기';
 
   @override
-  String get stageChild => '유년기';
+  String get stageYoung => '유년기';
 
   @override
-  String get stageGrown => '성장기';
+  String get stageTeen => '성장기';
 
   @override
   String get stageAdult => '성숙기';
@@ -531,7 +541,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get adoptionTitleAlt => '베지펫을 분양 받을 차례에요!';
 
   @override
-  String get adoptionReceiveButtonExclaim => '분양받기!';
+  String get adoptionReceiveButtonExclaim => '분양받기';
 
   @override
   String get snackLoginRequired => '로그인이 필요해요.';
@@ -833,10 +843,10 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get snackStageGrewToChild => '베지펫이 유년기로 성장했어요!';
+  String get snackStageGrewToYoung => '베지펫이 유년기로 성장했어요!';
 
   @override
-  String get snackStageGrewToGrown => '베지펫이 성장기로 자랐어요!';
+  String get snackStageGrewToTeen => '베지펫이 성장기로 자랐어요!';
 
   @override
   String get snackStageGrewToAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
@@ -1153,12 +1163,12 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String interactionGrowthYoungToGrown(String petNameSubject) {
+  String interactionGrowthYoungToTeen(String petNameSubject) {
     return '... 어라? $petNameSubject 다소 늠름해진 것 같다!';
   }
 
   @override
-  String interactionGrowthGrownToAdult(String petNameTopic) {
+  String interactionGrowthTeenToAdult(String petNameTopic) {
     return '$petNameTopic 이제 어엿한 어른이 된 것 같다!';
   }
 

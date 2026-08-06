@@ -74,8 +74,8 @@
   "petInfoCurrentAffection": "Affection",
   "petInfoStageComplete": "Adult Stage Reached",
   "petInfoUntilAdult": "Until Adult",
-  "petInfoUntilGrown": "Until Growth",
-  "petInfoUntilChild": "Until Child",
+  "petInfoUntilTeen": "Until Teen",
+  "petInfoUntilYoung": "Until Young",
   "petInfoFeedShort": "Feed",
   "petInfoMealCheckBubble": "Meal Check",
   "gameMenuTooltip": "Game Menu",
@@ -89,6 +89,9 @@
   "menuLabelStory": "Story",
   "menuLabelHelp": "Help",
   "menuLabelSettings": "Settings",
+  "menuLabelSocialContribution": "Impact",
+  "socialContributionMainMessage": "\"AvoPet uses 15% of its ad revenue\nto support animal welfare.\"",
+  "socialContributionWebsiteHint": "For details, please visit our official website.",
   "profileSetupTitle": "Set Up Your Profile",
   "nickname": "Nickname",
   "gender": "Gender",
@@ -116,7 +119,7 @@
   "mealPanelTodayCertLabel": "Today's Meal Check",
   "mealPanelBrunchButton": "Brunch",
   "mealPanelDinnerButton": "Dinner",
-  "mealPanelFootnote1": "• Brunch: 06:00–14:00 / Dinner: 17:00–22:00",
+  "mealPanelFootnote1": "• Brunch: 06:00–16:00 / Dinner: 17:00–23:00",
   "mealPanelFootnote2": "• Only live camera photos are used for AI evaluation.",
   "mealPanelFootnote3": "• Meal photos can be viewed in the Diet Diary.",
   "mealPanelUploading": "Evaluating...",
@@ -165,14 +168,14 @@
   "nameInterlockMain": "Please try again.",
   "nameInterlockSub": "Use 2–8 characters. No special characters!",
   "stageBaby": "Baby",
-  "stageChild": "Child",
-  "stageGrown": "Growing",
+  "stageYoung": "Young",
+  "stageTeen": "Teen",
   "stageAdult": "Adult",
   "familyDog": "Dogs",
   "familyCat": "Cats",
   "defaultPetName": "Pet",
   "adoptionTitleAlt": "Time to adopt a baby VegePet!",
-  "adoptionReceiveButtonExclaim": "Adopt!",
+  "adoptionReceiveButtonExclaim": "Adopt",
   "snackLoginRequired": "Please log in first.",
   "snackAccountAlreadyLinked": "An account is already linked.",
   "snackAccountLinkCompleted": "Your account has been linked.",
@@ -286,8 +289,8 @@
   "snackWeightNumberOnly": "Please enter a valid weight.",
   "snackDiarySaveFailed": "Failed to save diet diary: {error}",
   "@snackDiarySaveFailed": {"placeholders": {"error": {"type": "String"}}},
-  "snackStageGrewToChild": "Your VegePet grew into the Child stage!",
-  "snackStageGrewToGrown": "Your VegePet grew into the Growth stage!",
+  "snackStageGrewToYoung": "Your VegePet grew into the Young stage!",
+  "snackStageGrewToTeen": "Your VegePet grew into the Teen stage!",
   "snackStageGrewToAdult": "Your VegePet reached the Adult stage! Raising complete!",
   "snackGraduationFailed": "Failed to update Adult stage status: {error}",
   "@snackGraduationFailed": {"placeholders": {"error": {"type": "String"}}},
@@ -501,14 +504,14 @@
       "petName": {"type": "String"}
     }
   },
-  "interactionGrowthYoungToGrown": "... Wait, does {petNameSubject} look a little more grown-up?",
-  "@interactionGrowthYoungToGrown": {
+  "interactionGrowthYoungToTeen": "... Wait, does {petNameSubject} look a little more grown-up?",
+  "@interactionGrowthYoungToTeen": {
     "placeholders": {
       "petNameSubject": {"type": "String"}
     }
   },
-  "interactionGrowthGrownToAdult": "{petNameTopic} seems to have grown into a fine adult!",
-  "@interactionGrowthGrownToAdult": {
+  "interactionGrowthTeenToAdult": "{petNameTopic} seems to have grown into a fine adult!",
+  "@interactionGrowthTeenToAdult": {
     "placeholders": {
       "petNameTopic": {"type": "String"}
     }

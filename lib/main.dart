@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' show DateFormat;
@@ -21,6 +22,8 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:vegepet/ads/meal_interstitial_controller.dart';
+import 'package:vegepet/ads/vegepet_admob_config.dart';
 import 'package:vegepet/l10n/app_localizations.dart';
 import 'package:vegepet/features/bag/bag_models.dart';
 import 'package:vegepet/features/analysis/analysis_helpers.dart';
@@ -237,6 +240,7 @@ enum _GameMenuSubOutsideDismissKind {
   story,
   settings,
   help,
+  socialContribution,
 }
 
 List<String> _normalizeMealFeedbackCodes(dynamic raw) {
@@ -534,6 +538,18 @@ void main() async {
   // 시작 로딩 첫 프레임부터 로고가 보이도록 asset 을 미리 decode 한다.
   await _precacheStartupLoadingLogo();
 
+  // iOS AdMob 초기화 (Android 광고는 이번 범위 밖).
+  if (!kIsWeb && Platform.isIOS) {
+    try {
+      await MobileAds.instance.initialize();
+      if (VegePetAdMobConfig.useTestAdUnitIds && kReleaseMode) {
+        debugPrint('interstitial:config_warn:test_ids_enabled_in_release');
+      }
+    } catch (e) {
+      debugPrint('interstitial:init_failed');
+    }
+  }
+
   runApp(const VegePetApp());
 }
 
@@ -742,6 +758,10 @@ class _HomePageState extends State<HomePage>
   double _startupLoadingOpacity = 1.0;
   Timer? _startupLoadingTimer;
   bool _startupLoadingCompleting = false;
+
+  /// 첫 실행(프로필+분양 미완료) 세계관 스토리 일러스트 오버레이.
+  bool _showIntroStoryOverlay = false;
+  int _introStoryPageIndex = 0;
   bool _isRetryingBootstrap = false;
 
   _ViewStatus _status = _ViewStatus.loading;
@@ -756,6 +776,10 @@ class _HomePageState extends State<HomePage>
 
   String? _selectedSpeciesId;
   bool _isAdopting = false;
+
+  /// 분양창 idle 스프라이트 첫 프레임 캐시 (asset path → cropped ui.Image).
+  final Map<String, ui.Image?> _adoptionIdleFirstFrameCache = {};
+  final Set<String> _adoptionIdleFirstFrameLoading = {};
 
   List<Map<String, dynamic>> _todayMealLogs = [];
 
@@ -790,6 +814,13 @@ class _HomePageState extends State<HomePage>
   late AnimationController _interactionStatusAnimationController;
   late Animation<double> _interactionStatusOpacity;
   late Animation<double> _interactionStatusScale;
+
+  /// 식단 성공 인증 전면 광고 (iOS).
+  final MealInterstitialController _mealInterstitialController =
+      MealInterstitialController();
+  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
+  bool _interstitialAudioSuspended = false;
+  final Set<String> _mealInterstitialAttemptedEventKeys = <String>{};
 
   final TextEditingController _nicknameController = TextEditingController();
   final FocusNode _nicknameFocusNode = FocusNode();
@@ -995,7 +1026,6 @@ class _HomePageState extends State<HomePage>
 
   bool _isPokedexPanelOpen = false;
   bool _pokedexPanelSwapInProgress = false;
-  Map<String, dynamic>? _pokedexPanelSelectedEntry;
   late AnimationController _gamePokedexSwapController;
   late Animation<double> _gamePokedexSwapCurve;
 
@@ -1017,6 +1047,12 @@ class _HomePageState extends State<HomePage>
   bool _helpPanelSwapInProgress = false;
   late AnimationController _gameHelpSwapController;
   late Animation<double> _gameHelpSwapCurve;
+
+  /// 게임 메뉴 ↔ 사회공헌 창 전환 (도움말과 동일 계열 · fade only).
+  bool _isSocialContributionPanelOpen = false;
+  bool _socialContributionPanelSwapInProgress = false;
+  late AnimationController _gameSocialContributionSwapController;
+  late Animation<double> _gameSocialContributionSwapCurve;
   final ScrollController _settingsScrollController = ScrollController();
   SupportDocType? _activeSettingsSupportDoc;
   SupportDocType? _renderingSettingsSupportDoc;
@@ -1198,10 +1234,18 @@ class _HomePageState extends State<HomePage>
   static const String _kBackgroundMusicPrefKey =
       'vegepet_background_music_enabled';
   static const String _kSoundEffectsPrefKey = 'vegepet_sound_effects_enabled';
+  static const String _kAdFirstMealSuccessDonePrefKey =
+      'vegepet_ad_first_meal_success_done';
+  static const String _kAdDailyCountPrefKey = 'vegepet_ad_daily_count';
+  static const String _kAdDailySlotsPrefKey = 'vegepet_ad_daily_slots';
+  static const String _kAdLastShownAtMsPrefKey = 'vegepet_ad_last_shown_at_ms';
+  static const String _kAdRecordKstDatePrefKey = 'vegepet_ad_record_kst_date';
+  static const Duration _kAdMinInterval = Duration(hours: 3);
+  static const int _kAdDailyMaxCount = 2;
   static const int _kMealReminderNotificationIdBase = 120000;
   static const int _kMealReminderDaysToSchedule = 14;
 
-  /// 우측 게임 메뉴 6셀 + 2셀. String 슬롯은 표시용 라벨이 아니라
+  /// 우측 게임 메뉴 6셀 + 3셀. String 슬롯은 표시용 라벨이 아니라
   /// **안정적인 key** 다. 실제 화면 라벨은 [_menuLabelForKey] 가 l10n 으로
   /// 매핑하고, onTap 분기도 이 key 를 기준으로 한다.
   static const List<(IconData, String)> _menuSheetItems = [
@@ -1213,6 +1257,7 @@ class _HomePageState extends State<HomePage>
     (Icons.auto_stories_outlined, 'story'),
     (Icons.help_outline, 'help'),
     (Icons.settings_outlined, 'settings'),
+    (Icons.volunteer_activism_outlined, 'socialContribution'),
   ];
 
   /// 844×390 마당 기준 우측 상단 게임 메뉴 글래스 패널.
@@ -1239,10 +1284,12 @@ class _HomePageState extends State<HomePage>
   static const double _kStoryPanelTop = 40;
   static const double _kStoryPanelW = 766;
   static const double _kStoryPanelH = 310;
-  static const double _kStoryIllustrationLeft = 36;
+  static const double _kStoryIllustrationLeft = 79; // 36 + 43 (양옆 43씩 축소)
   static const double _kStoryIllustrationTop = 15;
-  static const double _kStoryIllustrationW = 691;
+  static const double _kStoryIllustrationW = 605;
   static const double _kStoryIllustrationH = 280;
+  static const double _kStoryNavButtonSize = 42; // 28 × 1.5
+  static const double _kStoryNavIconSize = 24; // 16 × 1.5
 
   /// 분석 글래스 패널 (844×390 마당 기준 · 스토리와 별도 좌표).
   static const double _kAnalysisPanelLeft = 40;
@@ -1250,9 +1297,11 @@ class _HomePageState extends State<HomePage>
   static const double _kAnalysisPanelW = 766;
   static const double _kAnalysisPanelH = 310;
 
-  /// 추후 story png 삽입 시 경로 추가.
+  /// 스토리 일러스트 3장.
   static const List<String> _storyPageAssetPaths = <String>[
-    // 'assets/images/story/story_01.png',
+    'assets/images/story/story_01.png',
+    'assets/images/story/story_02.png',
+    'assets/images/story/story_03.png',
   ];
 
   /// 가방 아이템 설명창 (844×390 기준 593,84) — 가방 글래스 패널 내부 상대좌표.
@@ -1434,6 +1483,14 @@ class _HomePageState extends State<HomePage>
       parent: _gameHelpSwapController,
       curve: _kYardSidePanelSwapCurve,
     );
+    _gameSocialContributionSwapController = AnimationController(
+      vsync: this,
+      duration: _kYardSidePanelSwapDuration,
+    );
+    _gameSocialContributionSwapCurve = CurvedAnimation(
+      parent: _gameSocialContributionSwapController,
+      curve: _kYardSidePanelSwapCurve,
+    );
     _gameMenuSubOutsideDismissController = AnimationController(
       vsync: this,
       duration: _kYardSidePanelSwapDuration,
@@ -1489,13 +1546,21 @@ class _HomePageState extends State<HomePage>
     _startStartupFakeProgress();
     _bootstrap();
     _startAccountHealthCheckTimer();
+    if (!kIsWeb && Platform.isIOS) {
+      unawaited(_mealInterstitialController.preload());
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _mealInterstitialController.dispose();
     _startupLoadingTimer?.cancel();
     _accountHealthCheckTimer?.cancel();
+    for (final image in _adoptionIdleFirstFrameCache.values) {
+      image?.dispose();
+    }
+    _adoptionIdleFirstFrameCache.clear();
     _unsubscribeProfileDeletionWatch();
     _nicknameController.removeListener(_enforceProfileNicknameMaxLength);
     _profileSelectScrollController?.dispose();
@@ -1519,6 +1584,7 @@ class _HomePageState extends State<HomePage>
     _gameStorySwapController.dispose();
     _gameSettingsSwapController.dispose();
     _gameHelpSwapController.dispose();
+    _gameSocialContributionSwapController.dispose();
     _settingsScrollController.dispose();
     _settingsSupportDocScrollController.dispose();
     _gameMenuSubOutsideDismissController.dispose();
@@ -1541,6 +1607,7 @@ class _HomePageState extends State<HomePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appLifecycleState = state;
     if (state == AppLifecycleState.resumed) {
       unawaited(_checkAccountHealthOnResume());
       // foreground 복귀 시 월별 식단일지 캐시 키를 비워 다음 오픈/표시가
@@ -1580,6 +1647,21 @@ class _HomePageState extends State<HomePage>
         nonEmpty(p['gender']) &&
         nonEmpty(p['age_range']) &&
         nonEmpty(p['diet_goal']);
+  }
+
+  /// 프로필 완료 + 분양 펫 보유 시 첫 실행 스토리를 건너뛴다.
+  bool _needsIntroStoryOnboarding() {
+    return !(_isProfileComplete() && _activePet != null);
+  }
+
+  void _presentIntroStoryOverlay() {
+    _introStoryPageIndex = 0;
+    _showIntroStoryOverlay = true;
+  }
+
+  void _dismissIntroStoryOverlay() {
+    _showIntroStoryOverlay = false;
+    _introStoryPageIndex = 0;
   }
 
   /// 프로필 완료 → 선택 분양 → 분양 펫 이름 저장이 끝나기 전까지
@@ -1672,7 +1754,6 @@ class _HomePageState extends State<HomePage>
     _todayMealLogs = [];
     _todayMealVerificationAttempts = {};
     _pokedexEntries = [];
-    _pokedexPanelSelectedEntry = null;
     _diaryLogsByDate = {};
     _diaryCurrentWeightByDate = {};
     _diaryHasNoteTextByDate = {};
@@ -1777,7 +1858,6 @@ class _HomePageState extends State<HomePage>
       _todayMealLogs = [];
       _todayMealVerificationAttempts = {};
       _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
       _diaryLogsByDate = {};
       _diaryCurrentWeightByDate = {};
       _diaryHasNoteTextByDate = {};
@@ -1804,6 +1884,9 @@ class _HomePageState extends State<HomePage>
       _isPetNamingPanelClosing = false;
       _canShowActivePetDuringNaming = false;
 
+      _showIntroStoryOverlay = false;
+      _introStoryPageIndex = 0;
+
       _isPetInfoBannerOpen = false;
       _isMealPanelOpen = false;
       _isToyMenuOpen = false;
@@ -1826,6 +1909,8 @@ class _HomePageState extends State<HomePage>
       _settingsPanelSwapInProgress = false;
       _isHelpPanelOpen = false;
       _helpPanelSwapInProgress = false;
+      _isSocialContributionPanelOpen = false;
+      _socialContributionPanelSwapInProgress = false;
       _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
     });
@@ -2501,7 +2586,6 @@ class _HomePageState extends State<HomePage>
       // 부트스트랩 재조회 전에 이전 세션·탈퇴 직후 찌꺼기가 화면에 남지 않도록 캐시만 선비움.
       // (실 데이터는 아래 fetch 들로 다시 채움 — 깜빡임은 짧은 로딩 상태로 흡수)
       _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
       _residentPets = [];
       _randomTicketCount = 0;
     });
@@ -2937,7 +3021,6 @@ class _HomePageState extends State<HomePage>
         _firstMealPopupShownThisSession = false;
         _randomTicketCount = 0;
         _pokedexEntries = [];
-        _pokedexPanelSelectedEntry = null;
         _residentPets = [];
         _activePet = null;
         _todayMealLogs = [];
@@ -2977,6 +3060,8 @@ class _HomePageState extends State<HomePage>
         _isCustomerCenterPanelOpen = false;
         _isHelpPanelOpen = false;
         _helpPanelSwapInProgress = false;
+        _isSocialContributionPanelOpen = false;
+        _socialContributionPanelSwapInProgress = false;
         _isStoryPanelOpen = false;
         _storyPanelSwapInProgress = false;
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
@@ -3002,6 +3087,7 @@ class _HomePageState extends State<HomePage>
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
       _gameHelpSwapController.value = 0;
+      _gameSocialContributionSwapController.value = 0;
       _gameMenuSubOutsideDismissController.value = 0;
 
       await supabase.auth.signInAnonymously();
@@ -3489,6 +3575,8 @@ class _HomePageState extends State<HomePage>
     _storyPanelSwapInProgress = false;
     _isHelpPanelOpen = false;
     _helpPanelSwapInProgress = false;
+    _isSocialContributionPanelOpen = false;
+    _socialContributionPanelSwapInProgress = false;
     _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
 
     _petToySwapController.value = 0;
@@ -3501,6 +3589,7 @@ class _HomePageState extends State<HomePage>
     _gamePokedexSwapController.value = 0;
     _gameSettingsSwapController.value = 0;
     _gameHelpSwapController.value = 0;
+    _gameSocialContributionSwapController.value = 0;
     _gameStorySwapController.value = 0;
     _gameMenuSubOutsideDismissController.value = 0;
   }
@@ -3562,6 +3651,9 @@ class _HomePageState extends State<HomePage>
         _forceFreshGuestProfileSetupState();
         // 분양창이 열리기 전에 MVP 4종 마스터를 확정한다.
         await _refreshPetSpeciesAfterFreshGuestReset();
+        if (mounted) {
+          _safeSetState(_presentIntroStoryOverlay);
+        }
       }
 
       debugPrint(
@@ -3578,6 +3670,7 @@ class _HomePageState extends State<HomePage>
       // 어떤 오류가 나도 UI는 fresh guest 프로필 입력 상태로 유지한다.
       if (mounted) {
         _forceFreshGuestProfileSetupState();
+        _safeSetState(_presentIntroStoryOverlay);
       }
     } finally {
       _isResettingDeletedAccountSession = false;
@@ -3782,6 +3875,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _startBackgroundMusicIfEnabled() async {
+    if (_interstitialAudioSuspended) return;
     if (!_backgroundMusicEnabled) return;
     if (_bgmAssetUnavailable) return;
 
@@ -3806,6 +3900,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _playSoundEffect(String assetPath) async {
+    if (_interstitialAudioSuspended) return;
     if (!_soundEffectsEnabled) return;
     if (_sfxAssetUnavailable) return;
 
@@ -3819,6 +3914,43 @@ class _HomePageState extends State<HomePage>
     } catch (e) {
       _sfxAssetUnavailable = true;
       debugPrint('play sfx skipped/failed: $e');
+    }
+  }
+
+  /// 전면 광고 표시 직전: BGM 일시정지 + SFX 중지. 설정 boolean 은 바꾸지 않는다.
+  Future<void> _suspendAppAudioForInterstitial() async {
+    if (_interstitialAudioSuspended) return;
+    _interstitialAudioSuspended = true;
+    try {
+      await _sfxPlayer.stop();
+    } catch (e) {
+      debugPrint('interstitial:sfx_stop_failed');
+    }
+    try {
+      await _bgmPlayer.pause();
+    } catch (e) {
+      debugPrint('interstitial:bgm_pause_failed');
+    }
+  }
+
+  /// 광고 종료/실패 후 사용자 설정에 맞춰 오디오 복구 (idempotent).
+  Future<void> _restoreAppAudioAfterInterstitial() async {
+    if (!_interstitialAudioSuspended) return;
+    _interstitialAudioSuspended = false;
+    try {
+      await _sfxPlayer.stop();
+    } catch (_) {}
+    if (!_backgroundMusicEnabled || _bgmAssetUnavailable) return;
+    try {
+      await _initSoundIfNeeded();
+      final state = _bgmPlayer.state;
+      if (state == PlayerState.paused) {
+        await _bgmPlayer.resume();
+      } else if (state != PlayerState.playing) {
+        await _startBackgroundMusicIfEnabled();
+      }
+    } catch (e) {
+      debugPrint('interstitial:bgm_restore_failed');
     }
   }
 
@@ -5213,6 +5345,10 @@ class _HomePageState extends State<HomePage>
     }
 
     _activePet = data == null ? null : Map<String, dynamic>.from(data);
+    // DB migration 전 과거 stage(child/grown) 호환: 메모리상만 정규화.
+    if (_activePet != null) {
+      _activePet!['stage'] = _normalizePetStage(_activePet!['stage']);
+    }
     if (syncYard) {
       _scheduleSyncActivePetToYardGame();
     }
@@ -5250,10 +5386,11 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      _residentPets = (data as List)
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+      _residentPets = (data as List).whereType<Map>().map((e) {
+        final pet = Map<String, dynamic>.from(e);
+        pet['stage'] = _normalizePetStage(pet['stage']);
+        return pet;
+      }).toList();
     } catch (e) {
       debugPrint('fetch resident pets failed: $e');
       if (generation == _userDataGeneration &&
@@ -5527,7 +5664,6 @@ class _HomePageState extends State<HomePage>
     if (user == null) {
       debugPrint('pokedex fetch skipped: user is null');
       _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
       if (mounted) {
         _safeSetState(() {});
       }
@@ -5563,7 +5699,6 @@ class _HomePageState extends State<HomePage>
 
     if (entries.isEmpty) {
       _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
       if (mounted) {
         _safeSetState(() {});
       }
@@ -5676,29 +5811,15 @@ class _HomePageState extends State<HomePage>
       debugPrint('pokedex merged entries count: ${entries.length}');
       _pokedexEntries = entries;
       if (mounted) {
-        _invalidatePokedexPanelSelectedEntryIfStale();
         // 이전 캐시가 화면에 남지 않도록 목록 갱신을 반드시 반영한다.
         _safeSetState(() {});
       }
     } catch (e, st) {
       debugPrint('fetch pokedex merge/sort failed: $e\n$st');
       _pokedexEntries = [];
-      _pokedexPanelSelectedEntry = null;
       if (mounted) {
         _safeSetState(() {});
       }
-    }
-  }
-
-  /// [_fetchPokedexEntries] 이후 도감에 없어진 종이면 상세 선택만 해제.
-  void _invalidatePokedexPanelSelectedEntryIfStale() {
-    final sel = _pokedexPanelSelectedEntry;
-    if (sel == null) return;
-    final raw = sel['pet_species_id'];
-    final id = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
-    final invalid = id == null || _pokedexEntryForSpeciesId(id) == null;
-    if (invalid && mounted) {
-      _safeSetState(() => _pokedexPanelSelectedEntry = null);
     }
   }
 
@@ -5792,8 +5913,8 @@ class _HomePageState extends State<HomePage>
 
   /// cat_sco Flame 표시 여부.
   ///
-  /// 현재 baby sprite 만 있으므로 grown 단계에서도 임시로 baby 컴포넌트를 유지한다.
-  /// DB stage 값은 속이지 않는다. grown 전용 asset 추가 시 stage별 컴포넌트로 교체.
+  /// 현재 baby sprite 만 있으므로 young/teen 단계에서도 임시로 baby 컴포넌트를 유지한다.
+  /// DB stage 값은 속이지 않는다. stage별 asset 추가 시 [_flameStageAssetFolder] 기준으로 교체.
   /// adult 졸업 UI 는 기존 더미/resident 흐름을 유지한다.
   bool _shouldUseFlamePetForActivePet() {
     final pet = _activePet;
@@ -5805,9 +5926,109 @@ class _HomePageState extends State<HomePage>
     final isSco = code == 'cat_sco' || speciesId == 1;
     if (!isSco) return false;
 
-    final stage = pet['stage']?.toString();
-    // baby / grown: Flame baby sprite 임시 유지. adult 는 졸업 UI·더미 경로.
-    return stage == 'baby' || stage == 'grown';
+    final stage = _normalizePetStage(pet['stage']);
+    // baby / young / teen: Flame baby sprite 임시 유지. adult 는 졸업 UI·더미 경로.
+    return stage == 'baby' || stage == 'young' || stage == 'teen';
+  }
+
+  /// Flame sprite 폴더명. 내부 stage 와 asset 경로를 분리한다.
+  ///
+  /// 현재 cat_sco 는 `pets/cat_sco/baby` 폴더만 있으므로 non-adult 는 baby 를 사용한다.
+  /// (child/grown 폴더는 없음 — DB stage 를 폴더명으로 직접 조합하지 않는다.)
+  String _flameStageAssetFolder(String stage) {
+    switch (_normalizePetStage(stage)) {
+      case 'baby':
+      case 'young':
+      case 'teen':
+        return 'baby';
+      case 'adult':
+        return 'adult';
+      default:
+        return 'baby';
+    }
+  }
+
+  /// 정보창 단계 아이콘 파일명. 내부 stage 와 파일명을 분리한다.
+  ///
+  /// 실제 asset: `{species}/baby.png|young.png|teen.png`
+  /// (adult.png 없음 → adult 는 teen.png 재사용. 파일명 변경 없음.)
+  String _petInfoStageIconFileName(String stage) {
+    switch (_normalizePetStage(stage)) {
+      case 'baby':
+        return 'baby.png';
+      case 'young':
+        return 'young.png';
+      case 'teen':
+      case 'adult':
+        return 'teen.png';
+      default:
+        return 'baby.png';
+    }
+  }
+
+  String? _petInfoStageIconAssetPath(Map<String, dynamic> pet) {
+    final species = _speciesForPet(pet);
+    final code = _speciesInternalCode(species);
+    if (code.isEmpty) return null;
+    final file = _petInfoStageIconFileName(pet['stage']?.toString() ?? 'baby');
+    return 'assets/images/ui/icons/$code/$file';
+  }
+
+  /// 이름짓기 창 펫 아이콘. 분양 직후 아기 펫이므로 항상 baby.png.
+  String? _petNamingIconAssetPath() {
+    final pet = _activePet;
+    if (pet == null) return null;
+    final species = _speciesForPet(pet);
+    final code = _speciesInternalCode(species);
+    if (code.isEmpty) return null;
+    return 'assets/images/ui/icons/$code/baby.png';
+  }
+
+  /// 도감 등록(성숙기) 아이콘. 항상 teen.png.
+  String? _pokedexUnlockedIconAssetPath(Map<String, dynamic> species) {
+    final code = _speciesInternalCode(species);
+    if (code.isEmpty) return null;
+    return 'assets/images/ui/icons/$code/teen.png';
+  }
+
+  /// 분양창과 동일 48×48 라운드 프레임. PNG 는 cover 로 꽉 채운 뒤 radius 클리핑.
+  Widget _buildRoundedPetIconFrame({
+    required String? assetPath,
+    required Widget fallback,
+  }) {
+    return Container(
+      width: 48,
+      height: 48,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
+      ),
+      alignment: Alignment.center,
+      child: assetPath == null
+          ? fallback
+          : Image.asset(
+              assetPath,
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.none,
+              errorBuilder: (context, error, stackTrace) => fallback,
+            ),
+    );
+  }
+
+  /// 놀아주기 창 장난감 PNG. [BagItem.name] 안정 code 기준.
+  String? _toyMenuIconAssetPath(BagItem toy) {
+    switch (toy.name) {
+      case 'bone_doll':
+        return 'assets/images/ui/icons/toys/bone_doll.png';
+      case 'yarn_ball':
+        return 'assets/images/ui/icons/toys/yarn_ball.png';
+      default:
+        return null;
+    }
   }
 
   void _scheduleSyncActivePetToYardGame() {
@@ -5834,15 +6055,16 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final stage = pet['stage']?.toString();
+    final stage = _normalizePetStage(pet['stage']);
     final speciesId = _speciesIdFromPet(pet);
     final species = _speciesForPet(pet);
     final embeddedCode = species?['code']?.toString();
     final code = _speciesInternalCode(species);
     final shouldUseFlame = _shouldUseFlamePetForActivePet();
+    final flameFolder = _flameStageAssetFolder(stage);
 
     debugPrint(
-      'YardGame sync check: petId=${pet['id']}, speciesId=$speciesId, embeddedCode=$embeddedCode, code=$code, stage=$stage, shouldUseFlame=$shouldUseFlame, gen=$generation',
+      'YardGame sync check: petId=${pet['id']}, speciesId=$speciesId, embeddedCode=$embeddedCode, code=$code, stage=$stage, flameFolder=$flameFolder, shouldUseFlame=$shouldUseFlame, gen=$generation',
     );
 
     if (!shouldUseFlame) {
@@ -6167,9 +6389,11 @@ class _HomePageState extends State<HomePage>
   //
   // affection 값만을 기준으로 stage 를 결정한다:
   //   0 ~ 29    : baby    (유아기)
-  //   30 ~ 69   : child   (유년기)
-  //   70 ~ 109  : grown   (성장기)
+  //   30 ~ 69   : young   (유년기)
+  //   70 ~ 109  : teen    (성장기)
   //   110 이상  : adult   (성숙기)
+  //
+  // 순서: baby → young → teen → adult
   //
   // 사용 위치:
   //   - 놀아주기 / 쓰다듬기 성공 시 (_interactPet)
@@ -6182,15 +6406,36 @@ class _HomePageState extends State<HomePage>
   //   이미 adult 였거나 is_resident / graduated_at 이 이미 채워져 있으면 중복 실행하지 않는다.
   // --------------------------------------------------------------------------
 
+  /// DB migration 전 과거 stage 값(child/grown) → 신규(young/teen) 정규화.
+  /// 과거값 호환은 이 helper 한곳에서만 처리한다.
+  String _normalizePetStage(dynamic rawStage) {
+    switch (rawStage?.toString()) {
+      case 'child':
+        return 'young';
+      case 'grown':
+        return 'teen';
+      case 'baby':
+      case 'young':
+      case 'teen':
+      case 'adult':
+        return rawStage.toString();
+      default:
+        return 'baby';
+    }
+  }
+
   String _stageFromAffection(int affection) {
     if (affection >= 110) return 'adult';
-    if (affection >= 70) return 'grown';
-    if (affection >= 30) return 'child';
+    if (affection >= 70) return 'teen';
+    if (affection >= 30) return 'young';
     return 'baby';
   }
 
   String? _stageGrowthMessage(String? beforeStage, String afterStage) {
-    if (beforeStage == null || beforeStage == afterStage) return null;
+    if (beforeStage == null) return null;
+    final from = _normalizePetStage(beforeStage);
+    final to = _normalizePetStage(afterStage);
+    if (from == to) return null;
     final l10n = AppLocalizations.of(context);
     final petName = _activePetDisplayName(l10n);
     final isEn = _isEnglishLocale;
@@ -6199,27 +6444,24 @@ class _HomePageState extends State<HomePage>
         : _petNameWithSubjectParticle(petName);
     final petNameTopic = isEn ? petName : _petNameWithTopicParticle(petName);
 
-    // DB 매핑은 child(=유년기). 스펙의 young 과 동일하게 취급.
-    final from = beforeStage == 'young' ? 'child' : beforeStage;
-    final to = afterStage == 'young' ? 'child' : afterStage;
-
-    if (from == 'baby' && to == 'child') {
+    // baby → young / young → teen / teen → adult
+    if (from == 'baby' && to == 'young') {
       return l10n.interactionGrowthBabyToYoung(petName);
     }
-    if (from == 'child' && to == 'grown') {
-      return l10n.interactionGrowthYoungToGrown(petNameSubject);
+    if (from == 'young' && to == 'teen') {
+      return l10n.interactionGrowthYoungToTeen(petNameSubject);
     }
-    if (from == 'grown' && to == 'adult') {
-      return l10n.interactionGrowthGrownToAdult(petNameTopic);
+    if (from == 'teen' && to == 'adult') {
+      return l10n.interactionGrowthTeenToAdult(petNameTopic);
     }
 
     // 단계 점프 시 최종 단계 기준 메시지.
-    if (to == 'child') return l10n.interactionGrowthBabyToYoung(petName);
-    if (to == 'grown') {
-      return l10n.interactionGrowthYoungToGrown(petNameSubject);
+    if (to == 'young') return l10n.interactionGrowthBabyToYoung(petName);
+    if (to == 'teen') {
+      return l10n.interactionGrowthYoungToTeen(petNameSubject);
     }
     if (to == 'adult') {
-      return l10n.interactionGrowthGrownToAdult(petNameTopic);
+      return l10n.interactionGrowthTeenToAdult(petNameTopic);
     }
     return null;
   }
@@ -6230,11 +6472,15 @@ class _HomePageState extends State<HomePage>
   /// - 최초 adult 도달 시 [_handleAdultGraduationIfNeeded] 로 육성 완료 처리.
   Future<void> _syncStageAfterAffectionChange({
     required String? beforeStage,
+    bool deferMaturityNotice = false,
   }) async {
     if (_activePet == null) return;
     final affection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
-    final dbStage = _activePet!['stage']?.toString() ?? 'baby';
+    final dbStage = _normalizePetStage(_activePet!['stage']);
     final targetStage = _stageFromAffection(affection);
+    final normalizedBefore = beforeStage == null
+        ? null
+        : _normalizePetStage(beforeStage);
 
     if (dbStage != targetStage) {
       try {
@@ -6250,13 +6496,14 @@ class _HomePageState extends State<HomePage>
     }
 
     final petId = _activePet?['id']?.toString() ?? '';
-    final growthEventKey = (beforeStage != null && beforeStage != targetStage)
-        ? 'growth:$petId:$beforeStage:$targetStage'
+    final growthEventKey =
+        (normalizedBefore != null && normalizedBefore != targetStage)
+        ? 'growth:$petId:$normalizedBefore:$targetStage'
         : null;
-    final growthMessage = _stageGrowthMessage(beforeStage, targetStage);
+    final growthMessage = _stageGrowthMessage(normalizedBefore, targetStage);
 
     // adult 도달은 성숙기 축하 modal 종료 후 교감 메시지로 안내한다.
-    // 여기서는 child/grown 전환만 즉시(또는 queue) 표시.
+    // 여기서는 young/teen 전환만 즉시(또는 queue) 표시.
     if (targetStage != 'adult' && growthMessage != null) {
       await _showInteractionStatusMessage(
         growthMessage,
@@ -6266,9 +6513,9 @@ class _HomePageState extends State<HomePage>
 
     await _handleAdultGraduationIfNeeded(beforeStage: beforeStage);
 
-    // 순서: 식단 메시지 → 성장 메시지 → 사용자 닫기 → 성숭기 완료 모달.
+    // 순서: 식단 메시지 → 성장 메시지 → 사용자 닫기 → (광고) → 성숙기 완료 모달.
     if (targetStage == 'adult' && growthMessage != null) {
-      if (_pendingMaturityNoticeBody != null) {
+      if (_pendingMaturityNoticeBody != null && !deferMaturityNotice) {
         await _showInteractionStatusMessage(
           growthMessage,
           eventKey: growthEventKey,
@@ -6280,7 +6527,9 @@ class _HomePageState extends State<HomePage>
           eventKey: growthEventKey,
         );
       }
-    } else if (targetStage == 'adult' && _pendingMaturityNoticeBody != null) {
+    } else if (targetStage == 'adult' &&
+        _pendingMaturityNoticeBody != null &&
+        !deferMaturityNotice) {
       // 성장 메시지가 없는 경우(예: 이미 표시된 이벤트) 바로 모달을 띄운다.
       _presentPendingMaturityCompleteNotice();
     }
@@ -6302,6 +6551,253 @@ class _HomePageState extends State<HomePage>
     _showMaturityCompleteAlert();
   }
 
+  // --------------------------------------------------------------------------
+  // 식단 인증 성공 → 전면 광고 (iOS)
+  // --------------------------------------------------------------------------
+
+  bool get _isAppLifecycleResumed =>
+      _appLifecycleState == AppLifecycleState.resumed;
+
+  bool _hasAccountUiBlockingMealInterstitial() {
+    return _isAccountLinkInviteNoticeOpen ||
+        _isAccountLinkPanelOpen ||
+        _isAccountLinkSuccessNoticeOpen ||
+        _isLinkedAccountAddressNoticeOpen ||
+        _isRemoteAccountLinkedLogoutNoticeOpen ||
+        _isWithdrawConfirmOpen ||
+        _isWithdrawFinalConfirmOpen ||
+        _isWithdrawErrorNoticeOpen ||
+        _isNameInterlockNoticeOpen ||
+        _isProfileSelectMissingNoticeOpen;
+  }
+
+  bool _hasUiBlockingMealInterstitial() {
+    return _isInteractionStatusOpen ||
+        _interactionStatusTransitionInProgress ||
+        _interactionStatusQueue.isNotEmpty ||
+        _hasBlockingYardModalOpen() ||
+        _hasAccountUiBlockingMealInterstitial() ||
+        _isUploadingMeal ||
+        _mealInterstitialController.isShowInFlight;
+  }
+
+  /// 해당 식단 인증으로 쌓인 교감 메시지 중 마지막 dismiss 에 광고를 연결한다.
+  void _bindMealInterstitialToLastInteractionStatus({
+    required String slot,
+    required String mealEventKey,
+    required Future<void> Function() afterAd,
+  }) {
+    void runAd() {
+      unawaited(
+        _showMealInterstitialIfEligible(
+          slot: slot,
+          mealEventKey: mealEventKey,
+          afterAd: afterAd,
+        ),
+      );
+    }
+
+    VoidCallback compose(VoidCallback? existing) {
+      return () {
+        existing?.call();
+        runAd();
+      };
+    }
+
+    if (_interactionStatusQueue.isNotEmpty) {
+      final last = _interactionStatusQueue.removeLast();
+      _interactionStatusQueue.add(
+        _InteractionStatusEntry(
+          last.message,
+          onDismissed: compose(last.onDismissed),
+        ),
+      );
+      return;
+    }
+
+    if (_isInteractionStatusOpen || _interactionStatusTransitionInProgress) {
+      _interactionStatusCurrentOnDismissed = compose(
+        _interactionStatusCurrentOnDismissed,
+      );
+      return;
+    }
+
+    // 교감 메시지가 없으면(이론상 드묾) 즉시 광고 후보 판정.
+    runAd();
+  }
+
+  Future<void> _rollAdDailyPrefsIfNeeded(SharedPreferences prefs) async {
+    final today = _todayDateStr();
+    final recorded = prefs.getString(_kAdRecordKstDatePrefKey);
+    if (recorded == today) return;
+    await prefs.setString(_kAdRecordKstDatePrefKey, today);
+    await prefs.setInt(_kAdDailyCountPrefKey, 0);
+    await prefs.setStringList(_kAdDailySlotsPrefKey, <String>[]);
+  }
+
+  Future<void> _markFirstMealSuccessDone(SharedPreferences prefs) async {
+    await prefs.setBool(_kAdFirstMealSuccessDonePrefKey, true);
+  }
+
+  Future<void> _recordInterstitialImpression({
+    required SharedPreferences prefs,
+    required String slot,
+  }) async {
+    await _rollAdDailyPrefsIfNeeded(prefs);
+    final count = prefs.getInt(_kAdDailyCountPrefKey) ?? 0;
+    final slots = List<String>.from(
+      prefs.getStringList(_kAdDailySlotsPrefKey) ?? const <String>[],
+    );
+    if (!slots.contains(slot)) {
+      slots.add(slot);
+    }
+    await prefs.setInt(_kAdDailyCountPrefKey, count + 1);
+    await prefs.setStringList(_kAdDailySlotsPrefKey, slots);
+    await prefs.setInt(
+      _kAdLastShownAtMsPrefKey,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    await prefs.setString(_kAdRecordKstDatePrefKey, _todayDateStr());
+  }
+
+  /// 정책·UI·생명주기 조건을 보고 전면 광고를 1회 시도한다.
+  /// [afterAd] 는 성공/생략/실패 모든 경로에서 정확히 1회 실행한다.
+  Future<void> _showMealInterstitialIfEligible({
+    required String slot,
+    required String mealEventKey,
+    required Future<void> Function() afterAd,
+  }) async {
+    var afterAdDone = false;
+    Future<void> runAfterAdOnce() async {
+      if (afterAdDone) return;
+      afterAdDone = true;
+      try {
+        await afterAd();
+      } catch (e) {
+        debugPrint('interstitial:after_ad_failed');
+      }
+    }
+
+    if (!mounted) {
+      await runAfterAdOnce();
+      return;
+    }
+    if (kIsWeb || !Platform.isIOS) {
+      await runAfterAdOnce();
+      return;
+    }
+
+    if (_mealInterstitialAttemptedEventKeys.contains(mealEventKey)) {
+      debugPrint('interstitial:skip:event_guard');
+      await runAfterAdOnce();
+      return;
+    }
+    // show 요청 전 in-flight / event guard
+    _mealInterstitialAttemptedEventKeys.add(mealEventKey);
+
+    if (_mealInterstitialController.isShowInFlight) {
+      debugPrint('interstitial:skip:show_in_flight');
+      await runAfterAdOnce();
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await _rollAdDailyPrefsIfNeeded(prefs);
+
+      final firstDone = prefs.getBool(_kAdFirstMealSuccessDonePrefKey) ?? false;
+      if (!firstDone) {
+        await _markFirstMealSuccessDone(prefs);
+        debugPrint('interstitial:skip:first_meal');
+        await runAfterAdOnce();
+        return;
+      }
+
+      final dailyCount = prefs.getInt(_kAdDailyCountPrefKey) ?? 0;
+      if (dailyCount >= _kAdDailyMaxCount) {
+        debugPrint('interstitial:skip:daily_limit');
+        await runAfterAdOnce();
+        return;
+      }
+
+      final slots =
+          prefs.getStringList(_kAdDailySlotsPrefKey) ?? const <String>[];
+      if (slots.contains(slot)) {
+        debugPrint('interstitial:skip:slot_already_shown');
+        await runAfterAdOnce();
+        return;
+      }
+
+      final lastMs = prefs.getInt(_kAdLastShownAtMsPrefKey);
+      if (lastMs != null) {
+        final elapsed = DateTime.now().millisecondsSinceEpoch - lastMs;
+        if (elapsed < _kAdMinInterval.inMilliseconds) {
+          debugPrint('interstitial:skip:cooldown');
+          await runAfterAdOnce();
+          return;
+        }
+      }
+
+      if (!_isAppLifecycleResumed) {
+        debugPrint('interstitial:skip:app_not_resumed');
+        await runAfterAdOnce();
+        return;
+      }
+
+      if (_hasUiBlockingMealInterstitial()) {
+        debugPrint('interstitial:skip:blocking_modal');
+        await runAfterAdOnce();
+        return;
+      }
+
+      if (!_mealInterstitialController.isReady) {
+        debugPrint('interstitial:skip:not_ready');
+        await runAfterAdOnce();
+        unawaited(_mealInterstitialController.preload());
+        return;
+      }
+
+      await _suspendAppAudioForInterstitial();
+
+      if (!mounted ||
+          !_isAppLifecycleResumed ||
+          _hasUiBlockingMealInterstitial()) {
+        if (!_isAppLifecycleResumed) {
+          debugPrint('interstitial:skip:app_not_resumed');
+        } else {
+          debugPrint('interstitial:skip:blocking_modal');
+        }
+        await _restoreAppAudioAfterInterstitial();
+        await runAfterAdOnce();
+        return;
+      }
+
+      final showed = await _mealInterstitialController.show(
+        onShowed: () {
+          unawaited(_recordInterstitialImpression(prefs: prefs, slot: slot));
+        },
+        onFinished: () {
+          unawaited(() async {
+            await _restoreAppAudioAfterInterstitial();
+            await runAfterAdOnce();
+          }());
+        },
+      );
+
+      if (!showed) {
+        debugPrint('interstitial:skip:not_ready');
+        await _restoreAppAudioAfterInterstitial();
+        await runAfterAdOnce();
+        unawaited(_mealInterstitialController.preload());
+      }
+    } catch (e) {
+      debugPrint('interstitial:show_failed');
+      await _restoreAppAudioAfterInterstitial();
+      await runAfterAdOnce();
+      unawaited(_mealInterstitialController.preload());
+    }
+  }
+
   /// 최초 성숙기(adult) 도달 처리.
   ///
   /// 실제 졸업(도감 등록 + 랜덤 분양권 지급 + user_pets 상태 갱신)은
@@ -6315,9 +6811,9 @@ class _HomePageState extends State<HomePage>
     required String? beforeStage,
   }) async {
     if (_activePet == null) return;
-    final currentStage = _activePet!['stage']?.toString() ?? 'baby';
+    final currentStage = _normalizePetStage(_activePet!['stage']);
     if (currentStage != 'adult') return;
-    if (beforeStage == 'adult') return;
+    if (_normalizePetStage(beforeStage) == 'adult') return;
 
     final alreadyResident = _activePet!['is_resident'] == true;
     final alreadyGraduated = _activePet!['graduated_at'] != null;
@@ -6378,7 +6874,7 @@ class _HomePageState extends State<HomePage>
 
   bool _isCurrentPetMature() {
     if (_activePet == null) return false;
-    final stage = _activePet!['stage']?.toString() ?? 'baby';
+    final stage = _normalizePetStage(_activePet!['stage']);
     if (stage == 'adult') return true;
     final affection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
     return affection >= 110;
@@ -6535,7 +7031,7 @@ class _HomePageState extends State<HomePage>
     try {
       final petId = _activePet!['id'];
       final currentAffection = (_activePet!['affection'] as num?)?.toInt() ?? 0;
-      final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
+      final beforeStage = _normalizePetStage(_activePet!['stage']);
 
       final affectionGain = 1;
       final nextAffection = currentAffection + affectionGain;
@@ -6731,6 +7227,20 @@ class _HomePageState extends State<HomePage>
   // 식단일지/식단 인증과 동일하게 KST(UTC+9) 기준 "오늘" 날짜.
   DateTime _todayKstDate() {
     return DateTime.now().toUtc().add(const Duration(hours: 9));
+  }
+
+  /// 릴리즈에서만 아점(06~16시)·저녁(17~23시) 시간대 제한. 디버그/프로파일은 항상 허용.
+  bool _isMealSlotAllowedNow(String slot) {
+    if (!kReleaseMode) return true;
+    final hour = _todayKstDate().hour;
+    switch (slot) {
+      case 'brunch':
+        return hour >= 6 && hour <= 16;
+      case 'dinner':
+        return hour >= 17 && hour <= 23;
+      default:
+        return false;
+    }
   }
 
   // 오늘이 속한 달(1일 기준)을 2026-01 ~ 2035-12 범위로 보정.
@@ -7007,11 +7517,12 @@ class _HomePageState extends State<HomePage>
         _bagPanelDetailItem = null;
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
         _isHelpPanelOpen = false;
         _helpPanelSwapInProgress = false;
+        _isSocialContributionPanelOpen = false;
+        _socialContributionPanelSwapInProgress = false;
 
         _clearProfileFormState();
         _isProfileSetupPanelVisible = true;
@@ -7026,6 +7537,7 @@ class _HomePageState extends State<HomePage>
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
       _gameHelpSwapController.value = 0;
+      _gameSocialContributionSwapController.value = 0;
       await _waitForUiSettle();
       if (!mounted) return;
       await _bootstrap();
@@ -7203,11 +7715,12 @@ class _HomePageState extends State<HomePage>
         _bagPanelDetailItem = null;
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
         _isSettingsPanelOpen = false;
         _settingsPanelSwapInProgress = false;
         _isHelpPanelOpen = false;
         _helpPanelSwapInProgress = false;
+        _isSocialContributionPanelOpen = false;
+        _socialContributionPanelSwapInProgress = false;
         _gameMenuSubOutsideDismissKind = _GameMenuSubOutsideDismissKind.none;
 
         _selectedSpeciesId = null;
@@ -7225,6 +7738,7 @@ class _HomePageState extends State<HomePage>
       _gamePokedexSwapController.value = 0;
       _gameSettingsSwapController.value = 0;
       _gameHelpSwapController.value = 0;
+      _gameSocialContributionSwapController.value = 0;
       _gameMenuSubOutsideDismissController.value = 0;
 
       await _resetSettingsToDefaultsForTesting();
@@ -7264,7 +7778,7 @@ class _HomePageState extends State<HomePage>
     _safeSetState(() => _isDebugStageMutationInFlight = true);
     final petId = _activePet!['id'];
     final current = (_activePet!['affection'] as num?)?.toInt() ?? 0;
-    final beforeStage = _activePet!['stage']?.toString() ?? 'baby';
+    final beforeStage = _normalizePetStage(_activePet!['stage']);
     final next = (current + delta) < 0 ? 0 : (current + delta);
     final nextStage = _stageFromAffection(next);
 
@@ -7292,7 +7806,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _debugSetJustBeforeAdult() async {
-    // 성숙기 직전 상태로 세팅: affection=109, stage=grown
+    // 성숙기 직전 상태로 세팅: affection=109, stage=teen
     //
     // 이전에 이미 졸업 처리됐던 펫이라면 is_resident/graduated_at 이 남아 있어
     // _handleAdultGraduationIfNeeded 의 중복 방지 가드에 걸려
@@ -7311,7 +7825,7 @@ class _HomePageState extends State<HomePage>
           .from('user_pets')
           .update({
             'affection': 109,
-            'stage': 'grown',
+            'stage': 'teen',
             'is_resident': false,
             'graduated_at': null,
           })
@@ -7396,6 +7910,7 @@ class _HomePageState extends State<HomePage>
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
@@ -7421,7 +7936,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
     _safeSetState(() {
@@ -7460,6 +7974,7 @@ class _HomePageState extends State<HomePage>
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
@@ -7497,7 +8012,6 @@ class _HomePageState extends State<HomePage>
     _gamePokedexSwapController.stop();
     _gamePokedexSwapController.value = 0.0;
     _safeSetState(() {
-      _pokedexPanelSelectedEntry = null;
       _pokedexPanelSwapInProgress = true;
       _isPokedexPanelOpen = true;
     });
@@ -7514,7 +8028,6 @@ class _HomePageState extends State<HomePage>
     _gamePokedexSwapController.value = 1.0;
     _safeSetState(() {
       _pokedexPanelSwapInProgress = true;
-      _pokedexPanelSelectedEntry = null;
     });
     await _gamePokedexSwapController.reverse(from: 1.0);
     if (!mounted) return;
@@ -7549,6 +8062,7 @@ class _HomePageState extends State<HomePage>
     if (_gameAnalysisSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
@@ -7574,7 +8088,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
     _dismissFocus();
@@ -7798,6 +8311,7 @@ class _HomePageState extends State<HomePage>
     if (_gameStorySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
@@ -7823,7 +8337,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
     _dismissFocus();
@@ -7869,10 +8382,25 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  Future<void> _openHelpPanelFromGameMenu() async {
-    if (_helpPanelSwapInProgress) return;
-    if (_gameHelpSwapController.isAnimating) return;
+  void _instantResetSocialContributionPanelIfOpen() {
+    _gameSocialContributionSwapController.stop();
+    _gameSocialContributionSwapController.value = 0.0;
+    if (!_isSocialContributionPanelOpen &&
+        !_socialContributionPanelSwapInProgress) {
+      return;
+    }
+    _safeSetState(() {
+      _isSocialContributionPanelOpen = false;
+      _socialContributionPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _openSocialContributionPanelFromGameMenu() async {
+    if (_socialContributionPanelSwapInProgress) return;
+    if (_gameSocialContributionSwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
+    _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     _gameProfileSwapController.stop();
@@ -7907,7 +8435,155 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
+      });
+    }
+    _dismissFocus();
+    await _closeProfileSelectOverlay(notify: false, animated: false);
+    await _waitForUiSettle();
+    if (!mounted) return;
+    _gameSocialContributionSwapController.stop();
+    _gameSocialContributionSwapController.value = 0.0;
+    _safeSetState(() {
+      _socialContributionPanelSwapInProgress = true;
+      _isSocialContributionPanelOpen = true;
+    });
+    await _gameSocialContributionSwapController.forward(from: 0.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _socialContributionPanelSwapInProgress = false;
+    });
+  }
+
+  Future<void> _closeSocialContributionPanelToGameMenu() async {
+    if (_socialContributionPanelSwapInProgress) return;
+    _dismissFocus();
+    _gameSocialContributionSwapController.value = 1.0;
+    _safeSetState(() {
+      _socialContributionPanelSwapInProgress = true;
+    });
+    await _gameSocialContributionSwapController.reverse(from: 1.0);
+    if (!mounted) return;
+    _safeSetState(() {
+      _socialContributionPanelSwapInProgress = false;
+      _isSocialContributionPanelOpen = false;
+    });
+  }
+
+  Widget _buildSocialContributionGameMenuGlassPanel() {
+    final l10n = AppLocalizations.of(context);
+
+    return _buildGameMenuSubPanelShell(
+      title: l10n.menuLabelSocialContribution,
+      onBack: () => unawaited(_closeSocialContributionPanelToGameMenu()),
+      bodyLeft: 8,
+      bodyRight: 8,
+      bodyBottom: 8,
+      bodyPadding: EdgeInsets.zero,
+      body: Column(
+        children: [
+          const Spacer(),
+          Transform.translate(
+            offset: const Offset(0, -16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: ColoredBox(
+                    color: const Color(0xFFC9E9DD),
+                    child: SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: Image.asset(
+                        'assets/images/ui/icons/logo.png',
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(
+                              Icons.volunteer_activism_outlined,
+                              size: 28,
+                              color: Color(0xFF5C5C5C),
+                            ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  l10n.socialContributionMainMessage,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.visible,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF000000),
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  l10n.socialContributionWebsiteHint,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF4A4A4A),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openHelpPanelFromGameMenu() async {
+    if (_helpPanelSwapInProgress) return;
+    if (_gameHelpSwapController.isAnimating) return;
+    _instantResetSettingsPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
+    _instantResetStoryPanelIfOpen();
+    _instantResetAnalysisPanelIfOpen();
+    _gameProfileSwapController.stop();
+    _gameProfileSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isProfilePanelOpen = false;
+        _profilePanelSwapInProgress = false;
+        _profileOpenedFromGameMenu = false;
+      });
+    }
+    _gameDietDiarySwapController.stop();
+    _gameDietDiarySwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isDietDiaryPanelOpen = false;
+        _dietDiaryPanelSwapInProgress = false;
+      });
+    }
+    _gameBagSwapController.stop();
+    _gameBagSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isBagPanelOpen = false;
+        _bagPanelSwapInProgress = false;
+        _bagPanelDetailItem = null;
+      });
+    }
+    _gamePokedexSwapController.stop();
+    _gamePokedexSwapController.value = 0.0;
+    if (mounted) {
+      _safeSetState(() {
+        _isPokedexPanelOpen = false;
+        _pokedexPanelSwapInProgress = false;
       });
     }
     _dismissFocus();
@@ -8005,14 +8681,42 @@ class _HomePageState extends State<HomePage>
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: SizedBox(
-          width: 28,
-          height: 28,
+          width: _kStoryNavButtonSize,
+          height: _kStoryNavButtonSize,
           child: Icon(
             icon,
-            size: 16,
-            color: onTap == null
-                ? const Color(0xFF000000).withValues(alpha: 0.25)
-                : const Color(0xFF000000),
+            size: _kStoryNavIconSize,
+            color: const Color(0xFF000000),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 첫 실행 스토리용: InkWell splash 느낌의 음영을 상시 표시.
+  Widget _buildIntroStoryPageNavButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(_kStoryNavButtonSize / 2),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        child: Container(
+          width: _kStoryNavButtonSize,
+          height: _kStoryNavButtonSize,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.20),
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            icon,
+            size: _kStoryNavIconSize,
+            color: const Color(0xFF000000),
           ),
         ),
       ),
@@ -8024,8 +8728,17 @@ class _HomePageState extends State<HomePage>
     final canPage = paths.length > 1;
     final canPrev = canPage && _storyPageIndex > 0;
     final canNext = canPage && _storyPageIndex < paths.length - 1;
-    const navButtonTop =
-        _kStoryIllustrationTop + (_kStoryIllustrationH - 28) / 2;
+    final navButtonTop =
+        _kStoryIllustrationTop +
+        (_kStoryIllustrationH - _kStoryNavButtonSize) / 2;
+    final leftGap = _kStoryIllustrationLeft;
+    final rightGap =
+        _kStoryPanelW - (_kStoryIllustrationLeft + _kStoryIllustrationW);
+    final leftNavLeft = (leftGap - _kStoryNavButtonSize) / 2;
+    final rightNavLeft =
+        _kStoryIllustrationLeft +
+        _kStoryIllustrationW +
+        (rightGap - _kStoryNavButtonSize) / 2;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -8039,16 +8752,16 @@ class _HomePageState extends State<HomePage>
             Positioned(
               top: 8,
               right: 8,
-              width: 24,
-              height: 24,
+              width: 36,
+              height: 36,
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
                   onTap: () => unawaited(_closeStoryPanelToGameMenu()),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(18),
                   child: const Icon(
                     Icons.close_rounded,
-                    size: 18,
+                    size: 21,
                     color: Color(0xFF4A4A4A),
                   ),
                 ),
@@ -8059,22 +8772,24 @@ class _HomePageState extends State<HomePage>
               top: _kStoryIllustrationTop,
               child: _buildStoryIllustrationArea(),
             ),
-            Positioned(
-              left: 8,
-              top: navButtonTop,
-              child: _buildStoryPageNavButton(
-                icon: Icons.chevron_left,
-                onTap: canPrev ? _goStoryPrevPage : null,
+            if (canPrev)
+              Positioned(
+                left: leftNavLeft,
+                top: navButtonTop,
+                child: _buildStoryPageNavButton(
+                  icon: Icons.chevron_left,
+                  onTap: _goStoryPrevPage,
+                ),
               ),
-            ),
-            Positioned(
-              left: _kStoryIllustrationLeft + _kStoryIllustrationW + 8,
-              top: navButtonTop,
-              child: _buildStoryPageNavButton(
-                icon: Icons.chevron_right,
-                onTap: canNext ? _goStoryNextPage : null,
+            if (canNext)
+              Positioned(
+                left: rightNavLeft,
+                top: navButtonTop,
+                child: _buildStoryPageNavButton(
+                  icon: Icons.chevron_right,
+                  onTap: _goStoryNextPage,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -8424,13 +9139,7 @@ class _HomePageState extends State<HomePage>
 
     return _buildGameMenuSubPanelShell(
       title: l10n.pokedexPanelTitle,
-      onBack: () {
-        if (_pokedexPanelSelectedEntry != null) {
-          _safeSetState(() => _pokedexPanelSelectedEntry = null);
-        } else {
-          unawaited(_closePokedexPanelToGameMenu());
-        }
-      },
+      onBack: () => unawaited(_closePokedexPanelToGameMenu()),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         child: Column(
@@ -8444,93 +9153,6 @@ class _HomePageState extends State<HomePage>
             const SizedBox(height: 8),
             _buildPokedexGameMenuMvpSpeciesRow(cats, 'cat'),
           ],
-        ),
-      ),
-    );
-  }
-
-  /// 도감 성숙기 완료 펫 상세 (176×222 · 가방 아이템 설명창과 동일 글래스 셸).
-  Widget _buildPokedexMaturePetDetailGlassPanel(Map<String, dynamic> entry) {
-    final family = _pokedexFamilyOf(entry);
-    final speciesName = _pokedexSpeciesNameOf(entry);
-    final nicknameLine = _pokedexNicknameOf(entry);
-    final iconData = family == 'cat'
-        ? Icons.pets
-        : family == 'dog'
-        ? Icons.cruelty_free_outlined
-        : Icons.eco_outlined;
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {},
-      child: _buildVegePetGlassPanel(
-        width: _kBagItemDetailW,
-        height: _kBagItemDetailH,
-        shadowBlurRadius: 10,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: LayoutBuilder(
-            builder: (context, c) {
-              return SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: c.maxHeight),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.78),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(
-                              0xFFE5E5E5,
-                            ).withValues(alpha: 0.75),
-                            width: 0.9,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          iconData,
-                          size: 22,
-                          color: const Color(0xFF5C5C5C),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        speciesName,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF000000),
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        nicknameLine,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF4A4A4A),
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
         ),
       ),
     );
@@ -8624,39 +9246,50 @@ class _HomePageState extends State<HomePage>
         : familyNorm == 'dog'
         ? Icons.cruelty_free_outlined
         : Icons.eco_outlined;
+    final teenPath = unlocked ? _pokedexUnlockedIconAssetPath(species) : null;
+    final fallbackIcon = Icon(
+      iconData,
+      size: 28,
+      color: const Color(0xFF3A3A3A),
+    );
+    final petName = entry == null ? null : _pokedexNicknameOf(entry);
+
+    final Widget iconVisual;
+    if (unlocked) {
+      // teen.png 를 프레임에 cover + radius 클리핑
+      iconVisual = _buildRoundedPetIconFrame(
+        assetPath: teenPath,
+        fallback: fallbackIcon,
+      );
+    } else {
+      iconVisual = Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8E8E8).withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+            width: 0.9,
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '?',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            color: Colors.grey.withValues(alpha: 0.52),
+          ),
+        ),
+      );
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _buildVegePetDummyIconInkWell(
-          onTap: unlocked
-              ? () => _safeSetState(() => _pokedexPanelSelectedEntry = entry)
-              : null,
-          child: Container(
-            decoration: BoxDecoration(
-              color: unlocked
-                  ? Colors.white.withValues(alpha: 0.78)
-                  : const Color(0xFFE8E8E8).withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
-                width: 0.9,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: unlocked
-                ? Icon(iconData, size: 22, color: const Color(0xFF5C5C5C))
-                : Text(
-                    '?',
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.grey.withValues(alpha: 0.52),
-                    ),
-                  ),
-          ),
-        ),
+        iconVisual,
         const SizedBox(height: 4),
         SizedBox(
           width: 72,
@@ -8675,6 +9308,24 @@ class _HomePageState extends State<HomePage>
             ),
           ),
         ),
+        if (petName != null) ...[
+          const SizedBox(height: 2),
+          SizedBox(
+            width: 72,
+            child: Text(
+              petName,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4A4A4A),
+                height: 1.15,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -9260,7 +9911,7 @@ class _HomePageState extends State<HomePage>
     final currentPet = _activePet;
     final isCurrentGraduated =
         currentPet != null &&
-        currentPet['stage']?.toString() == 'adult' &&
+        _normalizePetStage(currentPet['stage']) == 'adult' &&
         currentPet['is_resident'] == true &&
         currentPet['graduated_at'] != null;
     if (currentPet != null && !isCurrentGraduated) {
@@ -10712,7 +11363,6 @@ class _HomePageState extends State<HomePage>
         if (_isNamingDialogOpen || _isPetNamingPanelClosing)
           _buildInYardPetNamingPanel(),
         _buildBagItemDetailGlobalOverlay(),
-        _buildPokedexMaturePetDetailGlobalOverlay(),
         _buildAccountLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
         _buildInteractionStatusMessageOverlay(),
@@ -10732,6 +11382,7 @@ class _HomePageState extends State<HomePage>
         _buildCommunicationErrorNoticeGlobalOverlay(),
         _buildPokedexCompleteTicketNoticeGlobalOverlay(),
         _buildRemoteAccountLinkedLogoutNoticeGlobalOverlay(),
+        if (_showIntroStoryOverlay) _buildIntroStoryOverlay(),
         if (_showStartupLoadingOverlay) _buildStartupLoadingOverlay(),
         _buildBootstrapErrorNoticeGlobalOverlay(),
       ],
@@ -10744,6 +11395,8 @@ class _HomePageState extends State<HomePage>
     _startupLoadingOpacity = 1.0;
     _showStartupLoadingOverlay = true;
     _startupLoadingCompleting = false;
+    _showIntroStoryOverlay = false;
+    _introStoryPageIndex = 0;
 
     _startupLoadingTimer = Timer.periodic(const Duration(milliseconds: 70), (
       _,
@@ -10790,9 +11443,25 @@ class _HomePageState extends State<HomePage>
 
     _startupLoadingTimer?.cancel();
 
-    setState(() {
-      _startupLoadingProgress = 1.0;
-    });
+    final showIntro = _needsIntroStoryOnboarding();
+    if (showIntro) {
+      await _precacheIntroStoryImages();
+      if (!mounted) return;
+      // 로딩이 아직 불투명한 상태에서 스토리를 먼저 올려 프로필 깜빡임을 막는다.
+      setState(() {
+        _startupLoadingProgress = 1.0;
+        _presentIntroStoryOverlay();
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    } else {
+      setState(() {
+        _startupLoadingProgress = 1.0;
+        _dismissIntroStoryOverlay();
+      });
+    }
 
     await Future.delayed(const Duration(milliseconds: 260));
     if (!mounted) return;
@@ -10807,6 +11476,21 @@ class _HomePageState extends State<HomePage>
     setState(() {
       _showStartupLoadingOverlay = false;
     });
+  }
+
+  Future<void> _precacheIntroStoryImages() async {
+    if (!mounted) return;
+    for (final path in _storyPageAssetPaths) {
+      try {
+        await precacheImage(
+          AssetImage(path),
+          context,
+        ).timeout(const Duration(seconds: 8), onTimeout: () {});
+      } catch (e) {
+        debugPrint('intro story precache skipped');
+      }
+      if (!mounted) return;
+    }
   }
 
   Future<void> _hideStartupLoadingOverlayOnError() async {
@@ -10890,6 +11574,134 @@ class _HomePageState extends State<HomePage>
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntroStoryOverlay() {
+    final l10n = AppLocalizations.of(context);
+    final paths = _storyPageAssetPaths;
+    final pageCount = paths.length;
+    if (pageCount == 0) return const SizedBox.shrink();
+
+    final pageIndex = _introStoryPageIndex.clamp(0, pageCount - 1);
+    final canPrev = pageIndex > 0;
+    final canNext = pageIndex < pageCount - 1;
+    final isLastPage = pageIndex >= pageCount - 1;
+    final navTop = (_kGameCanvasHeight - _kStoryNavButtonSize) / 2;
+    final leftNavLeft = 16.0;
+    final rightNavLeft = _kGameCanvasWidth - 16.0 - _kStoryNavButtonSize;
+
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                paths[pageIndex],
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stackTrace) =>
+                    const ColoredBox(color: Color(0xFFC9E9DD)),
+              ),
+            ),
+            if (canPrev)
+              Positioned(
+                left: leftNavLeft,
+                top: navTop,
+                child: _buildIntroStoryPageNavButton(
+                  icon: Icons.chevron_left,
+                  onTap: () {
+                    _safeSetState(() {
+                      _introStoryPageIndex = pageIndex - 1;
+                    });
+                  },
+                ),
+              ),
+            if (canNext)
+              Positioned(
+                left: rightNavLeft,
+                top: navTop,
+                child: _buildIntroStoryPageNavButton(
+                  icon: Icons.chevron_right,
+                  onTap: () {
+                    _safeSetState(() {
+                      _introStoryPageIndex = pageIndex + 1;
+                    });
+                  },
+                ),
+              ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 28,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isLastPage) ...[
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          _safeSetState(_dismissIntroStoryOverlay);
+                        },
+                        borderRadius: BorderRadius.circular(16),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.35),
+                              width: 1,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 10,
+                            ),
+                            child: Text(
+                              l10n.start,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF000000),
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(
+                    '${pageIndex + 1}/$pageCount',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      height: 1.0,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 6,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -11966,66 +12778,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 도감 등록 완료 펫 상세(176×222): 가방 아이템 설명창과 동일 좌표·페이드·바깥 탭 dismiss.
-  Widget _buildPokedexMaturePetDetailGlobalOverlay() {
-    final entry = _pokedexPanelSelectedEntry;
-    if (entry == null || !_isPokedexPanelOpen) {
-      return const SizedBox.shrink();
-    }
-
-    return Positioned.fill(
-      child: AnimatedBuilder(
-        animation: Listenable.merge([
-          _gameMenuPanelController,
-          _gamePokedexSwapController,
-        ]),
-        builder: (context, _) {
-          final slide = _gameMenuPanelSlideLeft;
-          final dexSwapT = _gamePokedexSwapCurve.value.clamp(0.0, 1.0);
-          final showDexLayer =
-              _isPokedexPanelOpen || _pokedexPanelSwapInProgress;
-          final dexOpacity = showDexLayer ? dexSwapT : 0.0;
-          final o = dexOpacity.clamp(0.0, 1.0);
-
-          return Stack(
-            clipBehavior: Clip.none,
-            fit: StackFit.expand,
-            children: [
-              Positioned.fill(
-                child: IgnorePointer(
-                  ignoring: o < 0.05,
-                  child: Opacity(
-                    opacity: o,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _safeSetState(
-                        () => _pokedexPanelSelectedEntry = null,
-                      ),
-                      child: const ColoredBox(color: Colors.transparent),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: slide + _kBagItemDetailLeft,
-                top: _kGameMenuPanelTop + _kBagItemDetailTop,
-                width: _kBagItemDetailW,
-                height: _kBagItemDetailH,
-                child: IgnorePointer(
-                  ignoring: o < 0.05,
-                  child: Opacity(
-                    opacity: o,
-                    child: _buildPokedexMaturePetDetailGlassPanel(entry),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Widget _buildAccountLinkPanelGlobalOverlay() {
     if (!_isAccountLinkPanelOpen) {
       return const SizedBox.shrink();
@@ -12527,7 +13279,9 @@ class _HomePageState extends State<HomePage>
         _activeSettingsSupportDoc != null ||
         _renderingSettingsSupportDoc != null ||
         _isHelpPanelOpen ||
-        _helpPanelSwapInProgress;
+        _helpPanelSwapInProgress ||
+        _isSocialContributionPanelOpen ||
+        _socialContributionPanelSwapInProgress;
   }
 
   /// 우측 메뉴 아이콘: 패널이 닫히는 동안(슬라이드/마당 페이드) 배경에 유지.
@@ -12607,6 +13361,10 @@ class _HomePageState extends State<HomePage>
     }
     if (_isHelpPanelOpen || _helpPanelSwapInProgress) {
       opacity *= 1.0 - _gameHelpSwapCurve.value;
+    }
+    if (_isSocialContributionPanelOpen ||
+        _socialContributionPanelSwapInProgress) {
+      opacity *= 1.0 - _gameSocialContributionSwapCurve.value;
     }
     return opacity.clamp(0.0, 1.0);
   }
@@ -12902,6 +13660,12 @@ class _HomePageState extends State<HomePage>
     );
 
     final panelInteractive = _isNamingDialogOpen && !_isPetNamingPanelClosing;
+    final namingIconPath = _petNamingIconAssetPath();
+    final namingFallbackIcon = Icon(
+      _petIconDataForNaming(),
+      size: 28,
+      color: const Color(0xFF3A3A3A),
+    );
 
     return Positioned(
       left: _kPetNicknameDialogLeft,
@@ -12967,21 +13731,9 @@ class _HomePageState extends State<HomePage>
                       top: 60,
                       width: 48,
                       height: 48,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF5F5F5),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: const Color(0xFFB8B8B8),
-                            width: 1,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          _petIconDataForNaming(),
-                          size: 24,
-                          color: const Color(0xFF3A3A3A),
-                        ),
+                      child: _buildRoundedPetIconFrame(
+                        assetPath: namingIconPath,
+                        fallback: namingFallbackIcon,
                       ),
                     ),
                     Positioned(
@@ -13194,6 +13946,111 @@ class _HomePageState extends State<HomePage>
     return filtered.take(2).toList();
   }
 
+  /// 분양창용 idle 스프라이트 시트 경로. 존재하는 종만 반환한다.
+  String? _initialAdoptionIdleAssetPath(Map<String, dynamic> species) {
+    final identity = speciesIdentityFromSpeciesRow(species);
+    final code =
+        identity?.internalCode ?? species['code']?.toString().trim() ?? '';
+    switch (code) {
+      case 'cat_sco':
+        return 'assets/images/pets/cat_sco/baby/idle_sheet.png';
+      case 'dog_pom':
+        // 추후: 'assets/images/pets/dog_pom/baby/idle_sheet.png'
+        return null;
+      case 'dog_bic':
+        // 추후: 'assets/images/pets/dog_bic/baby/idle_sheet.png'
+        return null;
+      case 'cat_rag':
+        // 추후: 'assets/images/pets/cat_rag/baby/idle_sheet.png'
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  Future<ui.Image?> _decodeAdoptionIdleFirstFrame(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final frameInfo = await codec.getNextFrame();
+    final sheet = frameInfo.image;
+    // 가로 strip 시트: 프레임은 정사각. 현재 cat_sco idle 은 80×80 (시트 320×80).
+    final frameSize = sheet.height;
+    if (frameSize <= 0 || sheet.width < frameSize) {
+      sheet.dispose();
+      return null;
+    }
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final paint = Paint()..filterQuality = FilterQuality.none;
+    final src = Rect.fromLTWH(0, 0, frameSize.toDouble(), frameSize.toDouble());
+    final dst = Rect.fromLTWH(0, 0, frameSize.toDouble(), frameSize.toDouble());
+    canvas.drawImageRect(sheet, src, dst, paint);
+    final picture = recorder.endRecording();
+    final cropped = await picture.toImage(frameSize, frameSize);
+    sheet.dispose();
+    return cropped;
+  }
+
+  void _ensureAdoptionIdleFirstFrameLoaded(String assetPath) {
+    if (_adoptionIdleFirstFrameCache.containsKey(assetPath)) return;
+    if (_adoptionIdleFirstFrameLoading.contains(assetPath)) return;
+    _adoptionIdleFirstFrameLoading.add(assetPath);
+    unawaited(_loadAdoptionIdleFirstFrame(assetPath));
+  }
+
+  Future<void> _loadAdoptionIdleFirstFrame(String assetPath) async {
+    try {
+      final image = await _decodeAdoptionIdleFirstFrame(assetPath);
+      if (!mounted) {
+        image?.dispose();
+        return;
+      }
+      _adoptionIdleFirstFrameCache[assetPath] = image;
+      _safeSetState(() {});
+    } catch (e) {
+      debugPrint('adoption idle first frame load failed type=${e.runtimeType}');
+      if (!mounted) return;
+      _adoptionIdleFirstFrameCache[assetPath] = null;
+      _safeSetState(() {});
+    } finally {
+      _adoptionIdleFirstFrameLoading.remove(assetPath);
+    }
+  }
+
+  Widget _buildInitialAdoptionSpeciesFallbackIcon({required bool isDogFamily}) {
+    return Icon(
+      isDogFamily ? Icons.pets : Icons.cruelty_free,
+      size: 28,
+      color: const Color(0xFF3A3A3A),
+    );
+  }
+
+  Widget _buildInitialAdoptionSpeciesIdleVisual({
+    required Map<String, dynamic> species,
+    required bool isDogFamily,
+  }) {
+    final assetPath = _initialAdoptionIdleAssetPath(species);
+    if (assetPath == null) {
+      return _buildInitialAdoptionSpeciesFallbackIcon(isDogFamily: isDogFamily);
+    }
+    _ensureAdoptionIdleFirstFrameLoaded(assetPath);
+    if (!_adoptionIdleFirstFrameCache.containsKey(assetPath)) {
+      // 로딩 중에도 오류 위젯 대신 투명+fallback.
+      return _buildInitialAdoptionSpeciesFallbackIcon(isDogFamily: isDogFamily);
+    }
+    final frame = _adoptionIdleFirstFrameCache[assetPath];
+    if (frame == null) {
+      return _buildInitialAdoptionSpeciesFallbackIcon(isDogFamily: isDogFamily);
+    }
+    return RawImage(
+      image: frame,
+      width: 40,
+      height: 40,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.none,
+    );
+  }
+
   Widget _buildInitialAdoptionSpeciesCell({
     required Map<String, dynamic>? species,
     required bool isDogFamily,
@@ -13207,10 +14064,6 @@ class _HomePageState extends State<HomePage>
         ? species['code']?.toString().trim() ?? '-'
         : '-';
     final isSelected = id != null && id == _selectedSpeciesId;
-    final iconData = isDogFamily ? Icons.pets : Icons.cruelty_free;
-    final backgroundColor = isDogFamily
-        ? const Color(0xFFE8F2FF)
-        : const Color(0xFFF4ECFF);
 
     return SizedBox(
       width: 76,
@@ -13234,7 +14087,7 @@ class _HomePageState extends State<HomePage>
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFDCEAFF) : backgroundColor,
+                  color: Colors.transparent,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isSelected
@@ -13242,20 +14095,12 @@ class _HomePageState extends State<HomePage>
                         : const Color(0xFFE6E6E6),
                     width: isSelected ? 1.4 : 1,
                   ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: const Color(
-                              0xFFA9C9FF,
-                            ).withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
                 ),
                 alignment: Alignment.center,
-                child: Icon(iconData, size: 28, color: const Color(0xFF3A3A3A)),
+                child: _buildInitialAdoptionSpeciesIdleVisual(
+                  species: species,
+                  isDogFamily: isDogFamily,
+                ),
               ),
             ),
             const SizedBox(height: 4),
@@ -15468,7 +16313,6 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildPetInfoBannerContent() {
-    final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final pet = _activePet;
     if (pet == null) return const SizedBox.shrink();
@@ -15485,12 +16329,13 @@ class _HomePageState extends State<HomePage>
     final typeDisplay = speciesDisplayName.isNotEmpty
         ? speciesDisplayName
         : (_isEnglishLocale ? 'VegePet' : '펫');
-    final stage = pet['stage']?.toString() ?? 'baby';
+    final stage = _normalizePetStage(pet['stage']);
     final stageKo = _stageToKorean(stage);
     final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
     final today = _todayDateStr();
     final playedToday = pet['last_played_on']?.toString() == today;
     final affectionInfo = _affectionProgressInfo(affectionValue, l10n);
+    final stageIconPath = _petInfoStageIconAssetPath(pet);
     final petIcon = family.contains('cat')
         ? Icons.pets
         : Icons.cruelty_free_outlined;
@@ -15634,25 +16479,18 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
                 ),
-                // 더미 아이콘: 패널 상단 가로 중앙 (246-48)/2 = 99
+                // 성장 단계 아이콘: cover + radius 클리핑으로 프레임 꽉 채움
                 Positioned(
                   left: 99,
                   top: 37,
                   width: 48,
                   height: 48,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F5F5),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFFD8D8D8),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Icon(
+                  child: _buildRoundedPetIconFrame(
+                    assetPath: stageIconPath,
+                    fallback: Icon(
                       petIcon,
-                      size: 26,
-                      color: theme.colorScheme.primary,
+                      size: 28,
+                      color: const Color(0xFF3A3A3A),
                     ),
                   ),
                 ),
@@ -16264,49 +17102,52 @@ class _HomePageState extends State<HomePage>
         ),
       );
     }
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: disabled ? null : onTap,
+    return Opacity(
+      opacity: disabled ? 0.45 : 1,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(16),
-        child: Ink(
-          height: 34,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFF1F1F1), width: 0.8),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Center(
-              child: Transform.translate(
-                offset: const Offset(-13, 0),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Transform.translate(
-                      offset: const Offset(0, 1),
-                      child: const Icon(
-                        Icons.camera_alt_outlined,
-                        size: 18,
-                        color: Color(0xFFA9C9FF),
+        child: InkWell(
+          onTap: disabled ? null : onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            height: 34,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFF1F1F1), width: 0.8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Center(
+                child: Transform.translate(
+                  offset: const Offset(-13, 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Transform.translate(
+                        offset: const Offset(0, 1),
+                        child: const Icon(
+                          Icons.camera_alt_outlined,
+                          size: 18,
+                          color: Color(0xFFA9C9FF),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildPastelBlueGradientButtonText(
-                      label,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      _buildPastelBlueGradientButtonText(
+                        label,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -16322,6 +17163,8 @@ class _HomePageState extends State<HomePage>
     final dinnerDone = _todayMealLogs.any((m) => m['meal_slot'] == 'dinner');
     final brunchBlocked = !brunchDone && _isTodayMealSlotBlocked('brunch');
     final dinnerBlocked = !dinnerDone && _isTodayMealSlotBlocked('dinner');
+    final brunchInWindow = _isMealSlotAllowedNow('brunch');
+    final dinnerInWindow = _isMealSlotAllowedNow('dinner');
     final uploading = _isUploadingMeal;
     final uploadingBrunch = uploading && _uploadingSlot == 'brunch';
     final uploadingDinner = uploading && _uploadingSlot == 'dinner';
@@ -16416,7 +17259,7 @@ class _HomePageState extends State<HomePage>
                       done: brunchDone,
                       uploading: uploadingBrunch,
                       blocked: brunchBlocked,
-                      disabled: uploading,
+                      disabled: uploading || !brunchInWindow,
                       onTap: () =>
                           unawaited(_uploadMealPhotoAndEvaluate('brunch')),
                     ),
@@ -16426,7 +17269,7 @@ class _HomePageState extends State<HomePage>
                       done: dinnerDone,
                       uploading: uploadingDinner,
                       blocked: dinnerBlocked,
-                      disabled: uploading,
+                      disabled: uploading || !dinnerInWindow,
                       onTap: () =>
                           unawaited(_uploadMealPhotoAndEvaluate('dinner')),
                     ),
@@ -16623,28 +17466,33 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildToyMenuIconVisual(BagItem toy, bool canUse) {
-    final theme = Theme.of(context);
+    // canUse 테두리 색은 쓰지 않음 — 분양창 기본 프레임과 통일.
+    // 비활성 표시는 _buildToyMenuDraggableItem 의 Opacity 가 담당.
+    final assetPath = _toyMenuIconAssetPath(toy);
+    final fallbackIcon = Icon(
+      toy.icon,
+      size: 28,
+      color: const Color(0xFF3A3A3A),
+    );
     return Container(
       width: 48,
       height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: canUse
-              ? theme.colorScheme.primary.withValues(alpha: 0.65)
-              : theme.colorScheme.outlineVariant,
-          width: 0.8,
-        ),
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE6E6E6), width: 1),
       ),
       alignment: Alignment.center,
-      child: Icon(
-        toy.icon,
-        size: 26,
-        color: canUse
-            ? theme.colorScheme.primary
-            : theme.colorScheme.onSurfaceVariant,
-      ),
+      child: assetPath == null
+          ? fallbackIcon
+          : Image.asset(
+              assetPath,
+              width: 40,
+              height: 40,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.none,
+              errorBuilder: (context, error, stackTrace) => fallbackIcon,
+            ),
     );
   }
 
@@ -16946,7 +17794,7 @@ class _HomePageState extends State<HomePage>
               ? speciesName
               : (_isEnglishLocale ? 'VegePet' : '펫'))
         : nickname;
-    final stage = pet['stage']?.toString() ?? 'baby';
+    final stage = _normalizePetStage(pet['stage']);
     final stageKo = _stageToKorean(stage);
     final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
 
@@ -17165,8 +18013,8 @@ class _HomePageState extends State<HomePage>
   //
   // 성장 단계 기준 (다른 곳에서도 참조하는 _stageFromAffection 과 동일):
   //   baby:  0  ~ 29   → 다음 "유년기" 까지 (max 30)
-  //   child: 30 ~ 69   → 다음 "성장기" 까지 (max 40)
-  //   grown: 70 ~ 109  → 다음 "성숙기" 까지 (max 40)
+  //   young: 30 ~ 69   → 다음 "성장기" 까지 (max 40)
+  //   teen:  70 ~ 109  → 다음 "성숙기" 까지 (max 40)
   //   adult: 110 ~     → 더 이상 성장 단계 없음 (육성 완료)
   _AffectionProgressInfo _affectionProgressInfo(
     int affection,
@@ -17201,7 +18049,7 @@ class _HomePageState extends State<HomePage>
         current: current,
         max: max,
         progress: current / max,
-        label: '${l10n.petInfoUntilGrown} $current/$max',
+        label: '${l10n.petInfoUntilTeen} $current/$max',
         isComplete: false,
       );
     }
@@ -17212,7 +18060,7 @@ class _HomePageState extends State<HomePage>
       current: current,
       max: max,
       progress: current / max,
-      label: '${l10n.petInfoUntilChild} $current/$max',
+      label: '${l10n.petInfoUntilYoung} $current/$max',
       isComplete: false,
     );
   }
@@ -17329,6 +18177,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (_isUploadingMeal) return;
+    if (!_isMealSlotAllowedNow(slot)) return;
 
     if (_todayMealLogs.any((m) => m['meal_slot'] == slot)) {
       return;
@@ -17638,7 +18487,9 @@ class _HomePageState extends State<HomePage>
       'blocked_at': null,
     });
 
-    final beforeStage = _activePet?['stage']?.toString();
+    final beforeStage = _activePet == null
+        ? null
+        : _normalizePetStage(_activePet!['stage']);
     await Future.wait([
       _fetchTodayMealLogs(),
       _fetchActivePet(),
@@ -17686,9 +18537,29 @@ class _HomePageState extends State<HomePage>
     await _dismissMealPanelToYard();
     await _presentNextInteractionStatusIfIdle();
 
+    final mealEventKey = 'meal:${_todayDateStr()}:$slot:$resultType';
+    final isCompletedMealResult =
+        resultType == 'perfect' || resultType == 'good' || resultType == 'bad';
+
     if (gain > 0 && !_isCurrentPetMature()) {
-      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+      await _syncStageAfterAffectionChange(
+        beforeStage: beforeStage,
+        deferMaturityNotice: isCompletedMealResult,
+      );
     }
+
+    if (isCompletedMealResult) {
+      _bindMealInterstitialToLastInteractionStatus(
+        slot: slot,
+        mealEventKey: mealEventKey,
+        afterAd: () async {
+          if (_pendingMaturityNoticeBody != null) {
+            _schedulePendingMaturityCompleteNoticeAfterFrame();
+          }
+        },
+      );
+    }
+
     if (gain == 3 || gain == 5) {
       _triggerPetKneadingIfApplicable(gain);
     }
@@ -18011,6 +18882,7 @@ class _HomePageState extends State<HomePage>
         _gameStorySwapController,
         _gameSettingsSwapController,
         _gameHelpSwapController,
+        _gameSocialContributionSwapController,
         _gameMenuSubOutsideDismissController,
       ]),
       builder: (context, _) {
@@ -18051,6 +18923,12 @@ class _HomePageState extends State<HomePage>
         final helpOpacity =
             ((_isHelpPanelOpen || _helpPanelSwapInProgress)
                 ? _gameHelpSwapCurve.value.clamp(0.0, 1.0)
+                : 0.0) *
+            yardExit;
+        final socialContributionOpacity =
+            ((_isSocialContributionPanelOpen ||
+                    _socialContributionPanelSwapInProgress)
+                ? _gameSocialContributionSwapCurve.value.clamp(0.0, 1.0)
                 : 0.0) *
             yardExit;
 
@@ -18114,6 +18992,15 @@ class _HomePageState extends State<HomePage>
                   child: Opacity(
                     opacity: helpOpacity,
                     child: _buildHelpGameMenuGlassPanel(),
+                  ),
+                ),
+              if (_isSocialContributionPanelOpen ||
+                  _socialContributionPanelSwapInProgress)
+                IgnorePointer(
+                  ignoring: socialContributionOpacity < 0.05,
+                  child: Opacity(
+                    opacity: socialContributionOpacity,
+                    child: _buildSocialContributionGameMenuGlassPanel(),
                   ),
                 ),
             ],
@@ -18518,7 +19405,7 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(height: _kYardGameMenuRowGap),
                 SizedBox(
                   height: _kYardGameMenuRowCellH,
-                  child: _yardGameMenuIconRowTwo(items.sublist(6, 8)),
+                  child: _yardGameMenuIconRow(items.sublist(6, 9)),
                 ),
               ],
             ),
@@ -18549,36 +19436,21 @@ class _HomePageState extends State<HomePage>
                 icon: item.$1,
                 label: _menuLabelForKey(item.$2),
                 onTap: () => unawaited(_onYardGameMenuItemTap(item.$2)),
+                tileBackgroundColor: item.$2 == 'socialContribution'
+                    ? const Color(0xFFC9E9DD)
+                    : null,
+                iconWidget: item.$2 == 'socialContribution'
+                    ? Image.asset(
+                        'assets/images/ui/icons/logo.png',
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                      )
+                    : null,
               ),
             ),
           ),
-      ],
-    );
-  }
-
-  Widget _yardGameMenuIconRowTwo(List<(IconData, String)> rowItems) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Center(
-            child: _yardGameMenuItem(
-              icon: rowItems[0].$1,
-              label: _menuLabelForKey(rowItems[0].$2),
-              onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[0].$2)),
-            ),
-          ),
-        ),
-        Expanded(
-          child: Center(
-            child: _yardGameMenuItem(
-              icon: rowItems[1].$1,
-              label: _menuLabelForKey(rowItems[1].$2),
-              onTap: () => unawaited(_onYardGameMenuItemTap(rowItems[1].$2)),
-            ),
-          ),
-        ),
-        const Expanded(child: SizedBox.shrink()),
       ],
     );
   }
@@ -18589,6 +19461,8 @@ class _HomePageState extends State<HomePage>
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    Color? tileBackgroundColor,
+    Widget? iconWidget,
   }) {
     return SizedBox(
       width: _kYardGameMenuItemW,
@@ -18607,8 +19481,11 @@ class _HomePageState extends State<HomePage>
                 child: _buildVegePetDummyIconInkWell(
                   onTap: onTap,
                   child: Container(
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.78),
+                      color:
+                          tileBackgroundColor ??
+                          Colors.white.withValues(alpha: 0.78),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
@@ -18623,7 +19500,9 @@ class _HomePageState extends State<HomePage>
                       ],
                     ),
                     alignment: Alignment.center,
-                    child: Icon(icon, size: 22, color: const Color(0xFF5C5C5C)),
+                    child:
+                        iconWidget ??
+                        Icon(icon, size: 22, color: const Color(0xFF5C5C5C)),
                   ),
                 ),
               ),
@@ -18686,6 +19565,10 @@ class _HomePageState extends State<HomePage>
     }
     if (key == 'help') {
       await _openHelpPanelFromGameMenu();
+      return;
+    }
+    if (key == 'socialContribution') {
+      await _openSocialContributionPanelFromGameMenu();
       return;
     }
     await _closeGameMenuPanel();
@@ -18939,6 +19822,7 @@ class _HomePageState extends State<HomePage>
     if (_profilePanelSwapInProgress) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     final user = supabase.auth.currentUser;
@@ -18968,7 +19852,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
     _dismissFocus();
@@ -19036,7 +19919,6 @@ class _HomePageState extends State<HomePage>
     _gamePokedexSwapController.value = 0;
     _isPokedexPanelOpen = false;
     _pokedexPanelSwapInProgress = false;
-    _pokedexPanelSelectedEntry = null;
     _gameSettingsSwapController.stop();
     _gameSettingsSwapController.value = 0;
     _isSettingsPanelOpen = false;
@@ -19045,6 +19927,10 @@ class _HomePageState extends State<HomePage>
     _gameHelpSwapController.value = 0;
     _isHelpPanelOpen = false;
     _helpPanelSwapInProgress = false;
+    _gameSocialContributionSwapController.stop();
+    _gameSocialContributionSwapController.value = 0;
+    _isSocialContributionPanelOpen = false;
+    _socialContributionPanelSwapInProgress = false;
     _isAccountLinkPanelOpen = false;
     _isCustomerCenterPanelOpen = false;
     _instantCloseYardConfirmOverlays();
@@ -19105,6 +19991,8 @@ class _HomePageState extends State<HomePage>
         if (_settingsPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.help:
         if (_helpPanelSwapInProgress) return;
+      case _GameMenuSubOutsideDismissKind.socialContribution:
+        if (_socialContributionPanelSwapInProgress) return;
       case _GameMenuSubOutsideDismissKind.none:
         return;
     }
@@ -19285,6 +20173,13 @@ class _HomePageState extends State<HomePage>
     if (_isHelpPanelOpen && !_helpPanelSwapInProgress) {
       await _dismissGameSubPanelWithCenterExit(
         _GameMenuSubOutsideDismissKind.help,
+      );
+      return;
+    }
+    if (_isSocialContributionPanelOpen &&
+        !_socialContributionPanelSwapInProgress) {
+      await _dismissGameSubPanelWithCenterExit(
+        _GameMenuSubOutsideDismissKind.socialContribution,
       );
       return;
     }
@@ -19625,6 +20520,7 @@ class _HomePageState extends State<HomePage>
     if (_gameDietDiarySwapController.isAnimating) return;
     _instantResetSettingsPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     _dismissFocus();
@@ -19645,7 +20541,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
 
@@ -19751,6 +20646,7 @@ class _HomePageState extends State<HomePage>
     _instantResetStoryPanelIfOpen();
     _instantResetAnalysisPanelIfOpen();
     _instantResetHelpPanelIfOpen();
+    _instantResetSocialContributionPanelIfOpen();
     if (!await _closeGameMenuProfilePanelForMenuSwitch()) return;
     _gameDietDiarySwapController.stop();
     _gameDietDiarySwapController.value = 0.0;
@@ -19775,7 +20671,6 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {
         _isPokedexPanelOpen = false;
         _pokedexPanelSwapInProgress = false;
-        _pokedexPanelSelectedEntry = null;
       });
     }
     _dismissFocus();
@@ -22232,7 +23127,7 @@ class _HomePageState extends State<HomePage>
                 ? null
                 : _debugSetJustBeforeAdult,
             icon: const Icon(Icons.hourglass_bottom, size: 18),
-            label: const Text('성숙기 직전 세팅(aff 109 / grown)'),
+            label: const Text('성숙기 직전 세팅(aff 109 / teen)'),
           ),
           OutlinedButton.icon(
             onPressed: (_activePet == null || _isDebugStageMutationInFlight)
@@ -22464,13 +23359,13 @@ class _HomePageState extends State<HomePage>
 
   String _stageToKorean(String stage) {
     final l10n = AppLocalizations.of(context);
-    switch (stage) {
+    switch (_normalizePetStage(stage)) {
       case 'baby':
         return l10n.stageBaby;
-      case 'child':
-        return l10n.stageChild;
-      case 'grown':
-        return l10n.stageGrown;
+      case 'young':
+        return l10n.stageYoung;
+      case 'teen':
+        return l10n.stageTeen;
       case 'adult':
         return l10n.stageAdult;
       default:

@@ -45,6 +45,7 @@ dependencies:
   flutter_timezone: ^4.0.0
   audioplayers: ^6.6.0
   flame: ^1.37.0
+  google_mobile_ads: ^9.0.0
   google_sign_in: ^7.2.0
   sign_in_with_apple: ^8.1.0
   crypto: ^3.0.7
@@ -76,8 +77,14 @@ flutter:
     - assets/images/pets/
     - assets/images/pets/cat_sco/baby/
     - assets/images/ui/icons/
+    - assets/images/ui/icons/cat_rag/
+    - assets/images/ui/icons/cat_sco/
+    - assets/images/ui/icons/dog_bic/
+    - assets/images/ui/icons/dog_pom/
+    - assets/images/ui/icons/toys/
     - assets/images/ui/loading/
     - assets/images/auth/
+    - assets/images/story/
 
   generate: true
 

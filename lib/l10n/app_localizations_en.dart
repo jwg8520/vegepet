@@ -242,10 +242,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoUntilAdult => 'Until Adult';
 
   @override
-  String get petInfoUntilGrown => 'Until Growth';
+  String get petInfoUntilTeen => 'Until Teen';
 
   @override
-  String get petInfoUntilChild => 'Until Child';
+  String get petInfoUntilYoung => 'Until Young';
 
   @override
   String get petInfoFeedShort => 'Feed';
@@ -285,6 +285,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get menuLabelSettings => 'Settings';
+
+  @override
+  String get menuLabelSocialContribution => 'Impact';
+
+  @override
+  String get socialContributionMainMessage =>
+      '\"AvoPet uses 15% of its ad revenue\nto support animal welfare.\"';
+
+  @override
+  String get socialContributionWebsiteHint =>
+      'For details, please visit our official website.';
 
   @override
   String get profileSetupTitle => 'Set Up Your Profile';
@@ -374,7 +385,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealPanelFootnote1 =>
-      '• Brunch: 06:00–14:00 / Dinner: 17:00–22:00';
+      '• Brunch: 06:00–16:00 / Dinner: 17:00–23:00';
 
   @override
   String get mealPanelFootnote2 =>
@@ -530,10 +541,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get stageBaby => 'Baby';
 
   @override
-  String get stageChild => 'Child';
+  String get stageYoung => 'Young';
 
   @override
-  String get stageGrown => 'Growing';
+  String get stageTeen => 'Teen';
 
   @override
   String get stageAdult => 'Adult';
@@ -551,7 +562,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adoptionTitleAlt => 'Time to adopt a baby VegePet!';
 
   @override
-  String get adoptionReceiveButtonExclaim => 'Adopt!';
+  String get adoptionReceiveButtonExclaim => 'Adopt';
 
   @override
   String get snackLoginRequired => 'Please log in first.';
@@ -863,11 +874,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackStageGrewToChild => 'Your VegePet grew into the Child stage!';
+  String get snackStageGrewToYoung => 'Your VegePet grew into the Young stage!';
 
   @override
-  String get snackStageGrewToGrown =>
-      'Your VegePet grew into the Growth stage!';
+  String get snackStageGrewToTeen => 'Your VegePet grew into the Teen stage!';
 
   @override
   String get snackStageGrewToAdult =>
@@ -1190,12 +1200,12 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String interactionGrowthYoungToGrown(String petNameSubject) {
+  String interactionGrowthYoungToTeen(String petNameSubject) {
     return '... Wait, does $petNameSubject look a little more grown-up?';
   }
 
   @override
-  String interactionGrowthGrownToAdult(String petNameTopic) {
+  String interactionGrowthTeenToAdult(String petNameTopic) {
     return '$petNameTopic seems to have grown into a fine adult!';
   }
 

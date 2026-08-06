@@ -542,17 +542,17 @@ abstract class AppLocalizations {
   /// **'성숙기까지'**
   String get petInfoUntilAdult;
 
-  /// No description provided for @petInfoUntilGrown.
+  /// No description provided for @petInfoUntilTeen.
   ///
   /// In ko, this message translates to:
   /// **'성장기까지'**
-  String get petInfoUntilGrown;
+  String get petInfoUntilTeen;
 
-  /// No description provided for @petInfoUntilChild.
+  /// No description provided for @petInfoUntilYoung.
   ///
   /// In ko, this message translates to:
   /// **'유년기까지'**
-  String get petInfoUntilChild;
+  String get petInfoUntilYoung;
 
   /// No description provided for @petInfoFeedShort.
   ///
@@ -631,6 +631,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'설정'**
   String get menuLabelSettings;
+
+  /// No description provided for @menuLabelSocialContribution.
+  ///
+  /// In ko, this message translates to:
+  /// **'사회공헌'**
+  String get menuLabelSocialContribution;
+
+  /// No description provided for @socialContributionMainMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'\"아보펫은 광고 수익의 15%를\n유기 동물 보호 활동에 사용합니다.\"'**
+  String get socialContributionMainMessage;
+
+  /// No description provided for @socialContributionWebsiteHint.
+  ///
+  /// In ko, this message translates to:
+  /// **'자세한 사항은 공식 홈페이지를 참고해 주세요.'**
+  String get socialContributionWebsiteHint;
 
   /// No description provided for @profileSetupTitle.
   ///
@@ -797,7 +815,7 @@ abstract class AppLocalizations {
   /// No description provided for @mealPanelFootnote1.
   ///
   /// In ko, this message translates to:
-  /// **'• 아점 : 06 ~ 14시 / 저녁 : 17 ~ 22시'**
+  /// **'• 아점 : 06 ~ 16시 / 저녁 : 17 ~ 23시'**
   String get mealPanelFootnote1;
 
   /// No description provided for @mealPanelFootnote2.
@@ -1088,17 +1106,17 @@ abstract class AppLocalizations {
   /// **'유아기'**
   String get stageBaby;
 
-  /// No description provided for @stageChild.
+  /// No description provided for @stageYoung.
   ///
   /// In ko, this message translates to:
   /// **'유년기'**
-  String get stageChild;
+  String get stageYoung;
 
-  /// No description provided for @stageGrown.
+  /// No description provided for @stageTeen.
   ///
   /// In ko, this message translates to:
   /// **'성장기'**
-  String get stageGrown;
+  String get stageTeen;
 
   /// No description provided for @stageAdult.
   ///
@@ -1133,7 +1151,7 @@ abstract class AppLocalizations {
   /// No description provided for @adoptionReceiveButtonExclaim.
   ///
   /// In ko, this message translates to:
-  /// **'분양받기!'**
+  /// **'분양받기'**
   String get adoptionReceiveButtonExclaim;
 
   /// No description provided for @snackLoginRequired.
@@ -1658,17 +1676,17 @@ abstract class AppLocalizations {
   /// **'식단일지 저장 실패: {error}'**
   String snackDiarySaveFailed(String error);
 
-  /// No description provided for @snackStageGrewToChild.
+  /// No description provided for @snackStageGrewToYoung.
   ///
   /// In ko, this message translates to:
   /// **'베지펫이 유년기로 성장했어요!'**
-  String get snackStageGrewToChild;
+  String get snackStageGrewToYoung;
 
-  /// No description provided for @snackStageGrewToGrown.
+  /// No description provided for @snackStageGrewToTeen.
   ///
   /// In ko, this message translates to:
   /// **'베지펫이 성장기로 자랐어요!'**
-  String get snackStageGrewToGrown;
+  String get snackStageGrewToTeen;
 
   /// No description provided for @snackStageGrewToAdult.
   ///
@@ -2184,17 +2202,17 @@ abstract class AppLocalizations {
   /// **'... 어라? {petName}의 몸집이 조금 커진 것 같다!'**
   String interactionGrowthBabyToYoung(String petName);
 
-  /// No description provided for @interactionGrowthYoungToGrown.
+  /// No description provided for @interactionGrowthYoungToTeen.
   ///
   /// In ko, this message translates to:
   /// **'... 어라? {petNameSubject} 다소 늠름해진 것 같다!'**
-  String interactionGrowthYoungToGrown(String petNameSubject);
+  String interactionGrowthYoungToTeen(String petNameSubject);
 
-  /// No description provided for @interactionGrowthGrownToAdult.
+  /// No description provided for @interactionGrowthTeenToAdult.
   ///
   /// In ko, this message translates to:
   /// **'{petNameTopic} 이제 어엿한 어른이 된 것 같다!'**
-  String interactionGrowthGrownToAdult(String petNameTopic);
+  String interactionGrowthTeenToAdult(String petNameTopic);
 
   /// No description provided for @mealDiaryPhotoResultPerfect.
   ///
