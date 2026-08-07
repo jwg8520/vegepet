@@ -29,17 +29,17 @@ String petStageAssetFolder(String stage) {
   }
 }
 
-/// 마당 표시 크기 (stage 기준). adult 도 teen 과 동일 96.
+/// 마당 표시 크기 (stage 기준). adult 도 teen 과 동일.
 double petDisplaySizeForStage(String stage) {
   switch (stage) {
     case 'young':
-      return 88;
+      return 80;
     case 'teen':
     case 'adult':
-      return 96;
+      return 88;
     case 'baby':
     default:
-      return 80;
+      return 72;
   }
 }
 

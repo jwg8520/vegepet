@@ -762,6 +762,8 @@ class _HomePageState extends State<HomePage>
   /// 첫 실행(프로필+분양 미완료) 세계관 스토리 일러스트 오버레이.
   bool _showIntroStoryOverlay = false;
   int _introStoryPageIndex = 0;
+  double _introStoryOpacity = 1.0;
+  bool _introStoryFadingOut = false;
   bool _isRetryingBootstrap = false;
 
   _ViewStatus _status = _ViewStatus.loading;
@@ -1659,12 +1661,27 @@ class _HomePageState extends State<HomePage>
 
   void _presentIntroStoryOverlay() {
     _introStoryPageIndex = 0;
+    _introStoryOpacity = 1.0;
+    _introStoryFadingOut = false;
     _showIntroStoryOverlay = true;
   }
 
   void _dismissIntroStoryOverlay() {
     _showIntroStoryOverlay = false;
     _introStoryPageIndex = 0;
+    _introStoryOpacity = 1.0;
+    _introStoryFadingOut = false;
+  }
+
+  /// 시작하기: 스토리 일러스트를 페이드아웃한 뒤 마당으로 전환한다.
+  Future<void> _fadeOutAndDismissIntroStoryOverlay() async {
+    if (!_showIntroStoryOverlay || _introStoryFadingOut) return;
+    _introStoryFadingOut = true;
+    if (!mounted) return;
+    _safeSetState(() => _introStoryOpacity = 0.0);
+    await Future.delayed(const Duration(milliseconds: 420));
+    if (!mounted) return;
+    _safeSetState(_dismissIntroStoryOverlay);
   }
 
   /// 프로필 완료 → 선택 분양 → 분양 펫 이름 저장이 끝나기 전까지
@@ -1889,6 +1906,8 @@ class _HomePageState extends State<HomePage>
 
       _showIntroStoryOverlay = false;
       _introStoryPageIndex = 0;
+      _introStoryOpacity = 1.0;
+      _introStoryFadingOut = false;
 
       _isPetInfoBannerOpen = false;
       _isMealPanelOpen = false;
@@ -6530,6 +6549,12 @@ class _HomePageState extends State<HomePage>
       }
     }
 
+    // DB stage 가 바뀌었으면 Flame 펫도 즉시 단계 asset 으로 맞춘다.
+    // (디버그 애정도 조작 / 식단·교감 성장 공통)
+    if (normalizedBefore != null && normalizedBefore != targetStage) {
+      _scheduleSyncActivePetToYardGame();
+    }
+
     final petId = _activePet?['id']?.toString() ?? '';
     final growthEventKey =
         (normalizedBefore != null && normalizedBefore != targetStage)
@@ -7832,6 +7857,11 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {});
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+      // syncStage 내부에서도 schedule 하지만, 동일 단계 affection 만
+      // 바뀐 경우에도 표시 일관성을 위해 한 번 더 맞춘다.
+      if (mounted && beforeStage != nextStage) {
+        _scheduleSyncActivePetToYardGame();
+      }
     } catch (e, st) {
       debugPrint('debug adjust affection failed: $e\n$st');
       if (!mounted) return;
@@ -11436,6 +11466,8 @@ class _HomePageState extends State<HomePage>
     _startupLoadingCompleting = false;
     _showIntroStoryOverlay = false;
     _introStoryPageIndex = 0;
+    _introStoryOpacity = 1.0;
+    _introStoryFadingOut = false;
 
     _startupLoadingTimer = Timer.periodic(const Duration(milliseconds: 70), (
       _,
@@ -11635,119 +11667,127 @@ class _HomePageState extends State<HomePage>
     final canNext = pageIndex < pageCount - 1;
     final isLastPage = pageIndex >= pageCount - 1;
     final navTop = (_kGameCanvasHeight - _kStoryNavButtonSize) / 2;
-    // 다이나믹 아일랜드에 가리지 않도록 이전 버튼만 우측으로 24px 이동.
-    final leftNavLeft = 16.0 + 24.0;
+    // 다이나믹 아일랜드에 가리지 않도록 이전 버튼만 우측으로 이동 (16+24+24).
+    final leftNavLeft = 16.0 + 24.0 + 24.0;
     final rightNavLeft = _kGameCanvasWidth - 16.0 - _kStoryNavButtonSize;
 
     return Positioned.fill(
-      child: Material(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: Image.asset(
-                paths[pageIndex],
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                gaplessPlayback: true,
-                errorBuilder: (context, error, stackTrace) =>
-                    const ColoredBox(color: Color(0xFFC9E9DD)),
-              ),
-            ),
-            if (canPrev)
-              Positioned(
-                left: leftNavLeft,
-                top: navTop,
-                child: _buildIntroStoryPageNavButton(
-                  icon: Icons.chevron_left,
-                  onTap: () {
-                    _safeSetState(() {
-                      _introStoryPageIndex = pageIndex - 1;
-                    });
-                  },
+      child: AnimatedOpacity(
+        opacity: _introStoryOpacity,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOut,
+        child: IgnorePointer(
+          ignoring: _introStoryFadingOut,
+          child: Material(
+            color: Colors.black,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: Image.asset(
+                    paths[pageIndex],
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const ColoredBox(color: Color(0xFFC9E9DD)),
+                  ),
                 ),
-              ),
-            if (canNext)
-              Positioned(
-                left: rightNavLeft,
-                top: navTop,
-                child: _buildIntroStoryPageNavButton(
-                  icon: Icons.chevron_right,
-                  onTap: () {
-                    _safeSetState(() {
-                      _introStoryPageIndex = pageIndex + 1;
-                    });
-                  },
-                ),
-              ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 28,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isLastPage) ...[
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                          _safeSetState(_dismissIntroStoryOverlay);
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.92),
+                if (canPrev)
+                  Positioned(
+                    left: leftNavLeft,
+                    top: navTop,
+                    child: _buildIntroStoryPageNavButton(
+                      icon: Icons.chevron_left,
+                      onTap: () {
+                        _safeSetState(() {
+                          _introStoryPageIndex = pageIndex - 1;
+                        });
+                      },
+                    ),
+                  ),
+                if (canNext)
+                  Positioned(
+                    left: rightNavLeft,
+                    top: navTop,
+                    child: _buildIntroStoryPageNavButton(
+                      icon: Icons.chevron_right,
+                      onTap: () {
+                        _safeSetState(() {
+                          _introStoryPageIndex = pageIndex + 1;
+                        });
+                      },
+                    ),
+                  ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 28,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isLastPage) ...[
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              unawaited(_fadeOutAndDismissIntroStoryOverlay());
+                            },
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.35),
-                              width: 1,
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 22,
-                              vertical: 10,
-                            ),
-                            child: Text(
-                              l10n.start,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF000000),
-                                height: 1.0,
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.92),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.35),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 22,
+                                  vertical: 10,
+                                ),
+                                child: Text(
+                                  l10n.start,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF000000),
+                                    height: 1.0,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  Text(
-                    '${pageIndex + 1}/$pageCount',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                      height: 1.0,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          blurRadius: 6,
-                          offset: const Offset(0, 1),
-                        ),
+                        const SizedBox(height: 12),
                       ],
-                    ),
+                      Text(
+                        '${pageIndex + 1}/$pageCount',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          height: 1.0,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              blurRadius: 6,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -14087,8 +14127,8 @@ class _HomePageState extends State<HomePage>
     }
     return RawImage(
       image: frame,
-      width: 46,
-      height: 46,
+      width: 58,
+      height: 58,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.none,
     );

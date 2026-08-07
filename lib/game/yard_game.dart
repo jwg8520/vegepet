@@ -764,12 +764,26 @@ class YardGame extends FlameGame {
         return true;
       }
 
-      // stage/species 변경 시 재스폰.
+      // stage/species 변경 재스폰 시 현재 위치를 유지한다 (오두막 앞 순간이동 방지).
+      Vector2? spawnPosition = position;
+      if (spawnPosition == null) {
+        final live =
+            (existing != null && _isVegePetAlive(existing))
+            ? existing
+            : (_vegePetComponent != null &&
+                    _isVegePetAlive(_vegePetComponent)
+                ? _vegePetComponent
+                : null);
+        if (live != null) {
+          spawnPosition = live.position.clone();
+        }
+      }
+
       return await _spawnYardPetComponent(
         userPetId: userPetId,
         speciesCode: speciesCode,
         stage: stage,
-        position: position,
+        position: spawnPosition,
       );
     } catch (e, st) {
       _lastPetSpawnError = e.toString();

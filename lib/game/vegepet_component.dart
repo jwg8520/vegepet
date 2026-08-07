@@ -15,7 +15,7 @@ final Vector2 kDefaultPetSpawnPosition = Vector2(380, 250);
 
 /// 하위 호환 alias.
 final Vector2 kCatScoBabySpawnPosition = kDefaultPetSpawnPosition;
-const double kVegePetDisplaySize = 80;
+const double kVegePetDisplaySize = 72;
 
 /// 발밑 충돌 footprint (이동 차단 전용). sprite 전체 박스가 아니다.
 const double kPetCollisionFootprintW = 34;
@@ -96,6 +96,9 @@ class VegePetComponent extends PositionComponent
   double _moveTimeLeft = 0;
 
   bool _manualRunActive = false;
+
+  /// walk/run 종료 시 현재 스프라이트 사이클 완료를 기다리는 중인지.
+  bool _pendingMoveCycleFinish = false;
 
   Timer? _autoTimer;
   Timer? _motionTimer;
@@ -209,14 +212,10 @@ class VegePetComponent extends PositionComponent
       _moveWithCollision(scaledDt);
 
       if (_isMoving && _moveTimeLeft <= 0) {
-        _stopMovement();
         if (_motion == PetMotion.walk || _motion == PetMotion.run) {
-          if (_repeatRemaining > 1) {
-            _repeatRemaining--;
-            unawaited(_startDirectionalMove(_motion));
-          } else if (!_isSitting) {
-            unawaited(_enterIdle(resetAuto: !_manualControl));
-          }
+          unawaited(_finishDirectionalMoveAfterCycle());
+        } else {
+          _stopMovement();
         }
       }
     }
@@ -263,7 +262,7 @@ class VegePetComponent extends PositionComponent
     }
 
     _stopMovement();
-    unawaited(_enterIdle(resetAuto: !_manualControl));
+    unawaited(_finishDirectionalMoveAfterCycle());
   }
 
   Vector2? _pickAlternativeDirection(Vector2 current) {
@@ -319,10 +318,11 @@ class VegePetComponent extends PositionComponent
   void stopManualRun() {
     if (!_manualRunActive) return;
     _manualRunActive = false;
-    _stopMovement();
     _manualControl = false;
     if (!_isSitting) {
-      unawaited(_enterIdle(resetAuto: true));
+      unawaited(_finishDirectionalMoveAfterCycle());
+    } else {
+      _stopMovement();
     }
   }
 
@@ -478,6 +478,7 @@ class VegePetComponent extends PositionComponent
     int? generation,
   }) async {
     if (generation != null && generation != _motionGeneration) return;
+    _pendingMoveCycleFinish = false;
     _motion = motion;
     _isSitting = false;
     _moveSpeed = motion == PetMotion.run ? kVegePetRunSpeed : kVegePetWalkSpeed;
@@ -494,6 +495,78 @@ class VegePetComponent extends PositionComponent
         ? _cloneAnimation(_assets!.runAnimation, loop: true)
         : _cloneAnimation(_assets!.walkAnimation, loop: true);
     await _showAnimation(anim);
+  }
+
+  /// walk/run 이동이 끝났을 때, 현재 스프라이트 사이클이 끝난 뒤에만
+  /// 다음 반복 또는 idle 로 전환한다.
+  Future<void> _finishDirectionalMoveAfterCycle() async {
+    if (_pendingMoveCycleFinish) return;
+    if (_motion != PetMotion.walk && _motion != PetMotion.run) {
+      _stopMovement();
+      return;
+    }
+
+    _pendingMoveCycleFinish = true;
+    final gen = _motionGeneration;
+    final motion = _motion;
+    final shouldRepeat = _repeatRemaining > 1;
+    final resetAuto = !_manualControl;
+
+    // 위치 이동만 멈추고, 현재 walk/run 애니메이션은 사이클 끝까지 유지한다.
+    _stopMovement();
+
+    final remaining = _remainingInCurrentAnimationCycle();
+    if (remaining > 0.001) {
+      await _waitDuration(remaining, generation: gen);
+    }
+
+    if (gen != _motionGeneration || !isMounted) {
+      _pendingMoveCycleFinish = false;
+      return;
+    }
+    if (_motion != motion) {
+      _pendingMoveCycleFinish = false;
+      return;
+    }
+
+    _pendingMoveCycleFinish = false;
+
+    if (shouldRepeat) {
+      _repeatRemaining--;
+      await _startDirectionalMove(motion, generation: gen);
+    } else if (!_isSitting) {
+      await _enterIdle(resetAuto: resetAuto, generation: gen);
+    }
+  }
+
+  /// 현재 walk/run 루프 애니메이션에서 이번 사이클이 끝나기까지 남은 시간.
+  double _remainingInCurrentAnimationCycle() {
+    final animation = _animChild?.animation;
+    if (animation == null || animation.frames.isEmpty) return 0;
+    final cycle = animation.frames.fold<double>(
+      0,
+      (sum, f) => sum + f.stepTime,
+    );
+    if (cycle <= 0) return 0;
+    final intoCycle = animation.elapsed % cycle;
+    final remaining = cycle - intoCycle;
+    if (remaining <= 0.0005) return 0;
+    return remaining;
+  }
+
+  Future<void> _waitDuration(double duration, {int? generation}) async {
+    if (duration <= 0) return;
+    final completer = Completer<void>();
+    _motionTimer?.stop();
+    _motionTimer = Timer(
+      duration,
+      onTick: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+    _motionTimer!.start();
+    await completer.future;
+    if (generation != null && generation != _motionGeneration) return;
   }
 
   Future<void> _playSit({int? generation}) async {
