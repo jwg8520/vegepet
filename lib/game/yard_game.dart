@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:vegepet/game/petting_heart_effect.dart';
 import 'package:vegepet/game/petting_heart_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
+import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/vegepet_component.dart';
 
@@ -270,7 +271,7 @@ class YardGame extends FlameGame {
   bool _showPetCollisionDebug = true;
   _PetCollisionDebugComponent? _petCollisionDebug;
 
-  final PetShadowTuneConfig _petShadowTune = PetShadowTuneConfig();
+  final PetShadowTuneStore _petShadowTunes = PetShadowTuneStore();
   final PettingHeartTuneConfig _pettingHeartTune = PettingHeartTuneConfig();
 
   final Completer<void> _onLoadCompleter = Completer<void>();
@@ -298,19 +299,29 @@ class YardGame extends FlameGame {
   List<CloudRuntimeTuning> get cloudTunings => List.unmodifiable(_cloudTunings);
 
   // ---------------------------------------------------------------------------
-  // 펫 그림자 튜닝 (시각 효과 전용, 충돌/터치에 영향 없음).
+  // 펫 그림자 튜닝 (시각 효과 전용, 충돌/터치에 영향 없음). 종×단계별.
   // ---------------------------------------------------------------------------
 
-  /// 현재 펫 그림자 튜닝 설정.
-  PetShadowTuneConfig get petShadowTune => _petShadowTune;
+  /// 종×단계 전체 그림자 튜닝 저장소.
+  PetShadowTuneStore get petShadowTunes => _petShadowTunes;
 
-  /// 저장된/패널에서 조정한 그림자 설정을 일괄 반영한다.
-  void applyPetShadowTune(PetShadowTuneConfig config) {
-    _petShadowTune.copyFrom(config);
+  /// [speciesCode] + [stage] 에 해당하는 그림자 설정 (adult → teen).
+  PetShadowTuneConfig petShadowTuneFor({
+    required String speciesCode,
+    required String stage,
+  }) {
+    return _petShadowTunes.forPet(speciesCode: speciesCode, stage: stage);
   }
 
-  /// 펫 그림자 튜닝 값을 즉시 반영한다.
+  /// 저장된/패널에서 조정한 그림자 맵을 일괄 반영한다.
+  void applyPetShadowTunes(PetShadowTuneStore store) {
+    _petShadowTunes.applyAll(store);
+  }
+
+  /// 특정 종×단계 슬롯의 그림자 값을 즉시 반영한다.
   void updatePetShadowTune({
+    required String speciesCode,
+    required String stage,
     bool? enabled,
     Color? color,
     double? opacity,
@@ -320,19 +331,93 @@ class YardGame extends FlameGame {
     double? heightScale,
     double? blurSigma,
   }) {
-    if (enabled != null) _petShadowTune.enabled = enabled;
-    if (color != null) _petShadowTune.color = color;
-    if (opacity != null) _petShadowTune.opacity = opacity;
-    if (offsetX != null) _petShadowTune.offsetX = offsetX;
-    if (offsetY != null) _petShadowTune.offsetY = offsetY;
-    if (widthScale != null) _petShadowTune.widthScale = widthScale;
-    if (heightScale != null) _petShadowTune.heightScale = heightScale;
-    if (blurSigma != null) _petShadowTune.blurSigma = blurSigma;
+    final tune = _petShadowTunes.forPet(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
+    if (enabled != null) tune.enabled = enabled;
+    if (color != null) tune.color = color;
+    if (opacity != null) tune.opacity = opacity;
+    if (offsetX != null) tune.offsetX = offsetX;
+    if (offsetY != null) tune.offsetY = offsetY;
+    if (widthScale != null) tune.widthScale = widthScale;
+    if (heightScale != null) tune.heightScale = heightScale;
+    if (blurSigma != null) tune.blurSigma = blurSigma;
   }
 
-  /// 펫 그림자 튜닝을 기본값으로 복구한다.
-  void resetPetShadowTune() {
-    _petShadowTune.resetToDefaults();
+  /// 특정 종×단계 슬롯을 기본값으로 복구한다.
+  void resetPetShadowTune({
+    required String speciesCode,
+    required String stage,
+  }) {
+    _petShadowTunes.resetSlot(speciesCode: speciesCode, stage: stage);
+  }
+
+  /// 모든 종×단계 슬롯을 기본값으로 복구한다.
+  void resetAllPetShadowTunes() {
+    _petShadowTunes.resetAllToDefaults();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 펫 모션 튜닝 (spd/rep). 종×단계×모션별.
+  // ---------------------------------------------------------------------------
+
+  final PetMotionTuneStore _petMotionTunes = PetMotionTuneStore();
+
+  PetMotionTuneStore get petMotionTunes => _petMotionTunes;
+
+  PetMotionTuneConfig petMotionTuneFor({
+    required String speciesCode,
+    required String stage,
+    required PetMotion motion,
+  }) {
+    return _petMotionTunes.forPet(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
+  }
+
+  void applyPetMotionTunes(PetMotionTuneStore store) {
+    _petMotionTunes.applyAll(store);
+  }
+
+  void updatePetMotionTune({
+    required String speciesCode,
+    required String stage,
+    required PetMotion motion,
+    double? speedMultiplier,
+    int? repeatCount,
+  }) {
+    final tune = _petMotionTunes.forPet(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
+    if (speedMultiplier != null) tune.speedMultiplier = speedMultiplier;
+    if (repeatCount != null) tune.repeatCount = repeatCount;
+  }
+
+  void resetPetMotionTune({
+    required String speciesCode,
+    required String stage,
+    required PetMotion motion,
+  }) {
+    _petMotionTunes.resetSlot(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
+  }
+
+  void resetPetMotionTunesForSpeciesStage({
+    required String speciesCode,
+    required String stage,
+  }) {
+    _petMotionTunes.resetSpeciesStage(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
   }
 
   // ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ import 'dart:ui' show BlurStyle, Canvas, MaskFilter, Offset, Paint, Rect;
 import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
 import 'package:vegepet/game/pet_motion.dart';
-import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/pet_sprite_assets.dart';
 import 'package:vegepet/game/yard_game.dart';
@@ -91,6 +90,9 @@ class VegePetComponent extends PositionComponent
   int _motionGeneration = 0;
   bool _eventMotionActive = false;
 
+  /// 고양이 happy 직후: 다음 자동 행동은 최소 1회 idle 강제.
+  bool _forceIdleAfterHappy = false;
+
   Vector2 _moveDirection = Vector2.zero();
   double _moveSpeed = kVegePetWalkSpeed;
   double _moveTimeLeft = 0;
@@ -141,7 +143,10 @@ class VegePetComponent extends PositionComponent
 
   @override
   void render(Canvas canvas) {
-    final tune = game.petShadowTune;
+    final tune = game.petShadowTuneFor(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
     if (tune.enabled) {
       _renderPetShadow(canvas, tune);
     }
@@ -207,11 +212,20 @@ class VegePetComponent extends PositionComponent
     _autoTimer?.update(scaledDt);
     _motionTimer?.update(scaledDt);
 
-    if (_isMoving && _moveTimeLeft > 0) {
-      _moveTimeLeft -= scaledDt;
-      _moveWithCollision(scaledDt);
+    if (_isMoving) {
+      if (!_pendingMoveCycleFinish && _moveTimeLeft > 0) {
+        _moveTimeLeft -= scaledDt;
+      }
 
-      if (_isMoving && _moveTimeLeft <= 0) {
+      // 사이클 마무리 중에도 이동을 유지해 제자리 뛰기처럼 보이지 않게 한다.
+      if ((_moveTimeLeft > 0 || _pendingMoveCycleFinish) &&
+          !_moveDirection.isZero()) {
+        _moveWithCollision(scaledDt);
+      }
+
+      if (!_pendingMoveCycleFinish &&
+          _isMoving &&
+          _moveTimeLeft <= 0) {
         if (_motion == PetMotion.walk || _motion == PetMotion.run) {
           unawaited(_finishDirectionalMoveAfterCycle());
         } else {
@@ -262,7 +276,7 @@ class VegePetComponent extends PositionComponent
     }
 
     _stopMovement();
-    unawaited(_finishDirectionalMoveAfterCycle());
+    unawaited(_finishDirectionalMoveAfterCycle(keepMoving: false));
   }
 
   Vector2? _pickAlternativeDirection(Vector2 current) {
@@ -369,7 +383,11 @@ class VegePetComponent extends PositionComponent
       return;
     }
 
-    final defaults = kPetMotionDefaultTuningFor(motion);
+    final defaults = game.petMotionTuneFor(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
     _speedMultiplier = (speedMultiplier ?? defaults.speedMultiplier).clamp(
       0.25,
       3.0,
@@ -430,11 +448,24 @@ class VegePetComponent extends PositionComponent
         await playMotion(PetMotion.sittingIdle, fromAuto: true);
         return;
       }
+      // 고양이 happy 후 idle 강제 대기 중이면 일어서서 idle 경로로 보낸다.
+      if (_forceIdleAfterHappy && isCat) {
+        await playMotion(PetMotion.stand, fromAuto: true);
+        return;
+      }
       if (_random.nextDouble() < 0.45) {
         await playMotion(PetMotion.stand, fromAuto: true);
       } else {
         await playMotion(PetMotion.sittingIdle, fromAuto: true);
       }
+      return;
+    }
+
+    // 고양이: happy 직후 다음 자동 동작은 반드시 idle 1회.
+    if (_forceIdleAfterHappy && isCat) {
+      _forceIdleAfterHappy = false;
+      await playMotion(PetMotion.idle, fromAuto: true);
+      _scheduleAutoBehavior(delay: 2 + _random.nextDouble() * 3);
       return;
     }
 
@@ -463,9 +494,14 @@ class VegePetComponent extends PositionComponent
     _motion = PetMotion.idle;
     _isSitting = false;
     _stopMovement();
-    _speedMultiplier = kPetMotionDefaultTuningFor(
-      PetMotion.idle,
-    ).speedMultiplier.clamp(0.25, 3.0);
+    _speedMultiplier = game
+        .petMotionTuneFor(
+          speciesCode: speciesCode,
+          stage: stage,
+          motion: PetMotion.idle,
+        )
+        .speedMultiplier
+        .clamp(0.25, 3.0);
     final anim = _cloneAnimation(_assets!.idleAnimation, loop: true);
     await _showAnimation(anim);
     if (resetAuto) {
@@ -499,7 +535,12 @@ class VegePetComponent extends PositionComponent
 
   /// walk/run 이동이 끝났을 때, 현재 스프라이트 사이클이 끝난 뒤에만
   /// 다음 반복 또는 idle 로 전환한다.
-  Future<void> _finishDirectionalMoveAfterCycle() async {
+  ///
+  /// 사이클이 끝나기 전에는 이동을 유지한다(중간에 멈춰 제자리 뛰기 방지).
+  /// [keepMoving] false 는 충돌로 더 이상 진행 불가할 때만 사용한다.
+  Future<void> _finishDirectionalMoveAfterCycle({
+    bool keepMoving = true,
+  }) async {
     if (_pendingMoveCycleFinish) return;
     if (_motion != PetMotion.walk && _motion != PetMotion.run) {
       _stopMovement();
@@ -512,10 +553,19 @@ class VegePetComponent extends PositionComponent
     final shouldRepeat = _repeatRemaining > 1;
     final resetAuto = !_manualControl;
 
-    // 위치 이동만 멈추고, 현재 walk/run 애니메이션은 사이클 끝까지 유지한다.
-    _stopMovement();
+    final canKeepMoving = keepMoving && !_moveDirection.isZero();
+    if (canKeepMoving) {
+      _isMoving = true;
+    } else {
+      _stopMovement();
+    }
 
-    final remaining = _remainingInCurrentAnimationCycle();
+    // 고양이 run → idle 직전 마지막만 4프레임(0~3)에서 컷. 중간 루프는 5프레임 유지.
+    final useCatRunIdleCutoff =
+        !shouldRepeat && motion == PetMotion.run && isCat;
+    final remaining = useCatRunIdleCutoff
+        ? _remainingUntilCatRunFourFrameCutoff()
+        : _remainingInCurrentAnimationCycle();
     if (remaining > 0.001) {
       await _waitDuration(remaining, generation: gen);
     }
@@ -529,6 +579,7 @@ class VegePetComponent extends PositionComponent
       return;
     }
 
+    _stopMovement();
     _pendingMoveCycleFinish = false;
 
     if (shouldRepeat) {
@@ -553,6 +604,27 @@ class VegePetComponent extends PositionComponent
     final remaining = cycle - intoCycle;
     if (remaining <= 0.0005) return 0;
     return remaining;
+  }
+
+  /// 고양이 run idle 전환용: 5프레임 사이클에서 4프레임(인덱스 0~3) 끝까지만 대기.
+  double _remainingUntilCatRunFourFrameCutoff() {
+    final animation = _animChild?.animation;
+    if (animation == null || animation.frames.length < 5) {
+      return _remainingInCurrentAnimationCycle();
+    }
+    final cycle = animation.frames.fold<double>(
+      0,
+      (sum, f) => sum + f.stepTime,
+    );
+    if (cycle <= 0) return 0;
+    final cutoff = animation.frames
+        .take(4)
+        .fold<double>(0, (sum, f) => sum + f.stepTime);
+    final elapsed = _animChild?.animationTicker?.elapsed ?? 0.0;
+    final intoCycle = elapsed % cycle;
+    // 이미 5번째 프레임 구간이면 즉시 idle.
+    if (intoCycle >= cutoff - 0.0005) return 0;
+    return cutoff - intoCycle;
   }
 
   Future<void> _waitDuration(double duration, {int? generation}) async {
@@ -590,9 +662,14 @@ class VegePetComponent extends PositionComponent
     _motion = PetMotion.sittingIdle;
     _isSitting = true;
     _stopMovement();
-    _speedMultiplier = kPetMotionDefaultTuningFor(
-      PetMotion.sittingIdle,
-    ).speedMultiplier.clamp(0.25, 3.0);
+    _speedMultiplier = game
+        .petMotionTuneFor(
+          speciesCode: speciesCode,
+          stage: stage,
+          motion: PetMotion.sittingIdle,
+        )
+        .speedMultiplier
+        .clamp(0.25, 3.0);
     final anim = _cloneAnimation(_assets!.sittingIdleAnimation, loop: true);
     await _showAnimation(anim);
 
@@ -667,6 +744,10 @@ class VegePetComponent extends PositionComponent
 
     _eventMotionActive = false;
     _manualControl = false;
+
+    if (isCat) {
+      _forceIdleAfterHappy = true;
+    }
 
     if (isDog) {
       _sittingIdleCycleCount = 0;

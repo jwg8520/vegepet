@@ -93,6 +93,7 @@ flutter:
     - assets/images/ui/icons/dog_bic/
     - assets/images/ui/icons/dog_pom/
     - assets/images/ui/icons/toys/
+    - assets/images/ui/icons/tickets/
     - assets/images/ui/loading/
     - assets/images/auth/
     - assets/images/story/

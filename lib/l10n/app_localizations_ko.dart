@@ -1,4 +1,4 @@
-// ignore: unused_import
+﻿// ignore: unused_import
 import 'package:intl/intl.dart' as intl;
 import 'app_localizations.dart';
 
@@ -875,12 +875,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String mealPerfectMessage1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject 행복하게 음식을 먹었다! Perfect +$affectionGain💕';
+    return '$petNameSubject 행복하게 음식을 먹었다! Perfect (+$affectionGain💕)';
   }
 
   @override
   String mealPerfectMessage2(String petNameTopic, int affectionGain) {
-    return '$petNameTopic 한층 더 건강해진 것 같다! Perfect +$affectionGain💕';
+    return '$petNameTopic 한층 더 건강해진 것 같다! Perfect (+$affectionGain💕)';
   }
 
   @override
@@ -889,7 +889,7 @@ class AppLocalizationsKo extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petNameSubject 맛있게 음식을 먹었다. 다음에는 $feedback를 반영해 보자! Good +$affectionGain💕';
+    return '$petNameSubject 맛있게 음식을 먹었다. 다음에는 $feedback를 반영해 보자! Good (+$affectionGain💕)';
   }
 
   @override
@@ -898,7 +898,7 @@ class AppLocalizationsKo extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petName의 건강이 좋아지는 느낌이다. 다음에는 $feedback를 반영한 음식을 줘 보자! Good +$affectionGain💕';
+    return '$petName의 건강이 좋아지는 느낌이다. 다음에는 $feedback를 반영한 음식을 줘 보자! Good (+$affectionGain💕)';
   }
 
   @override
@@ -912,7 +912,7 @@ class AppLocalizationsKo extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petName의 기분이 좋지 않아 보인다.. 다음에는 $feedback를 반영해 보자. Bad +$affectionGain';
+    return '$petName의 기분이 좋지 않아 보인다.. 다음에는 $feedback를 반영해 보자. Bad (+$affectionGain)';
   }
 
   @override
@@ -921,7 +921,7 @@ class AppLocalizationsKo extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petNameTopic 힘이 없어 보인다. 다음에는 $feedback를 반영한 음식을 줘 보자. Bad +$affectionGain';
+    return '$petNameTopic 힘이 없어 보인다. 다음에는 $feedback를 반영한 음식을 줘 보자. Bad (+$affectionGain)';
   }
 
   @override
@@ -1119,32 +1119,32 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String interactionPettingCat1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject 갸르릉거린다..! +$affectionGain❤️';
+    return '$petNameSubject 갸르릉거린다..! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingCat2(String petName, int affectionGain) {
-    return '$petName의 꾹꾹이 발동! +$affectionGain❤️';
+    return '$petName의 꾹꾹이 발동! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingDog1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject 기분이 좋은지 함박웃음을 짓는다! +$affectionGain❤️';
+    return '$petNameSubject 기분이 좋은지 함박웃음을 짓는다! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingDog2(String petName, int affectionGain) {
-    return '$petName의 꼬리콥터 발동! +$affectionGain❤️';
+    return '$petName의 꼬리콥터 발동! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPlaySuccess1(String petNameTopic, int affectionGain) {
-    return '$petNameTopic 매우 신나 보인다! +$affectionGain❤️';
+    return '$petNameTopic 매우 신나 보인다! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPlaySuccess2(String petNameTopic, int affectionGain) {
-    return '$petNameTopic 주인이 놀아 주는 게 즐거운 듯하다! +$affectionGain❤️';
+    return '$petNameTopic 주인이 놀아 주는 게 즐거운 듯하다! (+$affectionGain❤️)';
   }
 
   @override

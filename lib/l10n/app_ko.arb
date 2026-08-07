@@ -1,4 +1,4 @@
-{
+﻿{
   "@@locale": "ko",
   "appTitle": "VegePet",
   "settings": "설정",
@@ -300,21 +300,21 @@
   "snackPettedTodayAlready": "오늘은 이미 쓰다듬었어요.",
   "snackPetFetchFailed": "펫 정보를 불러올 수 없어요: {error}",
   "@snackPetFetchFailed": {"placeholders": {"error": {"type": "String"}}},
-  "mealPerfectMessage1": "{petNameSubject} 행복하게 음식을 먹었다! Perfect +{affectionGain}💕",
+  "mealPerfectMessage1": "{petNameSubject} 행복하게 음식을 먹었다! Perfect (+{affectionGain}💕)",
   "@mealPerfectMessage1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "mealPerfectMessage2": "{petNameTopic} 한층 더 건강해진 것 같다! Perfect +{affectionGain}💕",
+  "mealPerfectMessage2": "{petNameTopic} 한층 더 건강해진 것 같다! Perfect (+{affectionGain}💕)",
   "@mealPerfectMessage2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage1": "{petNameSubject} 맛있게 음식을 먹었다. 다음에는 {feedback}를 반영해 보자! Good +{affectionGain}💕",
+  "mealGoodFeedbackMessage1": "{petNameSubject} 맛있게 음식을 먹었다. 다음에는 {feedback}를 반영해 보자! Good (+{affectionGain}💕)",
   "@mealGoodFeedbackMessage1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
@@ -322,7 +322,7 @@
       "affectionGain": {"type": "int"}
     }
   },
-  "mealGoodFeedbackMessage2": "{petName}의 건강이 좋아지는 느낌이다. 다음에는 {feedback}를 반영한 음식을 줘 보자! Good +{affectionGain}💕",
+  "mealGoodFeedbackMessage2": "{petName}의 건강이 좋아지는 느낌이다. 다음에는 {feedback}를 반영한 음식을 줘 보자! Good (+{affectionGain}💕)",
   "@mealGoodFeedbackMessage2": {
     "placeholders": {
       "petName": {"type": "String"},
@@ -336,7 +336,7 @@
       "petNameSubject": {"type": "String"}
     }
   },
-  "mealBadFeedbackMessage1": "{petName}의 기분이 좋지 않아 보인다.. 다음에는 {feedback}를 반영해 보자. Bad +{affectionGain}",
+  "mealBadFeedbackMessage1": "{petName}의 기분이 좋지 않아 보인다.. 다음에는 {feedback}를 반영해 보자. Bad (+{affectionGain})",
   "@mealBadFeedbackMessage1": {
     "placeholders": {
       "petName": {"type": "String"},
@@ -344,7 +344,7 @@
       "affectionGain": {"type": "int"}
     }
   },
-  "mealBadFeedbackMessage2": "{petNameTopic} 힘이 없어 보인다. 다음에는 {feedback}를 반영한 음식을 줘 보자. Bad +{affectionGain}",
+  "mealBadFeedbackMessage2": "{petNameTopic} 힘이 없어 보인다. 다음에는 {feedback}를 반영한 음식을 줘 보자. Bad (+{affectionGain})",
   "@mealBadFeedbackMessage2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
@@ -444,42 +444,42 @@
   "analysisRetry": "다시 시도",
   "analysisNoRecord": "기록 없음",
   "interactionPetNameFallback": "베지펫",
-  "interactionPettingCat1": "{petNameSubject} 갸르릉거린다..! +{affectionGain}❤️",
+  "interactionPettingCat1": "{petNameSubject} 갸르릉거린다..! (+{affectionGain}❤️)",
   "@interactionPettingCat1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingCat2": "{petName}의 꾹꾹이 발동! +{affectionGain}❤️",
+  "interactionPettingCat2": "{petName}의 꾹꾹이 발동! (+{affectionGain}❤️)",
   "@interactionPettingCat2": {
     "placeholders": {
       "petName": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingDog1": "{petNameSubject} 기분이 좋은지 함박웃음을 짓는다! +{affectionGain}❤️",
+  "interactionPettingDog1": "{petNameSubject} 기분이 좋은지 함박웃음을 짓는다! (+{affectionGain}❤️)",
   "@interactionPettingDog1": {
     "placeholders": {
       "petNameSubject": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPettingDog2": "{petName}의 꼬리콥터 발동! +{affectionGain}❤️",
+  "interactionPettingDog2": "{petName}의 꼬리콥터 발동! (+{affectionGain}❤️)",
   "@interactionPettingDog2": {
     "placeholders": {
       "petName": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlaySuccess1": "{petNameTopic} 매우 신나 보인다! +{affectionGain}❤️",
+  "interactionPlaySuccess1": "{petNameTopic} 매우 신나 보인다! (+{affectionGain}❤️)",
   "@interactionPlaySuccess1": {
     "placeholders": {
       "petNameTopic": {"type": "String"},
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlaySuccess2": "{petNameTopic} 주인이 놀아 주는 게 즐거운 듯하다! +{affectionGain}❤️",
+  "interactionPlaySuccess2": "{petNameTopic} 주인이 놀아 주는 게 즐거운 듯하다! (+{affectionGain}❤️)",
   "@interactionPlaySuccess2": {
     "placeholders": {
       "petNameTopic": {"type": "String"},

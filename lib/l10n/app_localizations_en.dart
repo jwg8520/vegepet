@@ -1,4 +1,4 @@
-// ignore: unused_import
+﻿// ignore: unused_import
 import 'package:intl/intl.dart' as intl;
 import 'app_localizations.dart';
 
@@ -909,12 +909,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String mealPerfectMessage1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject happily enjoyed the meal! Perfect +$affectionGain💕';
+    return '$petNameSubject happily enjoyed the meal! Perfect (+$affectionGain💕)';
   }
 
   @override
   String mealPerfectMessage2(String petNameTopic, int affectionGain) {
-    return '$petNameTopic seems even healthier now! Perfect +$affectionGain💕';
+    return '$petNameTopic seems even healthier now! Perfect (+$affectionGain💕)';
   }
 
   @override
@@ -923,7 +923,7 @@ class AppLocalizationsEn extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petNameSubject really enjoyed the meal. Next time, let’s $feedback. Good +$affectionGain💕';
+    return '$petNameSubject really enjoyed the meal. Next time, let’s $feedback. Good (+$affectionGain💕)';
   }
 
   @override
@@ -932,7 +932,7 @@ class AppLocalizationsEn extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petName seems to be getting healthier. Next time, let’s prepare the meal with this in mind: $feedback. Good +$affectionGain💕';
+    return '$petName seems to be getting healthier. Next time, let’s prepare the meal with this in mind: $feedback. Good (+$affectionGain💕)';
   }
 
   @override
@@ -946,7 +946,7 @@ class AppLocalizationsEn extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petName doesn’t seem very happy with the meal. Next time, let’s $feedback. Bad +$affectionGain';
+    return '$petName doesn’t seem very happy with the meal. Next time, let’s $feedback. Bad (+$affectionGain)';
   }
 
   @override
@@ -955,7 +955,7 @@ class AppLocalizationsEn extends AppLocalizations {
     String feedback,
     int affectionGain,
   ) {
-    return '$petNameTopic seems low on energy. Let’s prepare the next meal with this in mind: $feedback. Bad +$affectionGain';
+    return '$petNameTopic seems low on energy. Let’s prepare the next meal with this in mind: $feedback. Bad (+$affectionGain)';
   }
 
   @override
@@ -1156,32 +1156,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String interactionPettingCat1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject is purring happily..! +$affectionGain❤️';
+    return '$petNameSubject is purring happily..! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingCat2(String petName, int affectionGain) {
-    return '$petName starts kneading! +$affectionGain❤️';
+    return '$petName starts kneading! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingDog1(String petNameSubject, int affectionGain) {
-    return '$petNameSubject is grinning from ear to ear! +$affectionGain❤️';
+    return '$petNameSubject is grinning from ear to ear! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPettingDog2(String petName, int affectionGain) {
-    return '$petName activates tail-copter mode! +$affectionGain❤️';
+    return '$petName activates tail-copter mode! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPlaySuccess1(String petNameTopic, int affectionGain) {
-    return '$petNameTopic looks incredibly excited! +$affectionGain❤️';
+    return '$petNameTopic looks incredibly excited! (+$affectionGain❤️)';
   }
 
   @override
   String interactionPlaySuccess2(String petNameTopic, int affectionGain) {
-    return '$petNameTopic seems to love playing with you! +$affectionGain❤️';
+    return '$petNameTopic seems to love playing with you! (+$affectionGain❤️)';
   }
 
   @override

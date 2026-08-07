@@ -698,24 +698,6 @@ enum _ViewStatus { loading, error, ready }
 /// debug 전용 Yard Tuning Panel 의 현재 섹션(구름/연기/마스크).
 enum _YardTuningSection { cloud, smoke, mask }
 
-/// debug 전용 Pet Motion Test 패널의 모션별 spd/rep 설정.
-class _PetMotionDebugTuning {
-  const _PetMotionDebugTuning({
-    required this.speedMultiplier,
-    required this.repeatCount,
-  });
-
-  final double speedMultiplier;
-  final int repeatCount;
-
-  _PetMotionDebugTuning copyWith({double? speedMultiplier, int? repeatCount}) {
-    return _PetMotionDebugTuning(
-      speedMultiplier: speedMultiplier ?? this.speedMultiplier,
-      repeatCount: repeatCount ?? this.repeatCount,
-    );
-  }
-}
-
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -881,19 +863,16 @@ class _HomePageState extends State<HomePage>
   bool _isShadowTunePanelOpen = false;
   String _petShadowColorHexInput = '527A7B';
   late final TextEditingController _petShadowColorHexController;
+  String _shadowTuneSpeciesCode = 'cat_sco';
+  String _shadowTuneStage = 'baby';
 
   /// debug 전용 쓰다듬기 하트 튜닝 패널 (release 미노출).
   bool _isHeartTunePanelOpen = false;
   String _pettingHeartColorHexInput = 'EF5592';
   late final TextEditingController _pettingHeartColorHexController;
   PetMotion _selectedPetMotionTuning = PetMotion.idle;
-  final Map<PetMotion, _PetMotionDebugTuning> _petMotionDebugTunings = {
-    for (final motion in PetMotion.values)
-      motion: _PetMotionDebugTuning(
-        speedMultiplier: kPetMotionDefaultTuningFor(motion).speedMultiplier,
-        repeatCount: kPetMotionDefaultTuningFor(motion).repeatCount,
-      ),
-  };
+  String _motionTuneSpeciesCode = 'cat_sco';
+  String _motionTuneStage = 'baby';
 
   /// debug 전용: 이동 collision footprint overlay 표시 여부(YardGame 과 동기화).
   bool _petCollisionDebugVisible = true;
@@ -1547,6 +1526,7 @@ class _HomePageState extends State<HomePage>
     );
     WidgetsBinding.instance.addObserver(this);
     unawaited(_loadPetShadowTuneFromPrefs());
+    unawaited(_loadPetMotionTuneFromPrefs());
     unawaited(_loadPettingHeartTuneFromPrefs());
     _startStartupFakeProgress();
     _bootstrap();
@@ -6044,13 +6024,15 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 놀아주기 창 장난감 PNG. [BagItem.name] 안정 code 기준.
+  /// 놀아주기/가방 아이템 PNG. [BagItem.name] 안정 code 기준.
   String? _toyMenuIconAssetPath(BagItem toy) {
     switch (toy.name) {
       case 'bone_doll':
         return 'assets/images/ui/icons/toys/bone_doll.png';
       case 'yarn_ball':
         return 'assets/images/ui/icons/toys/yarn_ball.png';
+      case 'random_adoption_ticket':
+        return 'assets/images/ui/icons/tickets/random_ticket.png';
       default:
         return null;
     }
@@ -6181,7 +6163,7 @@ class _HomePageState extends State<HomePage>
   void _triggerPetHappyMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
-    final tuning = _debugTuningForMotion(PetMotion.happy);
+    final tuning = _motionTuneForActivePet(PetMotion.happy);
     _yardGame.playPetMotion(
       PetMotion.happy,
       speedMultiplier: tuning.speedMultiplier,
@@ -6192,7 +6174,7 @@ class _HomePageState extends State<HomePage>
   void _triggerPetPlayMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
-    final tuning = _debugTuningForMotion(PetMotion.play);
+    final tuning = _motionTuneForActivePet(PetMotion.play);
     _yardGame.playPetMotion(
       PetMotion.play,
       speedMultiplier: tuning.speedMultiplier,
@@ -9084,27 +9066,37 @@ class _HomePageState extends State<HomePage>
 
   /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
   /// 터치는 [_buildVegePetDummyIconInkWell] 와 동일: **아이콘 사각형만** onTap.
+  /// 장난감·분양권은 놀아주기 창과 동일 PNG 아이콘을 쓴다.
+  /// [enabled] false 이면 놀아주기 비활성 장난감과 같이 투명 처리하고 탭 무시.
   Widget _buildBagWireframeDummyTile({
     required BagItem item,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
+    bool enabled = true,
   }) {
-    return Column(
+    final assetPath = _toyMenuIconAssetPath(item);
+    final tile = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildVegePetDummyIconInkWell(
-          onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.78),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
-                width: 0.9,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Icon(item.icon, size: 22, color: const Color(0xFF5C5C5C)),
-          ),
+          onTap: enabled ? onTap : null,
+          child: assetPath != null
+              ? _buildToyMenuIconVisual(item, true)
+              : Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFFE5E5E5).withValues(alpha: 0.75),
+                      width: 0.9,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    item.icon,
+                    size: 22,
+                    color: const Color(0xFF5C5C5C),
+                  ),
+                ),
         ),
         const SizedBox(height: 4),
         SizedBox(
@@ -9130,14 +9122,17 @@ class _HomePageState extends State<HomePage>
         ),
       ],
     );
+    if (!enabled) {
+      return Opacity(opacity: 0.35, child: IgnorePointer(child: tile));
+    }
+    return tile;
   }
 
   Widget _buildBagGameMenuGlassPanel() {
     final l10n = AppLocalizations.of(context);
     final toys = _defaultToyBagItems();
-    final ticketDef = _effectiveRandomTicketCountForBag() > 0
-        ? _bagWireframeRandomTicketDef()
-        : null;
+    final ticketDef = _bagWireframeRandomTicketDef();
+    final ticketEnabled = _effectiveRandomTicketCountForBag() > 0;
     const sectionTitleStyle = TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w600,
@@ -9161,15 +9156,17 @@ class _HomePageState extends State<HomePage>
           children: [
             Text(l10n.bagSectionTickets, style: sectionTitleStyle),
             const SizedBox(height: 8),
-            if (ticketDef != null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _buildBagWireframeDummyTile(
-                  item: ticketDef,
-                  onTap: () =>
-                      _safeSetState(() => _bagPanelDetailItem = ticketDef),
-                ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _buildBagWireframeDummyTile(
+                item: ticketDef,
+                enabled: ticketEnabled,
+                onTap: ticketEnabled
+                    ? () =>
+                          _safeSetState(() => _bagPanelDetailItem = ticketDef)
+                    : null,
               ),
+            ),
             const SizedBox(height: 14),
             Text(l10n.bagSectionToys, style: sectionTitleStyle),
             const SizedBox(height: 8),
@@ -9401,6 +9398,9 @@ class _HomePageState extends State<HomePage>
 
   /// 가방 아이템 설명창: 176×222 글래스 패널, 하늘빛 그라데이션 텍스트 「사용하기」는 분양권만.
   Widget _buildBagDetailPreviewIcon(BagItem item) {
+    if (_toyMenuIconAssetPath(item) != null) {
+      return _buildToyMenuIconVisual(item, true);
+    }
     return Container(
       width: 48,
       height: 48,
@@ -14919,20 +14919,29 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  PetShadowTuneConfig get _editingPetShadowTune {
+    return _yardGame.petShadowTuneFor(
+      speciesCode: _shadowTuneSpeciesCode,
+      stage: _shadowTuneStage,
+    );
+  }
+
+  void _syncShadowColorHexFromEditing() {
+    _petShadowColorHexInput = PetShadowTunePreferences.colorToHex(
+      _editingPetShadowTune.color,
+    );
+    _petShadowColorHexController.text = _petShadowColorHexInput;
+  }
+
   Future<void> _loadPetShadowTuneFromPrefs() async {
-    final config = await PetShadowTunePreferences.load();
-    _yardGame.applyPetShadowTune(config);
+    final store = await PetShadowTunePreferences.load();
+    _yardGame.applyPetShadowTunes(store);
     if (!mounted) return;
-    _safeSetState(() {
-      _petShadowColorHexInput = PetShadowTunePreferences.colorToHex(
-        _yardGame.petShadowTune.color,
-      );
-      _petShadowColorHexController.text = _petShadowColorHexInput;
-    });
+    _safeSetState(_syncShadowColorHexFromEditing);
   }
 
   Future<void> _persistPetShadowTune() async {
-    await PetShadowTunePreferences.save(_yardGame.petShadowTune);
+    await PetShadowTunePreferences.save(_yardGame.petShadowTunes);
   }
 
   void _applyPetShadowColorHex(String raw) {
@@ -14941,7 +14950,11 @@ class _HomePageState extends State<HomePage>
     if (hex.length != 6) return;
     final value = int.tryParse(hex, radix: 16);
     if (value == null) return;
-    _yardGame.updatePetShadowTune(color: Color(0xFF000000 | value));
+    _yardGame.updatePetShadowTune(
+      speciesCode: _shadowTuneSpeciesCode,
+      stage: _shadowTuneStage,
+      color: Color(0xFF000000 | value),
+    );
     _safeSetState(() {
       _petShadowColorHexInput = hex.toUpperCase();
       _petShadowColorHexController.text = _petShadowColorHexInput;
@@ -15039,7 +15052,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildShadowTunePanelContent() {
-    final shadow = _yardGame.petShadowTune;
+    final shadow = _editingPetShadowTune;
     return Material(
       color: Colors.black.withValues(alpha: 0.72),
       borderRadius: BorderRadius.circular(8),
@@ -15049,7 +15062,7 @@ class _HomePageState extends State<HomePage>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Pet Shadow Tune',
+              'Pet Shadow Tune (species × stage)',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 11,
@@ -15058,10 +15071,69 @@ class _HomePageState extends State<HomePage>
             ),
             const SizedBox(height: 4),
             const Text(
-              '시각 효과 전용. 충돌/터치/클릭 판정에는 영향 없음.',
+              '시각 효과 전용. adult 는 teen 슬롯을 사용.',
               style: TextStyle(color: Colors.white54, fontSize: 9),
             ),
             const SizedBox(height: 6),
+            const Text(
+              'Species',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final code in kPetShadowSpeciesCodes)
+                  _buildPetMotionTuneTargetChip(
+                    label: code,
+                    selected: _shadowTuneSpeciesCode == code,
+                    onTap: () {
+                      _safeSetState(() {
+                        _shadowTuneSpeciesCode = code;
+                        _syncShadowColorHexFromEditing();
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Stage',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final stage in kPetShadowStageFolders)
+                  _buildPetMotionTuneTargetChip(
+                    label: stage,
+                    selected: _shadowTuneStage == stage,
+                    onTap: () {
+                      _safeSetState(() {
+                        _shadowTuneStage = stage;
+                        _syncShadowColorHexFromEditing();
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Editing: $_shadowTuneSpeciesCode / $_shadowTuneStage',
+              style: const TextStyle(color: Colors.white54, fontSize: 9),
+            ),
+            const SizedBox(height: 4),
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
@@ -15071,7 +15143,11 @@ class _HomePageState extends State<HomePage>
                       label: 'Show Shadow',
                       value: shadow.enabled,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(enabled: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          enabled: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15131,7 +15207,11 @@ class _HomePageState extends State<HomePage>
                       max: 1,
                       valueDecimals: 2,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(opacity: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          opacity: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15142,7 +15222,11 @@ class _HomePageState extends State<HomePage>
                       min: -40,
                       max: 40,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(offsetX: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          offsetX: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15153,7 +15237,11 @@ class _HomePageState extends State<HomePage>
                       min: -20,
                       max: 40,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(offsetY: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          offsetY: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15165,7 +15253,11 @@ class _HomePageState extends State<HomePage>
                       max: 1.2,
                       valueDecimals: 2,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(widthScale: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          widthScale: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15177,7 +15269,11 @@ class _HomePageState extends State<HomePage>
                       max: 0.5,
                       valueDecimals: 2,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(heightScale: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          heightScale: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15189,7 +15285,11 @@ class _HomePageState extends State<HomePage>
                       max: 12,
                       valueDecimals: 1,
                       onChanged: (v) {
-                        _yardGame.updatePetShadowTune(blurSigma: v);
+                        _yardGame.updatePetShadowTune(
+                          speciesCode: _shadowTuneSpeciesCode,
+                          stage: _shadowTuneStage,
+                          blurSigma: v,
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPetShadowTune());
                       },
@@ -15223,18 +15323,17 @@ class _HomePageState extends State<HomePage>
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     onPressed: () {
-                      _yardGame.resetPetShadowTune();
-                      _safeSetState(() {
-                        _petShadowColorHexInput =
-                            PetShadowTunePreferences.colorToHex(
-                              _yardGame.petShadowTune.color,
-                            );
-                        _petShadowColorHexController.text =
-                            _petShadowColorHexInput;
-                      });
+                      _yardGame.resetPetShadowTune(
+                        speciesCode: _shadowTuneSpeciesCode,
+                        stage: _shadowTuneStage,
+                      );
+                      _safeSetState(_syncShadowColorHexFromEditing);
                       unawaited(_persistPetShadowTune());
                     },
-                    child: const Text('Reset', style: TextStyle(fontSize: 11)),
+                    child: const Text(
+                      'Reset Slot',
+                      style: TextStyle(fontSize: 11),
+                    ),
                   ),
                 ),
               ],
@@ -15556,13 +15655,32 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  _PetMotionDebugTuning _debugTuningForMotion(PetMotion motion) {
-    final defaults = kPetMotionDefaultTuningFor(motion);
-    return _petMotionDebugTunings[motion] ??
-        _PetMotionDebugTuning(
-          speedMultiplier: defaults.speedMultiplier,
-          repeatCount: defaults.repeatCount,
-        );
+  Future<void> _loadPetMotionTuneFromPrefs() async {
+    final store = await PetMotionTunePreferences.load();
+    _yardGame.applyPetMotionTunes(store);
+    if (mounted) _safeSetState(() {});
+  }
+
+  Future<void> _persistPetMotionTune() async {
+    await PetMotionTunePreferences.save(_yardGame.petMotionTunes);
+  }
+
+  PetMotionTuneConfig _motionTuneForActivePet(PetMotion motion) {
+    final pet = _activePet;
+    if (pet == null) return kPetMotionDefaultTuningFor(motion);
+    return _yardGame.petMotionTuneFor(
+      speciesCode: _flameSpeciesCodeForPet(pet),
+      stage: _normalizePetStage(pet['stage']),
+      motion: motion,
+    );
+  }
+
+  PetMotionTuneConfig _debugTuningForMotion(PetMotion motion) {
+    return _yardGame.petMotionTuneFor(
+      speciesCode: _motionTuneSpeciesCode,
+      stage: _motionTuneStage,
+      motion: motion,
+    );
   }
 
   void _updateDebugTuningForMotion(
@@ -15570,13 +15688,15 @@ class _HomePageState extends State<HomePage>
     double? speedMultiplier,
     int? repeatCount,
   }) {
-    final current = _debugTuningForMotion(motion);
-    _safeSetState(() {
-      _petMotionDebugTunings[motion] = current.copyWith(
-        speedMultiplier: speedMultiplier,
-        repeatCount: repeatCount,
-      );
-    });
+    _yardGame.updatePetMotionTune(
+      speciesCode: _motionTuneSpeciesCode,
+      stage: _motionTuneStage,
+      motion: motion,
+      speedMultiplier: speedMultiplier,
+      repeatCount: repeatCount,
+    );
+    _safeSetState(() {});
+    unawaited(_persistPetMotionTune());
   }
 
   void _playDebugPetMotion(PetMotion motion) {
@@ -15603,15 +15723,14 @@ class _HomePageState extends State<HomePage>
 
   void _printPetMotionDebugConfig() {
     final buffer = StringBuffer(
-      'const Map<PetMotion, PetMotionDebugConfig> kPetMotionDebugDefaults = {',
+      'PetMotionTune $_motionTuneSpeciesCode/$_motionTuneStage = {',
     );
     for (final motion in PetMotion.values) {
       final tuning = _debugTuningForMotion(motion);
       buffer.writeln();
       buffer.write(
-        '  PetMotion.${motion.name}: PetMotionDebugConfig('
-        'speedMultiplier: ${tuning.speedMultiplier}, '
-        'repeatCount: ${tuning.repeatCount}),',
+        '  ${motion.name}: spd=${tuning.speedMultiplier}, '
+        'rep=${tuning.repeatCount},',
       );
     }
     buffer.writeln();
@@ -15681,12 +15800,63 @@ class _HomePageState extends State<HomePage>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Pet Motion Test',
+              'Pet Motion Test (species × stage)',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Species',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final code in kPetMotionSpeciesCodes)
+                  _buildPetMotionTuneTargetChip(
+                    label: code,
+                    selected: _motionTuneSpeciesCode == code,
+                    onTap: () =>
+                        _safeSetState(() => _motionTuneSpeciesCode = code),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Stage',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final stage in kPetMotionStageFolders)
+                  _buildPetMotionTuneTargetChip(
+                    label: stage,
+                    selected: _motionTuneStage == stage,
+                    onTap: () =>
+                        _safeSetState(() => _motionTuneStage = stage),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Editing: $_motionTuneSpeciesCode / $_motionTuneStage',
+              style: const TextStyle(color: Colors.white54, fontSize: 9),
             ),
             const SizedBox(height: 6),
             const Text(
@@ -15761,6 +15931,30 @@ class _HomePageState extends State<HomePage>
                 onPressed: _printPetMotionDebugConfig,
                 child: const Text(
                   'Print Motion Config',
+                  style: TextStyle(fontSize: 9),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.orangeAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () {
+                  _yardGame.resetPetMotionTune(
+                    speciesCode: _motionTuneSpeciesCode,
+                    stage: _motionTuneStage,
+                    motion: _selectedPetMotionTuning,
+                  );
+                  _safeSetState(() {});
+                  unawaited(_persistPetMotionTune());
+                },
+                child: const Text(
+                  'Reset Motion Slot',
                   style: TextStyle(fontSize: 9),
                 ),
               ),

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -1733,19 +1733,19 @@ abstract class AppLocalizations {
   /// No description provided for @mealPerfectMessage1.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameSubject} 행복하게 음식을 먹었다! Perfect +{affectionGain}💕'**
+  /// **'{petNameSubject} 행복하게 음식을 먹었다! Perfect (+{affectionGain}💕)'**
   String mealPerfectMessage1(String petNameSubject, int affectionGain);
 
   /// No description provided for @mealPerfectMessage2.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameTopic} 한층 더 건강해진 것 같다! Perfect +{affectionGain}💕'**
+  /// **'{petNameTopic} 한층 더 건강해진 것 같다! Perfect (+{affectionGain}💕)'**
   String mealPerfectMessage2(String petNameTopic, int affectionGain);
 
   /// No description provided for @mealGoodFeedbackMessage1.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameSubject} 맛있게 음식을 먹었다. 다음에는 {feedback}를 반영해 보자! Good +{affectionGain}💕'**
+  /// **'{petNameSubject} 맛있게 음식을 먹었다. 다음에는 {feedback}를 반영해 보자! Good (+{affectionGain}💕)'**
   String mealGoodFeedbackMessage1(
     String petNameSubject,
     String feedback,
@@ -1755,7 +1755,7 @@ abstract class AppLocalizations {
   /// No description provided for @mealGoodFeedbackMessage2.
   ///
   /// In ko, this message translates to:
-  /// **'{petName}의 건강이 좋아지는 느낌이다. 다음에는 {feedback}를 반영한 음식을 줘 보자! Good +{affectionGain}💕'**
+  /// **'{petName}의 건강이 좋아지는 느낌이다. 다음에는 {feedback}를 반영한 음식을 줘 보자! Good (+{affectionGain}💕)'**
   String mealGoodFeedbackMessage2(
     String petName,
     String feedback,
@@ -1771,7 +1771,7 @@ abstract class AppLocalizations {
   /// No description provided for @mealBadFeedbackMessage1.
   ///
   /// In ko, this message translates to:
-  /// **'{petName}의 기분이 좋지 않아 보인다.. 다음에는 {feedback}를 반영해 보자. Bad +{affectionGain}'**
+  /// **'{petName}의 기분이 좋지 않아 보인다.. 다음에는 {feedback}를 반영해 보자. Bad (+{affectionGain})'**
   String mealBadFeedbackMessage1(
     String petName,
     String feedback,
@@ -1781,7 +1781,7 @@ abstract class AppLocalizations {
   /// No description provided for @mealBadFeedbackMessage2.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameTopic} 힘이 없어 보인다. 다음에는 {feedback}를 반영한 음식을 줘 보자. Bad +{affectionGain}'**
+  /// **'{petNameTopic} 힘이 없어 보인다. 다음에는 {feedback}를 반영한 음식을 줘 보자. Bad (+{affectionGain})'**
   String mealBadFeedbackMessage2(
     String petNameTopic,
     String feedback,
@@ -2151,37 +2151,37 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPettingCat1.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameSubject} 갸르릉거린다..! +{affectionGain}❤️'**
+  /// **'{petNameSubject} 갸르릉거린다..! (+{affectionGain}❤️)'**
   String interactionPettingCat1(String petNameSubject, int affectionGain);
 
   /// No description provided for @interactionPettingCat2.
   ///
   /// In ko, this message translates to:
-  /// **'{petName}의 꾹꾹이 발동! +{affectionGain}❤️'**
+  /// **'{petName}의 꾹꾹이 발동! (+{affectionGain}❤️)'**
   String interactionPettingCat2(String petName, int affectionGain);
 
   /// No description provided for @interactionPettingDog1.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameSubject} 기분이 좋은지 함박웃음을 짓는다! +{affectionGain}❤️'**
+  /// **'{petNameSubject} 기분이 좋은지 함박웃음을 짓는다! (+{affectionGain}❤️)'**
   String interactionPettingDog1(String petNameSubject, int affectionGain);
 
   /// No description provided for @interactionPettingDog2.
   ///
   /// In ko, this message translates to:
-  /// **'{petName}의 꼬리콥터 발동! +{affectionGain}❤️'**
+  /// **'{petName}의 꼬리콥터 발동! (+{affectionGain}❤️)'**
   String interactionPettingDog2(String petName, int affectionGain);
 
   /// No description provided for @interactionPlaySuccess1.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameTopic} 매우 신나 보인다! +{affectionGain}❤️'**
+  /// **'{petNameTopic} 매우 신나 보인다! (+{affectionGain}❤️)'**
   String interactionPlaySuccess1(String petNameTopic, int affectionGain);
 
   /// No description provided for @interactionPlaySuccess2.
   ///
   /// In ko, this message translates to:
-  /// **'{petNameTopic} 주인이 놀아 주는 게 즐거운 듯하다! +{affectionGain}❤️'**
+  /// **'{petNameTopic} 주인이 놀아 주는 게 즐거운 듯하다! (+{affectionGain}❤️)'**
   String interactionPlaySuccess2(String petNameTopic, int affectionGain);
 
   /// No description provided for @interactionPlayFailure1.
