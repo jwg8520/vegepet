@@ -3617,7 +3617,8 @@ class _HomePageState extends State<HomePage>
   /// 초기화한다.
   ///
   /// MVP 정책상 다른 기기 데이터를 유지하려고 시도하지 않는다. 단순히 새
-  /// guest id 로 다시 시작해 "프로필을 입력해주세요!" 흐름으로 복귀한다.
+  /// guest id 로 다시 시작해, 앱 첫 실행과 같이 로딩 → 인트로 스토리 흐름으로
+  /// 복귀한다 (스토리를 즉시 띄우지 않는다).
   Future<void> _resetToFreshGuestAfterDeletedAccount() async {
     if (_isResettingDeletedAccountSession) return;
     _isResettingDeletedAccountSession = true;
@@ -3633,10 +3634,9 @@ class _HomePageState extends State<HomePage>
 
       if (mounted) {
         _safeSetState(_dismissAllUiForDeletedAccountReset);
-
-        // auth reset을 기다리지 않고 즉시 공란 프로필 입력창을 확정 표시한다.
-        debugPrint('force fresh guest ui before auth reset');
-        _forceFreshGuestProfileSetupState();
+        // 첫 실행과 동일하게 로딩부터 다시 시작 (스토리 즉시 표시 금지).
+        _startStartupFakeProgress();
+        _safeSetState(() {});
       } else {
         _dismissAllUiForDeletedAccountReset();
         _invalidateUserScopedAsyncWork(reason: 'deletedAccountReset');
@@ -3651,11 +3651,12 @@ class _HomePageState extends State<HomePage>
       debugPrint('force fresh guest ui after auth reset');
 
       if (mounted) {
+        // 로딩 오버레이 아래에서 공란 프로필 상태를 준비한다.
         _forceFreshGuestProfileSetupState();
         // 분양창이 열리기 전에 MVP 4종 마스터를 확정한다.
         await _refreshPetSpeciesAfterFreshGuestReset();
         if (mounted) {
-          _safeSetState(_presentIntroStoryOverlay);
+          await _completeStartupLoadingWhenYardReady();
         }
       }
 
@@ -3670,10 +3671,14 @@ class _HomePageState extends State<HomePage>
     } catch (e, st) {
       debugPrint('reset to fresh guest failed: $e\n$st');
 
-      // 어떤 오류가 나도 UI는 fresh guest 프로필 입력 상태로 유지한다.
+      // 어떤 오류가 나도 첫 실행과 같이 로딩 → 스토리로 복귀한다.
       if (mounted) {
         _forceFreshGuestProfileSetupState();
-        _safeSetState(_presentIntroStoryOverlay);
+        if (!_showStartupLoadingOverlay) {
+          _startStartupFakeProgress();
+          _safeSetState(() {});
+        }
+        await _completeStartupLoadingWhenYardReady();
       }
     } finally {
       _isResettingDeletedAccountSession = false;
