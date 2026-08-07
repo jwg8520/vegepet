@@ -1297,12 +1297,15 @@ class _HomePageState extends State<HomePage>
   static const double _kAnalysisPanelW = 766;
   static const double _kAnalysisPanelH = 310;
 
-  /// 스토리 일러스트 3장.
-  static const List<String> _storyPageAssetPaths = <String>[
-    'assets/images/story/story_01.png',
-    'assets/images/story/story_02.png',
-    'assets/images/story/story_03.png',
-  ];
+  /// 스토리 일러스트 3장 (언어별).
+  List<String> get _storyPageAssetPaths {
+    final lang = _isEnglishLocale ? 'en' : 'ko';
+    return <String>[
+      'assets/images/story/story_${lang}_01.png',
+      'assets/images/story/story_${lang}_02.png',
+      'assets/images/story/story_${lang}_03.png',
+    ];
+  }
 
   /// 가방 아이템 설명창 (844×390 기준 593,84) — 가방 글래스 패널 내부 상대좌표.
   static const double _kBagItemDetailLeft = 593 - _kGameMenuPanelLeft;
@@ -8530,7 +8533,7 @@ class _HomePageState extends State<HomePage>
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
-                    fontSize: 11,
+                    fontSize: 9,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF4A4A4A),
                     height: 1.3,
