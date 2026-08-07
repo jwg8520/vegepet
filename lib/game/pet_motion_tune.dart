@@ -17,17 +17,17 @@ const PetMotionTuneConfig kPetMotionDefaultTuningFallback = PetMotionTuneConfig(
 );
 
 const Map<PetMotion, PetMotionTuneConfig> kPetMotionDefaultTunings = {
+  PetMotion.happy: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
   PetMotion.idle: PetMotionTuneConfig(speedMultiplier: 0.7, repeatCount: 1),
-  PetMotion.walk: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
+  PetMotion.play: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 6),
   PetMotion.run: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.lieDown: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.lyingIdle: PetMotionTuneConfig(
+  PetMotion.sit: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
+  PetMotion.sittingIdle: PetMotionTuneConfig(
     speedMultiplier: 0.7,
     repeatCount: 1,
   ),
-  PetMotion.standUp: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.kneading: PetMotionTuneConfig(speedMultiplier: 0.8, repeatCount: 5),
-  PetMotion.play: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 6),
+  PetMotion.walk: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
+  PetMotion.stand: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
 };
 
 PetMotionTuneConfig kPetMotionDefaultTuningFor(PetMotion motion) {

@@ -255,6 +255,9 @@ class YardGame extends FlameGame {
   SpriteComponent? _collisionMaskDebugOverlay;
   bool _collisionMaskDebugVisible = true;
 
+  /// 마당에 표시 중인 모든 Flame 펫 (active + resident).
+  final Map<String, VegePetComponent> _petsById = {};
+
   VegePetComponent? _vegePetComponent;
   String? _activePetUserId;
   String? _lastPetSpawnError;
@@ -443,11 +446,17 @@ class YardGame extends FlameGame {
   ///
   /// 발밑 한 점이 아니라 footprint 전체를 검사한다.
   /// footprint 크기 자체는 [VegePetComponent] 의 상수로 튜닝한다.
+  /// [excludingPetId] 는 자기 자신 및 해당 펫과의 pet-to-pet 검사를 건너뛴다.
   bool canPetFootprintMoveTo(
     List<Vector2> currentPoints,
-    List<Vector2> nextPoints,
-  ) {
-    final allowed = _computeCanPetFootprintMoveTo(currentPoints, nextPoints);
+    List<Vector2> nextPoints, {
+    String? excludingPetId,
+  }) {
+    final allowed = _computeCanPetFootprintMoveTo(
+      currentPoints,
+      nextPoints,
+      excludingPetId: excludingPetId,
+    );
     if (!allowed && kDebugMode) {
       _logFootprintBlocked(currentPoints, nextPoints);
     }
@@ -456,8 +465,9 @@ class YardGame extends FlameGame {
 
   bool _computeCanPetFootprintMoveTo(
     List<Vector2> currentPoints,
-    List<Vector2> nextPoints,
-  ) {
+    List<Vector2> nextPoints, {
+    String? excludingPetId,
+  }) {
     final currentMaskBlockedCount = currentPoints
         .where(isInsideCollisionMask)
         .length;
@@ -466,11 +476,60 @@ class YardGame extends FlameGame {
     if (nextMaskBlockedCount > 0) {
       if (currentMaskBlockedCount > 0 &&
           nextMaskBlockedCount < currentMaskBlockedCount) {
-        return true;
+        // mask 탈출은 허용하되, pet overlap 악화는 아래에서 추가 검사.
+      } else {
+        return false;
       }
-      return false;
     }
-    return true;
+
+    return _computePetToPetFootprintAllowed(
+      currentPoints,
+      nextPoints,
+      excludingPetId: excludingPetId,
+    );
+  }
+
+  /// 다른 펫 footprint 와의 겹침 점수(sample point 가 상대 footprint 안인 개수).
+  double _petOverlapScore(
+    List<Vector2> points, {
+    required String? excludingPetId,
+  }) {
+    var score = 0.0;
+    for (final other in _petsById.values) {
+      if (!_isVegePetAlive(other)) continue;
+      if (excludingPetId != null && other.userPetId == excludingPetId) {
+        continue;
+      }
+      final rect = other.collisionFootprintRect;
+      for (final p in points) {
+        if (rect.contains(Offset(p.x, p.y))) {
+          score += 1;
+        }
+      }
+    }
+    return score;
+  }
+
+  /// pet-to-pet: 평소 새 충돌은 즉시 차단.
+  /// 이미 겹친 spawn 상태에서는 overlap 감소/유지 이동만 허용.
+  bool _computePetToPetFootprintAllowed(
+    List<Vector2> currentPoints,
+    List<Vector2> nextPoints, {
+    String? excludingPetId,
+  }) {
+    final currentScore = _petOverlapScore(
+      currentPoints,
+      excludingPetId: excludingPetId,
+    );
+    final nextScore = _petOverlapScore(
+      nextPoints,
+      excludingPetId: excludingPetId,
+    );
+
+    if (currentScore > 0) {
+      return nextScore <= currentScore;
+    }
+    return nextScore <= 0;
   }
 
   double _lastBlockLogSeconds = 0;
@@ -572,12 +631,24 @@ class YardGame extends FlameGame {
     }
   }
 
-  Future<bool> _spawnCatScoBabyComponent({
+  Future<bool> _spawnYardPetComponent({
     required String userPetId,
+    required String speciesCode,
+    required String stage,
     bool isDebugOnly = false,
+    bool isResident = false,
+    Vector2? position,
   }) async {
     final epoch = ++_petMutationEpoch;
-    await removeActivePetComponent(bumpEpoch: false);
+
+    if (isResident) {
+      await _removePetById(userPetId, bumpEpoch: false);
+    } else {
+      // active 교체 시 resident 는 유지한다.
+      await removeActivePetComponent(bumpEpoch: false);
+      // 동일 id 가 resident 로 남아 있으면 제거 후 active 로 재스폰.
+      await _removePetById(userPetId, bumpEpoch: false);
+    }
 
     if (epoch != _petMutationEpoch) {
       debugPrint('YardGame: spawn aborted before add (stale epoch)');
@@ -586,11 +657,22 @@ class YardGame extends FlameGame {
 
     final component = VegePetComponent(
       userPetId: userPetId,
+      speciesCode: speciesCode,
+      stage: stage,
       isDebugOnly: isDebugOnly,
-      canMoveFootprintTo: canPetFootprintMoveTo,
+      isResident: isResident,
+      initialPosition: position,
+      canMoveFootprintTo: (current, next) => canPetFootprintMoveTo(
+        current,
+        next,
+        excludingPetId: userPetId,
+      ),
     );
-    _vegePetComponent = component;
-    _activePetUserId = userPetId;
+    _petsById[userPetId] = component;
+    if (!isResident) {
+      _vegePetComponent = component;
+      _activePetUserId = userPetId;
+    }
 
     await world.add(component);
     await Future<void>.delayed(Duration.zero);
@@ -598,6 +680,9 @@ class YardGame extends FlameGame {
     if (epoch != _petMutationEpoch) {
       debugPrint('YardGame: spawn stale after add — removing orphan component');
       component.removeFromParent();
+      if (identical(_petsById[userPetId], component)) {
+        _petsById.remove(userPetId);
+      }
       if (identical(_vegePetComponent, component)) {
         _vegePetComponent = null;
         _activePetUserId = null;
@@ -610,27 +695,41 @@ class YardGame extends FlameGame {
       _lastPetSpawnError =
           'VegePetComponent was not mounted after world.add (mounted=${component.isMounted}, parent=${component.parent != null})';
       debugPrint('YardGame: $_lastPetSpawnError');
-      _vegePetComponent = null;
-      _activePetUserId = null;
+      _petsById.remove(userPetId);
+      if (identical(_vegePetComponent, component)) {
+        _vegePetComponent = null;
+        _activePetUserId = null;
+      }
       return false;
     }
 
     debugPrint(
-      'YardGame: cat_sco baby spawned, userPetId=$userPetId, mounted=${component.isMounted}, parent=${component.parent != null}',
+      'YardGame: pet spawned id=$userPetId species=$speciesCode stage=$stage '
+      'resident=$isResident mounted=${component.isMounted}',
     );
     return true;
   }
 
-  /// cat_sco baby 펫을 마당에 표시한다. 동일 userPetId 가 이미 있으면 skip.
-  Future<bool> showCatScoBabyPet({required String userPetId}) async {
+  /// 종·단계 지정 Flame 펫을 마당에 표시한다 (active).
+  Future<bool> showYardPet({
+    required String userPetId,
+    required String speciesCode,
+    required String stage,
+    Vector2? position,
+  }) async {
     if (_petSpawnInFlight != null && _petSpawnInFlightUserId == userPetId) {
       debugPrint(
-        'YardGame: showCatScoBabyPet join in-flight spawn (userPetId=$userPetId)',
+        'YardGame: showYardPet join in-flight spawn (userPetId=$userPetId)',
       );
       return _petSpawnInFlight!;
     }
 
-    final future = _showCatScoBabyPetImpl(userPetId: userPetId);
+    final future = _showYardPetImpl(
+      userPetId: userPetId,
+      speciesCode: speciesCode,
+      stage: stage,
+      position: position,
+    );
     _petSpawnInFlight = future;
     _petSpawnInFlightUserId = userPetId;
     try {
@@ -643,27 +742,100 @@ class YardGame extends FlameGame {
     }
   }
 
-  Future<bool> _showCatScoBabyPetImpl({required String userPetId}) async {
+  Future<bool> _showYardPetImpl({
+    required String userPetId,
+    required String speciesCode,
+    required String stage,
+    Vector2? position,
+  }) async {
     try {
       _lastPetSpawnError = null;
       await _ensureGameLoaded();
 
-      if (_vegePetComponent != null &&
+      final existing = _petsById[userPetId];
+      if (existing != null &&
           _activePetUserId == userPetId &&
-          _isVegePetAlive(_vegePetComponent)) {
-        debugPrint(
-          'YardGame: cat_sco baby already shown (userPetId=$userPetId)',
-        );
+          _isVegePetAlive(existing) &&
+          !existing.isResident &&
+          existing.speciesCode == speciesCode &&
+          existing.stage == stage) {
+        debugPrint('YardGame: yard pet already shown (userPetId=$userPetId)');
+        _vegePetComponent = existing;
         return true;
       }
 
-      return await _spawnCatScoBabyComponent(userPetId: userPetId);
+      // stage/species 변경 시 재스폰.
+      return await _spawnYardPetComponent(
+        userPetId: userPetId,
+        speciesCode: speciesCode,
+        stage: stage,
+        position: position,
+      );
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
-      debugPrint('YardGame.showCatScoBabyPet failed: $e\n$st');
-      _vegePetComponent = null;
-      _activePetUserId = null;
+      debugPrint('YardGame.showYardPet failed: $e\n$st');
+      _petsById.remove(userPetId);
+      if (_activePetUserId == userPetId) {
+        _vegePetComponent = null;
+        _activePetUserId = null;
+      }
       return false;
+    }
+  }
+
+  /// 하위 호환: cat_sco baby active spawn.
+  Future<bool> showCatScoBabyPet({required String userPetId}) {
+    return showYardPet(
+      userPetId: userPetId,
+      speciesCode: 'cat_sco',
+      stage: 'baby',
+    );
+  }
+
+  /// resident 펫 목록을 Flame 마당과 동기화한다 (active 제외).
+  Future<void> syncResidentYardPets(
+    List<({String userPetId, String speciesCode, String stage})> pets,
+  ) async {
+    await _ensureGameLoaded();
+    final desiredIds = pets.map((p) => p.userPetId).toSet();
+
+    for (final entry in _petsById.entries.toList()) {
+      final pet = entry.value;
+      if (!pet.isResident) continue;
+      if (!desiredIds.contains(entry.key)) {
+        pet.removeFromParent();
+        _petsById.remove(entry.key);
+      }
+    }
+
+    var index = 0;
+    for (final spec in pets) {
+      if (_activePetUserId == spec.userPetId) {
+        index++;
+        continue;
+      }
+      final existing = _petsById[spec.userPetId];
+      if (existing != null &&
+          _isVegePetAlive(existing) &&
+          existing.isResident &&
+          existing.speciesCode == spec.speciesCode &&
+          existing.stage == spec.stage) {
+        index++;
+        continue;
+      }
+
+      final spawnPos = Vector2(
+        260 + (index % 5) * 72.0,
+        255 + (index ~/ 5) * 28.0,
+      );
+      await _spawnYardPetComponent(
+        userPetId: spec.userPetId,
+        speciesCode: spec.speciesCode,
+        stage: spec.stage,
+        isResident: true,
+        position: spawnPos,
+      );
+      index++;
     }
   }
 
@@ -674,7 +846,11 @@ class YardGame extends FlameGame {
       return _petSpawnInFlight!;
     }
 
-    final future = _showCatScoBabyPetDebugImpl();
+    final future = _showYardPetDebugImpl(
+      userPetId: debugId,
+      speciesCode: 'cat_sco',
+      stage: 'baby',
+    );
     _petSpawnInFlight = future;
     _petSpawnInFlightUserId = debugId;
     try {
@@ -687,47 +863,87 @@ class YardGame extends FlameGame {
     }
   }
 
-  Future<bool> _showCatScoBabyPetDebugImpl() async {
+  Future<bool> _showYardPetDebugImpl({
+    required String userPetId,
+    required String speciesCode,
+    required String stage,
+  }) async {
     try {
       _lastPetSpawnError = null;
       await _ensureGameLoaded();
 
-      final debugId = 'debug-cat-sco-baby';
       if (_vegePetComponent != null &&
-          _activePetUserId == debugId &&
+          _activePetUserId == userPetId &&
           _isVegePetAlive(_vegePetComponent)) {
-        debugPrint('YardGame: debug cat_sco baby already shown');
+        debugPrint('YardGame: debug pet already shown');
         return true;
       }
 
-      final ok = await _spawnCatScoBabyComponent(
-        userPetId: debugId,
+      final ok = await _spawnYardPetComponent(
+        userPetId: userPetId,
+        speciesCode: speciesCode,
+        stage: stage,
         isDebugOnly: true,
       );
       if (ok) {
-        debugPrint('YardGame: debug cat_sco baby spawned');
+        debugPrint('YardGame: debug pet spawned ($speciesCode/$stage)');
       } else {
         debugPrint(
-          'YardGame: debug cat_sco baby spawn failed, error=$_lastPetSpawnError',
+          'YardGame: debug pet spawn failed, error=$_lastPetSpawnError',
         );
       }
       return ok;
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
-      debugPrint('YardGame.showCatScoBabyPetDebug failed: $e\n$st');
-      _vegePetComponent = null;
-      _activePetUserId = null;
+      debugPrint('YardGame debug spawn failed: $e\n$st');
+      _petsById.remove(userPetId);
+      if (_activePetUserId == userPetId) {
+        _vegePetComponent = null;
+        _activePetUserId = null;
+      }
       return false;
     }
   }
 
-  /// 활성 Flame 펫 컴포넌트를 제거한다.
+  Future<void> _removePetById(String? userPetId, {bool bumpEpoch = true}) async {
+    if (userPetId == null) return;
+    if (bumpEpoch) {
+      _petMutationEpoch++;
+    }
+    final pet = _petsById.remove(userPetId);
+    pet?.removeFromParent();
+    if (_activePetUserId == userPetId) {
+      _vegePetComponent = null;
+      _activePetUserId = null;
+    }
+  }
+
+  /// 활성 Flame 펫 컴포넌트를 제거한다 (resident 유지).
   Future<void> removeActivePetComponent({bool bumpEpoch = true}) async {
     if (bumpEpoch) {
       _petMutationEpoch++;
     }
-    // in-flight spawn 은 epoch 불일치로 결과가 버려진다.
-    _vegePetComponent?.removeFromParent();
+    final activeId = _activePetUserId;
+    if (activeId != null) {
+      final pet = _petsById.remove(activeId);
+      pet?.removeFromParent();
+    } else {
+      _vegePetComponent?.removeFromParent();
+    }
+    _vegePetComponent = null;
+    _activePetUserId = null;
+    _lastPetSpawnError = null;
+  }
+
+  /// 마당의 모든 Flame 펫을 제거한다.
+  Future<void> removeAllPetComponents({bool bumpEpoch = true}) async {
+    if (bumpEpoch) {
+      _petMutationEpoch++;
+    }
+    for (final pet in _petsById.values.toList()) {
+      pet.removeFromParent();
+    }
+    _petsById.clear();
     _vegePetComponent = null;
     _activePetUserId = null;
     _lastPetSpawnError = null;
@@ -772,6 +988,14 @@ class YardGame extends FlameGame {
     final pet = _vegePetComponent;
     if (pet == null || !_isVegePetAlive(pet)) return null;
     return pet.collisionFootprintRect;
+  }
+
+  /// 마당의 모든 펫 collision footprint (debug overlay 용).
+  List<Rect> get allPetCollisionFootprintRects {
+    return _petsById.values
+        .where(_isVegePetAlive)
+        .map((p) => p.collisionFootprintRect)
+        .toList();
   }
 
   /// debug 전용: active pet 이동 collision footprint overlay 표시 여부. release 무시.
@@ -1108,11 +1332,9 @@ class _CloudComponent extends SpriteComponent {
   }
 }
 
-/// 활성 펫의 이동 collision footprint 를 시각화하는 debug 전용 반투명 사각형.
+/// 마당 펫들의 이동 collision footprint 를 시각화하는 debug 전용 반투명 사각형.
 ///
-/// debug 빌드에서만 world 에 추가되며 release 에서는 절대 생성되지 않는다. 매
-/// 프레임 [YardGame.activePetCollisionFootprintRect] 를 읽어 펫 이동을 따라
-/// 갱신한다. 쓰다듬기 hitbox(파란색)와 혼동되지 않도록 노란색으로 표시한다.
+/// debug 빌드에서만 world 에 추가되며 release 에서는 절대 생성되지 않는다.
 class _PetCollisionDebugComponent extends Component {
   _PetCollisionDebugComponent({required YardGame game})
     : _game = game,
@@ -1127,20 +1349,22 @@ class _PetCollisionDebugComponent extends Component {
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
 
-  Rect? _rect;
+  List<Rect> _rects = const [];
 
   @override
   void update(double dt) {
     super.update(dt);
-    _rect = visibleOverride ? _game.activePetCollisionFootprintRect : null;
+    _rects = visibleOverride
+        ? _game.allPetCollisionFootprintRects
+        : const [];
   }
 
   @override
   void render(Canvas canvas) {
-    final rect = _rect;
-    if (rect == null) return;
-    canvas.drawRect(rect, _fillPaint);
-    canvas.drawRect(rect, _strokePaint);
+    for (final rect in _rects) {
+      canvas.drawRect(rect, _fillPaint);
+      canvas.drawRect(rect, _strokePaint);
+    }
   }
 }
 

@@ -4,46 +4,38 @@ import 'dart:ui' show BlurStyle, Canvas, MaskFilter, Offset, Paint, Rect;
 
 import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
-import 'package:vegepet/game/cat_sco_baby_assets.dart';
 import 'package:vegepet/game/pet_motion.dart';
 import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
+import 'package:vegepet/game/pet_sprite_assets.dart';
 import 'package:vegepet/game/yard_game.dart';
 
-/// cat_sco baby Flame 표시 크기 (튜닝 가능).
-const double kVegePetDisplaySize = 56;
+/// 기본 스폰 위치 (844×390, 오두막 문 앞).
+final Vector2 kDefaultPetSpawnPosition = Vector2(380, 250);
 
-/// cat_sco baby 발밑 충돌 footprint 크기/보정값 (이동 차단 전용, 추후 튜닝).
-///
-/// 펫 전체 sprite 가 아니라 발밑 근처의 작은 사각형을 충돌 기준으로 삼아,
-/// 오두막에 몸이 시각적으로 살짝 걸쳐 보이는 문제를 줄인다. 너무 크게 잡으면
-/// 이동이 과하게 막히므로 발밑 영역 정도로만 둔다.
-const double kCatScoBabyCollisionFootprintW = 34;
-const double kCatScoBabyCollisionFootprintH = 18;
+/// 하위 호환 alias.
+final Vector2 kCatScoBabySpawnPosition = kDefaultPetSpawnPosition;
+const double kVegePetDisplaySize = 80;
 
-/// 실제 발밑(position.y, bottomCenter)보다 살짝 위로 올린 보정값(음수 = 위).
-const double kCatScoBabyCollisionFootprintYOffset = -6;
+/// 발밑 충돌 footprint (이동 차단 전용). sprite 전체 박스가 아니다.
+const double kPetCollisionFootprintW = 34;
+const double kPetCollisionFootprintH = 18;
+const double kPetCollisionFootprintYOffset = -6;
 
-/// cat_sco baby 오두막 문 앞 초기 스폰 위치 (844×390, 추후 튜닝).
-final Vector2 kCatScoBabySpawnPosition = Vector2(380, 250);
+/// 하위 호환 alias.
+const double kCatScoBabyCollisionFootprintW = kPetCollisionFootprintW;
+const double kCatScoBabyCollisionFootprintH = kPetCollisionFootprintH;
+const double kCatScoBabyCollisionFootprintYOffset = kPetCollisionFootprintYOffset;
 
 /// walk / run 이동 속도 (논리 px/sec).
 const double kVegePetWalkSpeed = 38;
 const double kVegePetRunSpeed = 72;
 
-/// 베지펫 이동 가능 여부 판정 콜백 (단일 점 기준, 기존 호환용).
-///
-/// [current] 에서 [next] 로 이동해도 되는지(collision mask)를
-/// 반환한다. YardGame 을 직접 import/cast 하지 않고 콜백으로 주입해 결합을 낮춘다.
 typedef PetMoveValidator = bool Function(Vector2 current, Vector2 next);
 
-/// 베지펫 footprint(발밑 영역) 기준 이동 가능 여부 판정 콜백.
-///
-/// 발밑 한 점이 아니라 footprint sample point 목록 전체를 검사한다.
 typedef PetFootprintMoveValidator =
     bool Function(List<Vector2> currentPoints, List<Vector2> nextPoints);
 
-/// 8방향 이동 단위 벡터.
 final List<Vector2> kVegePetEightDirections = [
   Vector2(0, -1),
   Vector2(0, 1),
@@ -55,81 +47,82 @@ final List<Vector2> kVegePetEightDirections = [
   Vector2(0.7071, 0.7071),
 ];
 
-/// Flame 마당 위 cat_sco baby 베지펫 컴포넌트.
-///
-/// 향후 species internal code / stage 별 확장 가능. 현재: cat_sco + baby.
+/// Flame 마당 펫 컴포넌트 (종·단계별 스프라이트, 독립 상태 머신).
 class VegePetComponent extends PositionComponent
     with HasGameReference<YardGame> {
   VegePetComponent({
     required this.userPetId,
+    required this.speciesCode,
+    required this.stage,
     required this.canMoveFootprintTo,
     this.isDebugOnly = false,
+    this.isResident = false,
     Vector2? initialPosition,
-  }) : super(
-         position: initialPosition ?? kCatScoBabySpawnPosition.clone(),
+  }) : displaySize = petDisplaySizeForStage(stage),
+       stageFolder = petStageAssetFolder(stage),
+       super(
+         position: initialPosition ?? kDefaultPetSpawnPosition.clone(),
          anchor: Anchor.bottomCenter,
-         size: Vector2.all(kVegePetDisplaySize),
+         size: Vector2.all(petDisplaySizeForStage(stage)),
          priority: 8,
        );
 
   final String userPetId;
-
-  /// footprint 기준 이동 가능 여부 판정 콜백(YardGame.canPetFootprintMoveTo 주입).
-  /// 자동/수동 모든 실제 position 변경은 반드시 이 콜백을 거쳐야 한다.
+  final String speciesCode;
+  final String stage;
+  final String stageFolder;
+  final double displaySize;
   final PetFootprintMoveValidator canMoveFootprintTo;
-
   final bool isDebugOnly;
+  final bool isResident;
 
-  CatScoBabyAssets? _assets;
+  PetSpriteAssets? _assets;
   SpriteAnimationComponent? _animChild;
 
   PetMotion _motion = PetMotion.idle;
-  bool _lyingDown = false;
+  bool _isSitting = false;
+  int _sittingIdleCycleCount = 0;
   final bool _autoBehavior = true;
   bool _manualControl = false;
   bool _isMoving = false;
   bool _facingLeft = false;
   double _speedMultiplier = 1.0;
   int _repeatRemaining = 1;
+  int _motionGeneration = 0;
+  bool _eventMotionActive = false;
 
   Vector2 _moveDirection = Vector2.zero();
   double _moveSpeed = kVegePetWalkSpeed;
   double _moveTimeLeft = 0;
 
-  /// debug 방향키(수동 run)로 이동 중인지 여부. 수동 이동 중에는 자동 행동
-  /// 스케줄러가 끼어들지 않고, 충돌 시에도 임의 방향으로 전환하지 않는다.
   bool _manualRunActive = false;
 
   Timer? _autoTimer;
   Timer? _motionTimer;
   final Random _random = Random();
 
-  bool get isLyingDown => _lyingDown;
+  bool get isSitting => _isSitting;
+  bool get isLyingDown => _isSitting; // 하위 호환 (구 lying 상태)
   PetMotion get currentMotion => _motion;
+  bool get isDog => speciesCode == 'dog_bic' || speciesCode == 'dog_pom';
+  bool get isCat => speciesCode == 'cat_rag' || speciesCode == 'cat_sco';
 
-  /// 발밑 충돌 footprint 사각형(844×390 논리 좌표). 이동 차단 전용.
-  ///
-  /// 쓰다듬기 터치 판정용 hitbox 와는 의미가 다르다(그쪽은 YardGame 쪽 API).
   Rect get collisionFootprintRect {
-    final cy = position.y + kCatScoBabyCollisionFootprintYOffset;
+    final cy = position.y + kPetCollisionFootprintYOffset;
     return Rect.fromCenter(
       center: Offset(position.x, cy),
-      width: kCatScoBabyCollisionFootprintW,
-      height: kCatScoBabyCollisionFootprintH,
+      width: kPetCollisionFootprintW,
+      height: kPetCollisionFootprintH,
     );
   }
 
-  /// 현재 위치 기준 footprint sample point 9개.
   List<Vector2> get collisionSamplePoints => collisionSamplePointsAt(position);
 
-  /// [footPos](발밑/bottomCenter 좌표) 기준 footprint sample point 9개.
-  ///
-  /// center / left / right / top / bottom / 네 모서리 순서.
   List<Vector2> collisionSamplePointsAt(Vector2 footPos) {
     final cx = footPos.x;
-    final cy = footPos.y + kCatScoBabyCollisionFootprintYOffset;
-    final hw = kCatScoBabyCollisionFootprintW / 2;
-    final hh = kCatScoBabyCollisionFootprintH / 2;
+    final cy = footPos.y + kPetCollisionFootprintYOffset;
+    final hw = kPetCollisionFootprintW / 2;
+    final hh = kPetCollisionFootprintH / 2;
     return [
       Vector2(cx, cy),
       Vector2(cx - hw, cy),
@@ -152,7 +145,6 @@ class VegePetComponent extends PositionComponent
     super.render(canvas);
   }
 
-  /// 펫 발밑 타원형 그림자 (시각 전용, 충돌/터치 무관).
   void _renderPetShadow(Canvas canvas, PetShadowTuneConfig tune) {
     final shadowWidth = size.x * tune.widthScale;
     final shadowHeight = size.y * tune.heightScale;
@@ -175,14 +167,20 @@ class VegePetComponent extends PositionComponent
   Future<void> onLoad() async {
     await super.onLoad();
     debugPrint(
-      'VegePetComponent onLoad: userPetId=$userPetId, debugOnly=$isDebugOnly, flamePrefix=$kCatScoBabyFlamePrefix',
+      'VegePetComponent onLoad: id=$userPetId species=$speciesCode '
+      'stage=$stage folder=$stageFolder size=$displaySize',
     );
-    await CatScoBabyAssets.preflightAssets(game);
-    _assets = await CatScoBabyAssets.load(game);
-    debugPrint(
-      'VegePetComponent onLoad: assets ready for userPetId=$userPetId',
+    await PetSpriteAssets.preflightAssets(
+      game,
+      speciesCode: speciesCode,
+      stageFolder: stageFolder,
     );
-    // 분양 직후 첫 idle 표시만 좌측 향함. 이후 이동 방향에 따라 좌우 전환.
+    _assets = await PetSpriteAssets.load(
+      game,
+      speciesCode: speciesCode,
+      stageFolder: stageFolder,
+    );
+    size = Vector2.all(displaySize);
     _facingLeft = true;
     await _enterIdle(resetAuto: false);
     _scheduleAutoBehavior(delay: _randomIdleDelay());
@@ -192,6 +190,7 @@ class VegePetComponent extends PositionComponent
   void onRemove() {
     _autoTimer?.stop();
     _motionTimer?.stop();
+    _motionGeneration++;
     super.onRemove();
   }
 
@@ -209,15 +208,13 @@ class VegePetComponent extends PositionComponent
       _moveTimeLeft -= scaledDt;
       _moveWithCollision(scaledDt);
 
-      // _handleMoveBlocked 가 idle 로 전환하면 _isMoving 이 false 가 되어
-      // 아래 repeat/idle 처리는 건너뛴다(이미 idle 진입).
       if (_isMoving && _moveTimeLeft <= 0) {
         _stopMovement();
         if (_motion == PetMotion.walk || _motion == PetMotion.run) {
           if (_repeatRemaining > 1) {
             _repeatRemaining--;
             unawaited(_startDirectionalMove(_motion));
-          } else if (!_lyingDown) {
+          } else if (!_isSitting) {
             unawaited(_enterIdle(resetAuto: !_manualControl));
           }
         }
@@ -225,11 +222,6 @@ class VegePetComponent extends PositionComponent
     }
   }
 
-  /// 충돌 검사를 거쳐 한 프레임 이동을 수행한다.
-  ///
-  /// 한 프레임 이동량이 크면(빠른 속도/큰 dt) polygon 을 관통할 수 있으므로
-  /// 4px 단위 sub-step 으로 쪼개 매 단계 [canMoveTo] 를 검사한다. 막히면 즉시
-  /// [_handleMoveBlocked] 로 방향 전환/idle 처리하고 중단한다.
   void _moveWithCollision(double scaledDt) {
     if (_moveDirection.isZero()) return;
 
@@ -250,21 +242,15 @@ class VegePetComponent extends PositionComponent
         position.setFrom(next);
         _updateFacingFromDirection(_moveDirection);
       } else {
-        if (_manualRunActive) {
-          // 수동 방향키 이동: 막히면 그 방향으로만 멈춘다(임의 방향 전환/ idle
-          // 전환 안 함). 사용자가 반대 방향키를 누르면 빠져나올 수 있다.
-          break;
-        }
+        if (_manualRunActive) break;
         _handleMoveBlocked(current);
         break;
       }
     }
   }
 
-  /// 오두막/마당 경계에 막혔을 때: 같은 방향으로 계속 밀지 않고 이동 가능한
-  /// 대안 방향으로 전환한다. 어떤 방향도 불가하면 idle 로 전환한다.
   void _handleMoveBlocked(Vector2 current) {
-    if (_lyingDown) {
+    if (_isSitting) {
       _stopMovement();
       return;
     }
@@ -280,8 +266,6 @@ class VegePetComponent extends PositionComponent
     unawaited(_enterIdle(resetAuto: !_manualControl));
   }
 
-  /// 현재 위치에서 이동 가능한 대안 8방향을 찾는다. 현재 방향의 반대 방향을
-  /// 우선 검사하고, 그 다음 8방향을 랜덤 순서로 검사한다. 모두 막혀 있으면 null.
   Vector2? _pickAlternativeDirection(Vector2 current) {
     const probe = 6.0;
 
@@ -306,28 +290,24 @@ class VegePetComponent extends PositionComponent
     return null;
   }
 
-  /// debug 방향키: 현재 [direction] 방향으로 run 모션 수동 이동을 시작한다.
-  ///
-  /// [direction] 은 normalize 되어 대각선이 과속하지 않는다. lie_down/lying_idle
-  /// 상태에서는 무시한다(이번 단계 정책). 수동 이동 중에는 자동 행동을 멈춘다.
   void startManualRun(Vector2 direction, {double speedMultiplier = 1.0}) {
     if (_assets == null) return;
     if (direction.isZero()) return;
-    if (_lyingDown) {
-      debugPrint('[VegePet] manual run ignored while lying down');
+    if (_isSitting || _eventMotionActive) {
+      debugPrint('[VegePet] manual run ignored (sitting/event)');
       return;
     }
 
     _manualControl = true;
     _manualRunActive = true;
     _autoTimer?.stop();
+    _motionGeneration++;
 
     _speedMultiplier = speedMultiplier.clamp(0.25, 3.0);
     _motion = PetMotion.run;
     _moveSpeed = kVegePetRunSpeed;
     _moveDirection = direction.normalized();
     _isMoving = true;
-    // 버튼을 누르고 있는 동안 계속 이동. 멈춤은 stopManualRun 으로 처리.
     _moveTimeLeft = double.infinity;
     _updateFacingFromDirection(_moveDirection);
 
@@ -336,13 +316,12 @@ class VegePetComponent extends PositionComponent
     );
   }
 
-  /// debug 방향키: 수동 run 이동을 멈추고 idle 로 복귀한다.
   void stopManualRun() {
     if (!_manualRunActive) return;
     _manualRunActive = false;
     _stopMovement();
     _manualControl = false;
-    if (!_lyingDown) {
+    if (!_isSitting) {
       unawaited(_enterIdle(resetAuto: true));
     }
   }
@@ -354,9 +333,40 @@ class VegePetComponent extends PositionComponent
     bool fromAuto = false,
   }) async {
     if (_assets == null) return;
+
+    final isEvent = motion == PetMotion.happy || motion == PetMotion.play;
     if (!fromAuto) {
       _manualControl = true;
       _manualRunActive = false;
+    }
+
+    // sitting 중 일반 랜덤/수동 이동·idle·sit 금지 (이벤트·stand 제외)
+    if (_isSitting &&
+        !isEvent &&
+        motion != PetMotion.stand &&
+        motion != PetMotion.sittingIdle &&
+        motion != PetMotion.sit) {
+      if (fromAuto) {
+        debugPrint('[VegePet] $motion blocked while sitting');
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+        return;
+      }
+      if (motion == PetMotion.idle ||
+          motion == PetMotion.walk ||
+          motion == PetMotion.run) {
+        debugPrint('[VegePet] $motion blocked while sitting');
+        return;
+      }
+    }
+
+    // sit 직후 sittingIdle 최소 1회 전 stand 금지 (디버그 stand 는 강제 허용)
+    if (motion == PetMotion.stand &&
+        _isSitting &&
+        _sittingIdleCycleCount < 1 &&
+        fromAuto) {
+      debugPrint('[VegePet] stand blocked until sittingIdle >= 1');
+      await _enterSittingIdle(resetAuto: true);
+      return;
     }
 
     final defaults = kPetMotionDefaultTuningFor(motion);
@@ -367,50 +377,43 @@ class VegePetComponent extends PositionComponent
     _repeatRemaining = (repeatCount ?? defaults.repeatCount).clamp(1, 10);
     _autoTimer?.stop();
 
+    final gen = ++_motionGeneration;
+
     switch (motion) {
       case PetMotion.idle:
-        if (_lyingDown) {
-          debugPrint('[VegePet] idle blocked while lying down');
-          return;
-        }
-        await _enterIdle(resetAuto: !fromAuto);
+        await _enterIdle(resetAuto: !fromAuto, generation: gen);
       case PetMotion.walk:
-        if (_lyingDown) {
-          debugPrint('[VegePet] walk blocked while lying down');
-          return;
-        }
-        await _startDirectionalMove(PetMotion.walk);
+        await _startDirectionalMove(PetMotion.walk, generation: gen);
       case PetMotion.run:
-        if (_lyingDown) {
-          debugPrint('[VegePet] run blocked while lying down');
-          return;
-        }
-        await _startDirectionalMove(PetMotion.run);
-      case PetMotion.lieDown:
-        await _playLieDown();
-      case PetMotion.lyingIdle:
-        await _enterLyingIdle();
-      case PetMotion.standUp:
-        await _playStandUp();
-      case PetMotion.kneading:
-        await _playInteractionMotion(PetMotion.kneading);
+        await _startDirectionalMove(PetMotion.run, generation: gen);
+      case PetMotion.sit:
+        await _playSit(generation: gen);
+      case PetMotion.sittingIdle:
+        await _enterSittingIdle(resetAuto: !fromAuto, generation: gen);
+      case PetMotion.stand:
+        await _playStand(generation: gen, force: !fromAuto);
+      case PetMotion.happy:
+        await _playHappy(generation: gen);
       case PetMotion.play:
-        await _playInteractionMotion(PetMotion.play);
+        await _playPlay(generation: gen);
     }
 
-    if (!fromAuto) {
+    if (!fromAuto && gen == _motionGeneration && !isEvent) {
       _manualControl = false;
-      _scheduleAutoBehavior(delay: _randomIdleDelay());
+      if (!_eventMotionActive) {
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
     }
   }
 
   void _scheduleAutoBehavior({required double delay}) {
     if (!_autoBehavior || _manualControl || _assets == null) return;
+    if (_eventMotionActive) return;
     _autoTimer?.stop();
     _autoTimer = Timer(
       delay,
       onTick: () {
-        if (!isMounted || _manualControl) return;
+        if (!isMounted || _manualControl || _eventMotionActive) return;
         unawaited(_runAutoBehavior());
       },
     );
@@ -418,13 +421,17 @@ class VegePetComponent extends PositionComponent
   }
 
   Future<void> _runAutoBehavior() async {
-    if (_manualControl || _assets == null) return;
+    if (_manualControl || _assets == null || _eventMotionActive) return;
 
-    if (_lyingDown) {
-      if (_random.nextDouble() < 0.35) {
-        await playMotion(PetMotion.standUp, fromAuto: true);
+    if (_isSitting) {
+      if (_sittingIdleCycleCount < 1) {
+        await playMotion(PetMotion.sittingIdle, fromAuto: true);
+        return;
+      }
+      if (_random.nextDouble() < 0.45) {
+        await playMotion(PetMotion.stand, fromAuto: true);
       } else {
-        _scheduleAutoBehavior(delay: 3 + _random.nextDouble() * 5);
+        await playMotion(PetMotion.sittingIdle, fromAuto: true);
       }
       return;
     }
@@ -442,13 +449,17 @@ class VegePetComponent extends PositionComponent
     } else if (roll < 0.75) {
       await playMotion(PetMotion.run, fromAuto: true, repeatCount: 1);
     } else {
-      await playMotion(PetMotion.lieDown, fromAuto: true);
+      await playMotion(PetMotion.sit, fromAuto: true);
     }
   }
 
-  Future<void> _enterIdle({bool resetAuto = true}) async {
+  Future<void> _enterIdle({
+    bool resetAuto = true,
+    int? generation,
+  }) async {
+    if (generation != null && generation != _motionGeneration) return;
     _motion = PetMotion.idle;
-    _lyingDown = false;
+    _isSitting = false;
     _stopMovement();
     _speedMultiplier = kPetMotionDefaultTuningFor(
       PetMotion.idle,
@@ -460,9 +471,13 @@ class VegePetComponent extends PositionComponent
     }
   }
 
-  Future<void> _startDirectionalMove(PetMotion motion) async {
+  Future<void> _startDirectionalMove(
+    PetMotion motion, {
+    int? generation,
+  }) async {
+    if (generation != null && generation != _motionGeneration) return;
     _motion = motion;
-    _lyingDown = false;
+    _isSitting = false;
     _moveSpeed = motion == PetMotion.run ? kVegePetRunSpeed : kVegePetWalkSpeed;
 
     _moveDirection =
@@ -479,63 +494,148 @@ class VegePetComponent extends PositionComponent
     await _showAnimation(anim);
   }
 
-  Future<void> _playLieDown() async {
-    _motion = PetMotion.lieDown;
+  Future<void> _playSit({int? generation}) async {
+    if (generation != null && generation != _motionGeneration) return;
+    _motion = PetMotion.sit;
     _stopMovement();
-    final anim = _cloneAnimation(_assets!.lieDownAnimation, loop: false);
+    final anim = _cloneAnimation(_assets!.sitAnimation, loop: false);
     await _showAnimation(anim);
-    await _waitForAnimation(anim);
-    await _enterLyingIdle();
+    await _waitForAnimation(anim, generation: generation);
+    if (generation != null && generation != _motionGeneration) return;
+    _sittingIdleCycleCount = 0;
+    await _enterSittingIdle(resetAuto: true, generation: generation);
   }
 
-  Future<void> _enterLyingIdle() async {
-    _motion = PetMotion.lyingIdle;
-    _lyingDown = true;
+  Future<void> _enterSittingIdle({
+    bool resetAuto = true,
+    int? generation,
+  }) async {
+    if (generation != null && generation != _motionGeneration) return;
+    _motion = PetMotion.sittingIdle;
+    _isSitting = true;
     _stopMovement();
     _speedMultiplier = kPetMotionDefaultTuningFor(
-      PetMotion.lyingIdle,
+      PetMotion.sittingIdle,
     ).speedMultiplier.clamp(0.25, 3.0);
-    final anim = _cloneAnimation(_assets!.lyingIdleAnimation, loop: true);
+    final anim = _cloneAnimation(_assets!.sittingIdleAnimation, loop: true);
     await _showAnimation(anim);
-    _scheduleAutoBehavior(delay: 3 + _random.nextDouble() * 5);
+
+    // 1 cycle 완료 후 카운트 증가
+    final cycleTime = anim.frames.fold<double>(0, (s, f) => s + f.stepTime);
+    _motionTimer?.stop();
+    final gen = generation ?? _motionGeneration;
+    _motionTimer = Timer(
+      cycleTime,
+      onTick: () {
+        if (!isMounted || gen != _motionGeneration) return;
+        if (_motion == PetMotion.sittingIdle) {
+          _sittingIdleCycleCount++;
+        }
+      },
+    );
+    _motionTimer!.start();
+
+    if (resetAuto) {
+      _scheduleAutoBehavior(delay: 3 + _random.nextDouble() * 5);
+    }
   }
 
-  Future<void> _playStandUp() async {
-    if (!_lyingDown) {
-      await _enterIdle();
+  Future<void> _playStand({int? generation, bool force = false}) async {
+    if (generation != null && generation != _motionGeneration) return;
+    if (!_isSitting) {
+      await _enterIdle(generation: generation);
       return;
     }
-    _motion = PetMotion.standUp;
-    final anim = _cloneAnimation(_assets!.standUpAnimation, loop: false);
+    if (!force && _sittingIdleCycleCount < 1) {
+      debugPrint('[VegePet] stand blocked: sittingIdleCycleCount=0');
+      await _enterSittingIdle(resetAuto: true, generation: generation);
+      return;
+    }
+
+    _motion = PetMotion.stand;
+    _stopMovement();
+    final anim = _cloneAnimation(_assets!.standAnimation, loop: false);
     await _showAnimation(anim);
-    await _waitForAnimation(anim);
-    _lyingDown = false;
-    await _enterIdle();
+    await _waitForAnimation(anim, generation: generation);
+    if (generation != null && generation != _motionGeneration) return;
+    _isSitting = false;
+    _sittingIdleCycleCount = 0;
+    await _enterIdle(generation: generation);
   }
 
-  Future<void> _playInteractionMotion(PetMotion motion) async {
-    if (_lyingDown) {
-      await _playStandUp();
-      if (!isMounted) return;
-    }
-    _motion = motion;
+  Future<void> _playHappy({int? generation}) async {
+    if (generation != null && generation != _motionGeneration) return;
+    _eventMotionActive = true;
+    _manualControl = true;
+    _manualRunActive = false;
+    _autoTimer?.stop();
     _stopMovement();
+    _motion = PetMotion.happy;
 
-    final source = switch (motion) {
-      PetMotion.kneading => _assets!.kneadingAnimation,
-      PetMotion.play => _assets!.playAnimation,
-      _ => null,
-    };
-    if (source == null) return;
-
+    final wasSitting = _isSitting;
     var remaining = _repeatRemaining;
     while (remaining > 0 && isMounted) {
-      final anim = _cloneAnimation(source, loop: false);
+      if (generation != null && generation != _motionGeneration) {
+        _eventMotionActive = false;
+        return;
+      }
+      final anim = _cloneAnimation(_assets!.happyAnimation, loop: false);
       await _showAnimation(anim);
-      await _waitForAnimation(anim);
+      await _waitForAnimation(anim, generation: generation);
       remaining--;
     }
-    await _enterIdle();
+    if (generation != null && generation != _motionGeneration) {
+      _eventMotionActive = false;
+      return;
+    }
+
+    _eventMotionActive = false;
+    _manualControl = false;
+
+    if (isDog) {
+      _sittingIdleCycleCount = 0;
+      await _enterSittingIdle(resetAuto: true, generation: generation);
+    } else if (wasSitting) {
+      await _enterSittingIdle(resetAuto: true, generation: generation);
+    } else {
+      await _enterIdle(resetAuto: true, generation: generation);
+    }
+  }
+
+  Future<void> _playPlay({int? generation}) async {
+    if (generation != null && generation != _motionGeneration) return;
+    _eventMotionActive = true;
+    _manualControl = true;
+    _manualRunActive = false;
+    _autoTimer?.stop();
+    _stopMovement();
+    _motion = PetMotion.play;
+
+    final wasSitting = _isSitting;
+    var remaining = _repeatRemaining;
+    while (remaining > 0 && isMounted) {
+      if (generation != null && generation != _motionGeneration) {
+        _eventMotionActive = false;
+        return;
+      }
+      final anim = _cloneAnimation(_assets!.playAnimation, loop: false);
+      await _showAnimation(anim);
+      await _waitForAnimation(anim, generation: generation);
+      remaining--;
+    }
+    if (generation != null && generation != _motionGeneration) {
+      _eventMotionActive = false;
+      return;
+    }
+
+    _eventMotionActive = false;
+    _manualControl = false;
+
+    if (wasSitting) {
+      await _enterSittingIdle(resetAuto: true, generation: generation);
+    } else {
+      await _enterIdle(resetAuto: true, generation: generation);
+    }
   }
 
   Future<void> _showAnimation(SpriteAnimation animation) async {
@@ -547,7 +647,7 @@ class VegePetComponent extends PositionComponent
 
     _animChild = SpriteAnimationComponent(
       animation: animation,
-      size: Vector2.all(kVegePetDisplaySize),
+      size: Vector2.all(displaySize),
       anchor: Anchor.center,
       position: size / 2,
     );
@@ -555,7 +655,10 @@ class VegePetComponent extends PositionComponent
     _applyFacingFlip();
   }
 
-  Future<void> _waitForAnimation(SpriteAnimation animation) async {
+  Future<void> _waitForAnimation(
+    SpriteAnimation animation, {
+    int? generation,
+  }) async {
     final total = animation.frames.fold<double>(
       0,
       (sum, f) => sum + f.stepTime,
@@ -569,7 +672,8 @@ class VegePetComponent extends PositionComponent
       },
     );
     _motionTimer!.start();
-    return completer.future;
+    await completer.future;
+    if (generation != null && generation != _motionGeneration) return;
   }
 
   SpriteAnimation _cloneAnimation(

@@ -1917,7 +1917,7 @@ class _HomePageState extends State<HomePage>
       _isAccountLinkPanelOpen = false;
       _isCustomerCenterPanelOpen = false;
     });
-    unawaited(_yardGame.removeActivePetComponent());
+    unawaited(_yardGame.removeAllPetComponents());
   }
 
   /// anonymous guest + profile 없음인데 프로필 입력창이 안 떠 있는 먹통 상태를 복구한다.
@@ -3078,7 +3078,7 @@ class _HomePageState extends State<HomePage>
         _status = _ViewStatus.loading;
       });
 
-      unawaited(_yardGame.removeActivePetComponent());
+      unawaited(_yardGame.removeAllPetComponents());
 
       _petToySwapController.value = 0;
       _petMealSwapController.value = 0;
@@ -5914,41 +5914,39 @@ class _HomePageState extends State<HomePage>
     return int.tryParse(raw?.toString() ?? '');
   }
 
-  /// cat_sco Flame 표시 여부.
-  ///
-  /// 현재 baby sprite 만 있으므로 young/teen 단계에서도 임시로 baby 컴포넌트를 유지한다.
-  /// DB stage 값은 속이지 않는다. stage별 asset 추가 시 [_flameStageAssetFolder] 기준으로 교체.
-  /// adult 졸업 UI 는 기존 더미/resident 흐름을 유지한다.
+  /// Flame 마당 펫 표시 여부 (4종 + 전 단계 포함 adult).
   bool _shouldUseFlamePetForActivePet() {
     final pet = _activePet;
     if (pet == null) return false;
 
     final species = _speciesForPet(pet);
     final code = _speciesInternalCode(species);
-    final speciesId = _speciesIdFromPet(pet);
-    final isSco = code == 'cat_sco' || speciesId == 1;
-    if (!isSco) return false;
-
-    final stage = _normalizePetStage(pet['stage']);
-    // baby / young / teen: Flame baby sprite 임시 유지. adult 는 졸업 UI·더미 경로.
-    return stage == 'baby' || stage == 'young' || stage == 'teen';
+    return _isFlameSupportedSpeciesCode(code);
   }
 
-  /// Flame sprite 폴더명. 내부 stage 와 asset 경로를 분리한다.
-  ///
-  /// 현재 cat_sco 는 `pets/cat_sco/baby` 폴더만 있으므로 non-adult 는 baby 를 사용한다.
-  /// (child/grown 폴더는 없음 — DB stage 를 폴더명으로 직접 조합하지 않는다.)
+  bool _isFlameSupportedSpeciesCode(String code) {
+    return code == 'cat_sco' ||
+        code == 'cat_rag' ||
+        code == 'dog_bic' ||
+        code == 'dog_pom';
+  }
+
+  /// Flame sprite 폴더명. adult 는 teen asset 재사용 (DB stage 유지).
   String _flameStageAssetFolder(String stage) {
     switch (_normalizePetStage(stage)) {
-      case 'baby':
       case 'young':
+        return 'young';
       case 'teen':
-        return 'baby';
       case 'adult':
-        return 'adult';
+        return 'teen';
+      case 'baby':
       default:
         return 'baby';
     }
+  }
+
+  String _flameSpeciesCodeForPet(Map<String, dynamic> pet) {
+    return _speciesInternalCode(_speciesForPet(pet));
   }
 
   /// 정보창 단계 아이콘 파일명. 내부 stage 와 파일명을 분리한다.
@@ -6044,6 +6042,29 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  Future<void> _syncResidentPetsToYardGame() async {
+    final activeId = _activePet?['id']?.toString();
+    final specs =
+        <({String userPetId, String speciesCode, String stage})>[];
+    for (final pet in _residentPets) {
+      final id = pet['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      if (activeId != null && id == activeId) continue;
+      final code = _speciesInternalCode(_speciesForPet(pet));
+      if (!_isFlameSupportedSpeciesCode(code)) continue;
+      specs.add((
+        userPetId: id,
+        speciesCode: code,
+        stage: _normalizePetStage(pet['stage']),
+      ));
+    }
+    try {
+      await _yardGame.syncResidentYardPets(specs);
+    } catch (e, st) {
+      debugPrint('YardGame resident sync failed: $e\n$st');
+    }
+  }
+
   Future<void> _syncActivePetToYardGame() async {
     final generation = ++_yardPetSyncGeneration;
     final pet = _activePet;
@@ -6054,6 +6075,7 @@ class _HomePageState extends State<HomePage>
         debugPrint('stale yard pet sync ignored after remove(null)');
         return;
       }
+      await _syncResidentPetsToYardGame();
       if (mounted) _safeSetState(() {});
       return;
     }
@@ -6079,6 +6101,7 @@ class _HomePageState extends State<HomePage>
         debugPrint('stale yard pet sync ignored after remove(unsupported)');
         return;
       }
+      await _syncResidentPetsToYardGame();
       if (mounted) _safeSetState(() {});
       return;
     }
@@ -6093,7 +6116,11 @@ class _HomePageState extends State<HomePage>
     bool shown = false;
     try {
       shown = await _yardGame
-          .showCatScoBabyPet(userPetId: petId)
+          .showYardPet(
+            userPetId: petId,
+            speciesCode: code,
+            stage: stage,
+          )
           .timeout(
             const Duration(seconds: 5),
             onTimeout: () {
@@ -6120,19 +6147,19 @@ class _HomePageState extends State<HomePage>
       _scheduleSyncActivePetToYardGame();
       return;
     }
+    await _syncResidentPetsToYardGame();
     debugPrint(
       'YardGame sync result: shown=$shown, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
     );
     if (mounted) _safeSetState(() {});
   }
 
-  void _triggerPetKneadingIfApplicable(int affectionGain) {
+  void _triggerPetHappyMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
-    if (affectionGain != 3 && affectionGain != 5) return;
-    final tuning = _debugTuningForMotion(PetMotion.kneading);
+    final tuning = _debugTuningForMotion(PetMotion.happy);
     _yardGame.playPetMotion(
-      PetMotion.kneading,
+      PetMotion.happy,
       speedMultiplier: tuning.speedMultiplier,
       repeatCount: tuning.repeatCount,
     );
@@ -7054,6 +7081,13 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       setState(() => _isInteracting = false);
 
+      // 성공 판정 직후 이벤트 모션 (교감 메시지와 독립).
+      if (isPlay) {
+        _triggerPetPlayMotion();
+      } else {
+        _triggerPetHappyMotion();
+      }
+
       final eventPetId = petId.toString();
       if (isPlay) {
         await _showInteractionStatusMessage(
@@ -7069,9 +7103,6 @@ class _HomePageState extends State<HomePage>
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
 
-      if (isPlay) {
-        _triggerPetPlayMotion();
-      }
       _triggerPettingHeartEffect();
     } catch (e) {
       if (_isAuthUserMissingForeignKeyError(e)) {
@@ -11424,11 +11455,16 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
 
     if (_shouldUseFlamePetForActivePet()) {
-      final petId = _activePet?['id']?.toString();
-      if (petId != null && petId.isNotEmpty) {
+      final pet = _activePet;
+      final petId = pet?['id']?.toString();
+      if (pet != null && petId != null && petId.isNotEmpty) {
         try {
           await _yardGame
-              .showCatScoBabyPet(userPetId: petId)
+              .showYardPet(
+                userPetId: petId,
+                speciesCode: _flameSpeciesCodeForPet(pet),
+                stage: _normalizePetStage(pet['stage']),
+              )
               .timeout(
                 const Duration(seconds: 5),
                 onTimeout: () {
@@ -11436,6 +11472,7 @@ class _HomePageState extends State<HomePage>
                   return false;
                 },
               );
+          await _syncResidentPetsToYardGame();
         } catch (e, st) {
           debugPrint('startup YardGame spawn failed (isolated): $e\n$st');
         }
@@ -13958,14 +13995,11 @@ class _HomePageState extends State<HomePage>
       case 'cat_sco':
         return 'assets/images/pets/cat_sco/baby/idle_sheet.png';
       case 'dog_pom':
-        // 추후: 'assets/images/pets/dog_pom/baby/idle_sheet.png'
-        return null;
+        return 'assets/images/pets/dog_pom/baby/idle_sheet.png';
       case 'dog_bic':
-        // 추후: 'assets/images/pets/dog_bic/baby/idle_sheet.png'
-        return null;
+        return 'assets/images/pets/dog_bic/baby/idle_sheet.png';
       case 'cat_rag':
-        // 추후: 'assets/images/pets/cat_rag/baby/idle_sheet.png'
-        return null;
+        return 'assets/images/pets/cat_rag/baby/idle_sheet.png';
       default:
         return null;
     }
@@ -13976,7 +14010,7 @@ class _HomePageState extends State<HomePage>
     final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
     final frameInfo = await codec.getNextFrame();
     final sheet = frameInfo.image;
-    // 가로 strip 시트: 프레임은 정사각. 현재 cat_sco idle 은 80×80 (시트 320×80).
+    // 가로 strip 시트: 프레임은 정사각 (128×128, 시트 512×128 등).
     final frameSize = sheet.height;
     if (frameSize <= 0 || sheet.width < frameSize) {
       sheet.dispose();
@@ -15510,14 +15544,14 @@ class _HomePageState extends State<HomePage>
 
   String _petMotionDebugLabel(PetMotion motion) {
     return switch (motion) {
+      PetMotion.happy => 'Happy',
       PetMotion.idle => 'Idle',
-      PetMotion.walk => 'Walk',
-      PetMotion.run => 'Run',
-      PetMotion.lieDown => 'Lie Down',
-      PetMotion.lyingIdle => 'Lying Idle',
-      PetMotion.standUp => 'Stand Up',
-      PetMotion.kneading => 'Kneading',
       PetMotion.play => 'Play',
+      PetMotion.run => 'Run',
+      PetMotion.sit => 'Sit',
+      PetMotion.sittingIdle => 'Sitting Idle',
+      PetMotion.walk => 'Walk',
+      PetMotion.stand => 'Stand',
     };
   }
 
@@ -15601,7 +15635,7 @@ class _HomePageState extends State<HomePage>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Pet Motion Test (cat_sco baby)',
+              'Pet Motion Test',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 11,
@@ -15705,14 +15739,14 @@ class _HomePageState extends State<HomePage>
                   runSpacing: 4,
                   children: [
                     for (final entry in <(PetMotion, String)>[
+                      (PetMotion.happy, 'Happy'),
                       (PetMotion.idle, 'Idle'),
-                      (PetMotion.walk, 'Walk'),
-                      (PetMotion.run, 'Run'),
-                      (PetMotion.lieDown, 'Lie Down'),
-                      (PetMotion.lyingIdle, 'Lying Idle'),
-                      (PetMotion.standUp, 'Stand Up'),
-                      (PetMotion.kneading, 'Kneading'),
                       (PetMotion.play, 'Play'),
+                      (PetMotion.run, 'Run'),
+                      (PetMotion.sit, 'Sit'),
+                      (PetMotion.sittingIdle, 'Sitting Idle'),
+                      (PetMotion.walk, 'Walk'),
+                      (PetMotion.stand, 'Stand'),
                     ])
                       _buildPetMotionTestChip(
                         label: entry.$2,
@@ -18564,7 +18598,7 @@ class _HomePageState extends State<HomePage>
     }
 
     if (gain == 3 || gain == 5) {
-      _triggerPetKneadingIfApplicable(gain);
+      _triggerPetHappyMotion();
     }
     _invalidateAnalysisCache();
   }

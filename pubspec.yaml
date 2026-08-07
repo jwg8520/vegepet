@@ -75,7 +75,18 @@ flutter:
   assets:
     - assets/images/yard/
     - assets/images/pets/
+    - assets/images/pets/cat_rag/baby/
+    - assets/images/pets/cat_rag/young/
+    - assets/images/pets/cat_rag/teen/
     - assets/images/pets/cat_sco/baby/
+    - assets/images/pets/cat_sco/young/
+    - assets/images/pets/cat_sco/teen/
+    - assets/images/pets/dog_bic/baby/
+    - assets/images/pets/dog_bic/young/
+    - assets/images/pets/dog_bic/teen/
+    - assets/images/pets/dog_pom/baby/
+    - assets/images/pets/dog_pom/young/
+    - assets/images/pets/dog_pom/teen/
     - assets/images/ui/icons/
     - assets/images/ui/icons/cat_rag/
     - assets/images/ui/icons/cat_sco/
