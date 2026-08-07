@@ -548,7 +548,8 @@ class VegePetComponent extends PositionComponent
       (sum, f) => sum + f.stepTime,
     );
     if (cycle <= 0) return 0;
-    final intoCycle = animation.elapsed % cycle;
+    final elapsed = _animChild?.animationTicker?.elapsed ?? 0.0;
+    final intoCycle = elapsed % cycle;
     final remaining = cycle - intoCycle;
     if (remaining <= 0.0005) return 0;
     return remaining;
