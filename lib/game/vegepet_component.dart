@@ -389,7 +389,9 @@ class VegePetComponent extends PositionComponent
       case PetMotion.sit:
         await _playSit(generation: gen);
       case PetMotion.sittingIdle:
-        await _enterSittingIdle(resetAuto: !fromAuto, generation: gen);
+        // fromAuto 여부와 관계없이 다음 자동 행동(stand 포함)을 다시 스케줄한다.
+        // resetAuto: !fromAuto 이면 sittingIdle 재진입 후 스케줄이 끊겨 영구 착석한다.
+        await _enterSittingIdle(resetAuto: true, generation: gen);
       case PetMotion.stand:
         await _playStand(generation: gen, force: !fromAuto);
       case PetMotion.happy:

@@ -11635,7 +11635,8 @@ class _HomePageState extends State<HomePage>
     final canNext = pageIndex < pageCount - 1;
     final isLastPage = pageIndex >= pageCount - 1;
     final navTop = (_kGameCanvasHeight - _kStoryNavButtonSize) / 2;
-    final leftNavLeft = 16.0;
+    // 다이나믹 아일랜드에 가리지 않도록 이전 버튼만 우측으로 24px 이동.
+    final leftNavLeft = 16.0 + 24.0;
     final rightNavLeft = _kGameCanvasWidth - 16.0 - _kStoryNavButtonSize;
 
     return Positioned.fill(
@@ -14086,8 +14087,8 @@ class _HomePageState extends State<HomePage>
     }
     return RawImage(
       image: frame,
-      width: 40,
-      height: 40,
+      width: 46,
+      height: 46,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.none,
     );
