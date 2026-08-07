@@ -14125,12 +14125,18 @@ class _HomePageState extends State<HomePage>
     if (frame == null) {
       return _buildInitialAdoptionSpeciesFallbackIcon(isDogFamily: isDogFamily);
     }
-    return RawImage(
-      image: frame,
-      width: 58,
-      height: 58,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.none,
+    return Transform.translate(
+      offset: const Offset(0, -4),
+      child: Transform.scale(
+        scale: 1.2,
+        child: RawImage(
+          image: frame,
+          width: 48,
+          height: 48,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.none,
+        ),
+      ),
     );
   }
 
@@ -14179,6 +14185,7 @@ class _HomePageState extends State<HomePage>
                     width: isSelected ? 1.4 : 1,
                   ),
                 ),
+                clipBehavior: Clip.hardEdge,
                 alignment: Alignment.center,
                 child: _buildInitialAdoptionSpeciesIdleVisual(
                   species: species,

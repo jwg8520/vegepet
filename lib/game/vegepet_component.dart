@@ -275,8 +275,15 @@ class VegePetComponent extends PositionComponent
       return;
     }
 
+    // 더 이상 진행 불가: 제자리 walk/run 사이클 대기 없이 즉시 idle.
     _stopMovement();
-    unawaited(_finishDirectionalMoveAfterCycle(keepMoving: false));
+    _pendingMoveCycleFinish = false;
+    _motionTimer?.stop();
+    if (_motion == PetMotion.walk || _motion == PetMotion.run) {
+      final resetAuto = !_manualControl;
+      _motionGeneration++;
+      unawaited(_enterIdle(resetAuto: resetAuto));
+    }
   }
 
   Vector2? _pickAlternativeDirection(Vector2 current) {

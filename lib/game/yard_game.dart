@@ -316,6 +316,7 @@ class YardGame extends FlameGame {
   /// 저장된/패널에서 조정한 그림자 맵을 일괄 반영한다.
   void applyPetShadowTunes(PetShadowTuneStore store) {
     _petShadowTunes.applyAll(store);
+    _petShadowTunes.clampAllScales();
   }
 
   /// 특정 종×단계 슬롯의 그림자 값을 즉시 반영한다.
@@ -340,8 +341,12 @@ class YardGame extends FlameGame {
     if (opacity != null) tune.opacity = opacity;
     if (offsetX != null) tune.offsetX = offsetX;
     if (offsetY != null) tune.offsetY = offsetY;
-    if (widthScale != null) tune.widthScale = widthScale;
-    if (heightScale != null) tune.heightScale = heightScale;
+    if (widthScale != null) {
+      tune.widthScale = clampPetShadowWidthScale(widthScale);
+    }
+    if (heightScale != null) {
+      tune.heightScale = clampPetShadowHeightScale(heightScale);
+    }
     if (blurSigma != null) tune.blurSigma = blurSigma;
   }
 

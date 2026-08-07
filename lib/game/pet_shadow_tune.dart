@@ -15,6 +15,18 @@ const double kPetShadowDefaultWidthScale = 0.74;
 const double kPetShadowDefaultHeightScale = 0.16;
 const double kPetShadowDefaultBlurSigma = 0.5;
 
+/// debug 슬라이더와 동일한 scale 허용 범위.
+const double kPetShadowWidthScaleMin = 0.2;
+const double kPetShadowWidthScaleMax = 1.2;
+const double kPetShadowHeightScaleMin = 0.05;
+const double kPetShadowHeightScaleMax = 0.5;
+
+double clampPetShadowWidthScale(double value) =>
+    value.clamp(kPetShadowWidthScaleMin, kPetShadowWidthScaleMax).toDouble();
+
+double clampPetShadowHeightScale(double value) =>
+    value.clamp(kPetShadowHeightScaleMin, kPetShadowHeightScaleMax).toDouble();
+
 /// 그림자 튜닝 대상 종.
 const List<String> kPetShadowSpeciesCodes = [
   'cat_rag',
@@ -64,6 +76,11 @@ class PetShadowTuneConfig {
   /// Paint 에 바로 쓸 수 있는 색 (color × opacity).
   Color get paintColor => color.withValues(alpha: opacity);
 
+  void clampScales() {
+    widthScale = clampPetShadowWidthScale(widthScale);
+    heightScale = clampPetShadowHeightScale(heightScale);
+  }
+
   void resetToDefaults() {
     enabled = kPetShadowDefaultEnabled;
     color = kPetShadowDefaultColor;
@@ -84,6 +101,7 @@ class PetShadowTuneConfig {
     widthScale = other.widthScale;
     heightScale = other.heightScale;
     blurSigma = other.blurSigma;
+    clampScales();
   }
 
   PetShadowTuneConfig clone() {
@@ -126,12 +144,13 @@ class PetShadowTuneConfig {
         (json['offsetX'] as num?)?.toDouble() ?? kPetShadowDefaultOffsetX;
     config.offsetY =
         (json['offsetY'] as num?)?.toDouble() ?? kPetShadowDefaultOffsetY;
-    config.widthScale =
-        (json['widthScale'] as num?)?.toDouble() ??
-        kPetShadowDefaultWidthScale;
-    config.heightScale =
-        (json['heightScale'] as num?)?.toDouble() ??
-        kPetShadowDefaultHeightScale;
+    config.widthScale = clampPetShadowWidthScale(
+      (json['widthScale'] as num?)?.toDouble() ?? kPetShadowDefaultWidthScale,
+    );
+    config.heightScale = clampPetShadowHeightScale(
+      (json['heightScale'] as num?)?.toDouble() ??
+          kPetShadowDefaultHeightScale,
+    );
     config.blurSigma =
         (json['blurSigma'] as num?)?.toDouble() ?? kPetShadowDefaultBlurSigma;
     return config;
@@ -193,6 +212,13 @@ class PetShadowTuneStore {
       config.resetToDefaults();
     }
   }
+
+  void clampAllScales() {
+    ensureAllSlots();
+    for (final config in _byKey.values) {
+      config.clampScales();
+    }
+  }
 }
 
 /// debug 펫 그림자 튜닝 값 SharedPreferences 저장/복원 (종×단계 맵).
@@ -228,6 +254,7 @@ class PetShadowTunePreferences {
           }
         }
         store.ensureAllSlots();
+        store.clampAllScales();
         return store;
       }
 
@@ -252,12 +279,14 @@ class PetShadowTunePreferences {
             prefs.getDouble(keyHeightScale) ?? kPetShadowDefaultHeightScale;
         legacy.blurSigma =
             prefs.getDouble(keyBlurSigma) ?? kPetShadowDefaultBlurSigma;
+        legacy.clampScales();
         store.fillAllFrom(legacy);
       }
     } catch (e) {
       debugPrint('PetShadowTunePreferences.load failed: $e');
       store.resetAllToDefaults();
     }
+    store.clampAllScales();
     return store;
   }
 
