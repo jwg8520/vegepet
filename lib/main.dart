@@ -846,13 +846,18 @@ class _HomePageState extends State<HomePage>
   bool _isNamingDialogOpen = false;
   bool _canShowActivePetDuringNaming = false;
   bool _isPetNamingPanelClosing = false;
-  /// 이름 짓기 필수 플로우 진행 중(재진입 가드).
+  /// 분양 직후 이름 짓기 패널 진행 중(재진입 가드).
   bool _isShowingNicknameDialog = false;
   final TextEditingController _petNamingController = TextEditingController();
   final FocusNode _petNamingFocusNode = FocusNode();
   Completer<String?>? _petNamingCompleter;
   late AnimationController _petNamingPanelEnterController;
   late Animation<double> _petNamingPanelEnterCurve;
+
+  /// 아보펫 정보창에서 펫 이름 수정용.
+  final TextEditingController _petInfoNameController = TextEditingController();
+  final FocusNode _petInfoNameFocusNode = FocusNode();
+  bool _isPetInfoNameSaving = false;
 
   static const List<String> _languageDisplayOptions = ['한국어', 'English'];
 
@@ -1161,6 +1166,9 @@ class _HomePageState extends State<HomePage>
   /// 같은 frame 에 Yard sync schedule 이 중복되지 않도록 하는 가드.
   bool _yardPetSyncScheduled = false;
 
+  /// 방금 분양된 펫 id. 첫 Flame spawn 은 랜덤 배치 없이 기본 위치(오두막 앞)에 둔다.
+  String? _pendingFreshAdoptPetId;
+
   /// 디버그 성장 단계 조작(성숙기 직전/도달 등) 중복 실행 방지.
   bool _isDebugStageMutationInFlight = false;
 
@@ -1398,6 +1406,17 @@ class _HomePageState extends State<HomePage>
         ),
       ],
     );
+    _ensureKeyboardFocusBinding(
+      key: 'pet_info_name',
+      controller: _petInfoNameController,
+      focusNode: _petInfoNameFocusNode,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(
+          8,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        ),
+      ],
+    );
     // 계정 인증은 Google/Apple 네이티브 SDK 로만 진행한다.
     // 텍스트 입력이 없으므로 계정 패널용 keyboard accessory binding 도 없다.
     _petToySwapController = AnimationController(
@@ -1620,6 +1639,8 @@ class _HomePageState extends State<HomePage>
     _pettingHeartColorHexController.dispose();
     _petNamingController.dispose();
     _petNamingFocusNode.dispose();
+    _petInfoNameController.dispose();
+    _petInfoNameFocusNode.dispose();
     if (_randomTicketUseConfirmCompleter != null &&
         !_randomTicketUseConfirmCompleter!.isCompleted) {
       _randomTicketUseConfirmCompleter!.complete(false);
@@ -1702,8 +1723,9 @@ class _HomePageState extends State<HomePage>
     _safeSetState(_dismissIntroStoryOverlay);
   }
 
-  /// 프로필 완료 → 선택 분양 → 분양 펫 이름 저장이 끝나기 전까지
+  /// 프로필 완료 → 선택 분양이 끝나기 전까지
   /// 좌/우 상단 HUD 코너 버튼(아보펫 정보, 게임 메뉴) 터치를 막는다.
+  /// 펫 이름(nickname)이 null/빈 값이어도 HUD는 막지 않는다(정보창에서 수정 가능).
   bool _isInitialOnboardingHudBlocked() {
     if (!_isProfileComplete()) return true;
     if (_isSavingProfile || _isProfileSetupClosing) return true;
@@ -1714,8 +1736,6 @@ class _HomePageState extends State<HomePage>
     }
     if (_isNamingDialogOpen) return true;
     if (_activePet == null) return true;
-    final nick = _activePet!['nickname']?.toString().trim() ?? '';
-    if (nick.isEmpty) return true;
     return false;
   }
 
@@ -1835,9 +1855,12 @@ class _HomePageState extends State<HomePage>
       debugPrint('stale _fetchCoreUserData ignored (user changed)');
       return;
     }
-    // Flame spawn 은 UI/부트스트랩을 막지 않도록 schedule 만 한다.
-    // 시작 로딩 완료는 `_completeStartupLoadingWhenYardReady` 에서 별도 처리.
-    _scheduleSyncActivePetToYardGame();
+    // 시작 로딩 중이면 Flame spawn 을 여기서 돌리지 않는다.
+    // `_completeStartupLoadingWhenYardReady` 가 yardReady 후 schedule 한다.
+    // (로딩이 spawn 완료를 기다리지 않도록 중복·대기 제거)
+    if (!_showStartupLoadingOverlay) {
+      _scheduleSyncActivePetToYardGame();
+    }
   }
 
   /// [_fetchCoreUserData] 직후 UI·프로필 form 상태를 마당 ready 기준으로 맞춘다.
@@ -1875,7 +1898,11 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionInFlight = false;
       }
     });
-    _scheduleSyncActivePetToYardGame();
+    // 시작 로딩 중 spawn 은 completeStartup 한곳에서만 schedule.
+    if (!_showStartupLoadingOverlay) {
+      _scheduleSyncActivePetToYardGame();
+      _ensurePendingPetNamingIfNeeded();
+    }
   }
 
   /// 회원탈퇴·stale session reset 직후 새 anonymous guest 프로필 입력창을 즉시 확정한다.
@@ -5418,6 +5445,7 @@ class _HomePageState extends State<HomePage>
     final user = supabase.auth.currentUser;
     if (user == null) {
       _activePet = null;
+      _syncPetInfoNameFromActivePet();
       if (syncYard) {
         _scheduleSyncActivePetToYardGame();
       }
@@ -5447,6 +5475,7 @@ class _HomePageState extends State<HomePage>
     if (_activePet != null) {
       _activePet!['stage'] = _normalizePetStage(_activePet!['stage']);
     }
+    _syncPetInfoNameFromActivePet();
     if (syncYard) {
       _scheduleSyncActivePetToYardGame();
     }
@@ -6209,6 +6238,12 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
+    // 신규 분양 펫은 랜덤 배치 없이 기본 스폰 위치(오두막 문 앞)에 등장시킨다.
+    final isFreshAdopt = _pendingFreshAdoptPetId == petId;
+    if (isFreshAdopt) {
+      _pendingFreshAdoptPetId = null;
+    }
+
     // Flame spawn 은 UI 핵심 흐름과 분리. timeout/실패는 로그만 남긴다.
     bool shown = false;
     try {
@@ -6217,6 +6252,7 @@ class _HomePageState extends State<HomePage>
             userPetId: petId,
             speciesCode: code,
             stage: stage,
+            seedRandomAmbient: isFreshAdopt ? false : null,
           )
           .timeout(
             const Duration(seconds: 5),
@@ -7520,6 +7556,9 @@ class _HomePageState extends State<HomePage>
         _selectedSpeciesId = null;
       });
 
+      // 신규 분양: 기본 스폰 위치(오두막 문 앞) 고정.
+      _pendingFreshAdoptPetId = _activePet?['id']?.toString();
+
       // Flame 시각 동기화는 UI 흐름과 분리 (이름짓기/HUD를 막지 않음).
       _scheduleSyncActivePetToYardGame();
 
@@ -7557,14 +7596,40 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // 분양 직후·앱 재시작 시 마당 위 이름 짓기 패널.
+  // 분양 직후 마당 위 이름 짓기 패널(필수).
   // 허용 문자: 한글/영문 대소문자/숫자, 길이 2~8자, 공백·특수문자 금지.
-  // nickname 이 null/빈 값이면 저장 성공 전까지 닫히지 않는다.
-  bool _activePetNeedsNickname() {
+  // 바깥 탭으로 닫을 수 없다. 전원 종료 등으로 nickname 이 null 이면 재진입 시 다시 표시한다.
+  void _syncPetInfoNameFromActivePet() {
+    final nick = _activePet?['nickname']?.toString() ?? '';
+    if (_petInfoNameController.text == nick) return;
+    _petInfoNameController.value = TextEditingValue(
+      text: nick,
+      selection: TextSelection.collapsed(offset: nick.length),
+    );
+  }
+
+  /// 현재 active 펫에 저장할 이름이 아직 없는지.
+  bool _activePetNeedsNaming() {
     final pet = _activePet;
     if (pet == null) return false;
-    final nick = pet['nickname']?.toString().trim() ?? '';
-    return nick.isEmpty;
+    final nick = pet['nickname']?.toString().trim();
+    return nick == null || nick.isEmpty;
+  }
+
+  /// 미네이밍 active 펫이 있으면 이름 짓기 패널을 다시 연다.
+  /// (앱 재시작·계정 전환·저장 실패 후 강제 네이밍 복구)
+  void _ensurePendingPetNamingIfNeeded() {
+    if (!mounted) return;
+    if (!_activePetNeedsNaming()) return;
+    if (_isShowingNicknameDialog || _isNamingDialogOpen) return;
+    if (!_isProfileComplete()) return;
+    if (_isInitialAdoptionPanelVisible ||
+        _isInitialAdoptionPanelClosing ||
+        _isInitialAdoptionInFlight) {
+      return;
+    }
+    if (_showStartupLoadingOverlay || _showIntroStoryOverlay) return;
+    unawaited(_showNicknameDialog());
   }
 
   /// 로그아웃/계정 리셋 등에서 대기 중인 이름 짓기 Future 를 풀어 준다.
@@ -7579,90 +7644,140 @@ class _HomePageState extends State<HomePage>
     _petNamingController.clear();
   }
 
-  /// 로딩/부트스트랩 이후: 이름 없는 활성 펫이면 이름 짓기 창을 연다.
-  Future<void> _ensurePendingPetNamingIfNeeded() async {
-    if (!mounted) return;
-    if (_status != _ViewStatus.ready) return;
-    if (_showIntroStoryOverlay || _introStoryFadingOut) return;
-    if (_showStartupLoadingOverlay) return;
-    if (!_isProfileComplete()) return;
-    if (_isInitialAdoptionPanelVisible ||
-        _isInitialAdoptionPanelClosing ||
-        _isInitialAdoptionInFlight) {
-      return;
-    }
-    if (!_activePetNeedsNickname()) return;
-    if (_isShowingNicknameDialog || _isNamingDialogOpen) return;
-    await _showNicknameDialog();
-  }
-
   Future<void> _showNicknameDialog() async {
     if (_isShowingNicknameDialog) return;
     _isShowingNicknameDialog = true;
+    var shouldRetryAfterSaveFailure = false;
     try {
-      while (mounted && _activePetNeedsNickname()) {
-        final pet = _activePet;
-        if (pet == null) return;
+      final pet = _activePet;
+      if (pet == null) return;
 
-        final petId = pet['id']?.toString();
-        if (petId == null || petId.isEmpty) return;
+      final petId = pet['id']?.toString();
+      if (petId == null || petId.isEmpty) return;
 
-        _dismissFocus();
-        _petNamingController.clear();
+      _dismissFocus();
+      _petNamingController.clear();
 
-        final completer = Completer<String?>();
-        _petNamingCompleter = completer;
+      final completer = Completer<String?>();
+      _petNamingCompleter = completer;
 
-        _safeSetState(() {
-          _isNamingDialogOpen = true;
-          _canShowActivePetDuringNaming = true;
-          _isPetNamingPanelClosing = false;
-        });
-        _petNamingPanelEnterController.stop();
-        _petNamingPanelEnterController.value = 0;
-        unawaited(_petNamingPanelEnterController.forward());
+      _safeSetState(() {
+        _isNamingDialogOpen = true;
+        _canShowActivePetDuringNaming = true;
+        _isPetNamingPanelClosing = false;
+      });
+      _petNamingPanelEnterController.stop();
+      _petNamingPanelEnterController.value = 0;
+      unawaited(_petNamingPanelEnterController.forward());
 
-        final nickname = await completer.future;
-        _petNamingCompleter = null;
+      final nickname = await completer.future;
+      _petNamingCompleter = null;
+
+      if (!mounted) return;
+      // 로그아웃/계정 리셋 등으로 취소된 경우. 강제 네이밍 재표시는 하지 않는다.
+      if (nickname == null) return;
+
+      await _waitForUiSettle();
+      if (!mounted) return;
+
+      try {
+        await supabase
+            .from('user_pets')
+            .update({'nickname': nickname})
+            .eq('id', petId);
+
+        await _fetchActivePet(syncYard: false);
 
         if (!mounted) return;
-        // 취소/강제 종료로 null 이면 다시 연다 (이름 없이 진행 불가).
-        if (nickname == null) {
-          await _waitForUiSettle();
-          continue;
-        }
+        _safeSetState(() {});
 
-        await _waitForUiSettle();
+        _scheduleSyncActivePetToYardGame();
+      } catch (e) {
         if (!mounted) return;
-
-        try {
-          await supabase
-              .from('user_pets')
-              .update({'nickname': nickname})
-              .eq('id', petId);
-
-          await _fetchActivePet(syncYard: false);
-
-          if (!mounted) return;
-          _safeSetState(() {});
-
-          _scheduleSyncActivePetToYardGame();
-
-          await _waitForUiSettle();
-          if (!mounted) return;
-          // 로컬 상태가 비어 있으면 다시 연다.
-          if (!_activePetNeedsNickname()) return;
-        } catch (e) {
-          if (!mounted) return;
-          debugPrint('pet naming save failed type=${e.runtimeType}');
-          _showCommunicationErrorNotice();
-          await _waitForUiSettle();
-          // 저장 실패 → 다시 이름 창.
-        }
+        debugPrint('pet naming save failed type=${e.runtimeType}');
+        _showCommunicationErrorNotice();
+        shouldRetryAfterSaveFailure = true;
       }
     } finally {
       _isShowingNicknameDialog = false;
     }
+    if (shouldRetryAfterSaveFailure && mounted) {
+      _ensurePendingPetNamingIfNeeded();
+    }
+  }
+
+  /// 정보창 이름 입력이 저장된 nickname 과 다른지 여부.
+  bool _isPetInfoNameDirty() {
+    final pet = _activePet;
+    if (pet == null) return false;
+    final current = pet['nickname']?.toString().trim() ?? '';
+    return _petInfoNameController.text.trim() != current;
+  }
+
+  /// 정보창 이름을 저장한다. 저장 성공/변경 없음이면 true.
+  /// 검증 실패(빈 값·형식 오류·중복)면 알림 후 false.
+  Future<bool> _persistPetInfoNameIfDirty() async {
+    if (_isPetInfoNameSaving) return false;
+    if (_isNameInterlockNoticeOpen) return false;
+    final pet = _activePet;
+    final petId = pet?['id']?.toString();
+    if (pet == null || petId == null || petId.isEmpty) return true;
+    if (!_isPetInfoNameDirty()) return true;
+
+    final text = _petInfoNameController.text.trim();
+    if (text.isEmpty || !_isValidNicknameOrPetName(text)) {
+      await _showNameInterlockNotice();
+      return false;
+    }
+
+    final duplicated = await _hasDuplicatePokedexPetName(text);
+    if (!mounted) return false;
+    if (duplicated) {
+      await _showDuplicatePetNameNotice();
+      return false;
+    }
+
+    _isPetInfoNameSaving = true;
+    try {
+      await supabase
+          .from('user_pets')
+          .update({'nickname': text})
+          .eq('id', petId);
+      await _fetchActivePet(syncYard: false);
+      if (!mounted) return false;
+      _safeSetState(() {});
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+      debugPrint('pet info name save failed type=${e.runtimeType}');
+      _syncPetInfoNameFromActivePet();
+      _showCommunicationErrorNotice();
+      return false;
+    } finally {
+      _isPetInfoNameSaving = false;
+    }
+  }
+
+  /// 키보드 액세서리 완료(체크) — 프로필 닉네임과 동일하게 즉시 저장.
+  Future<void> _submitPetInfoNameEdit() async {
+    if (!_isPetInfoNameDirty()) {
+      _dismissKeyboardSessionOnly();
+      return;
+    }
+    final saved = await _persistPetInfoNameIfDirty();
+    if (!mounted) return;
+    if (!saved) {
+      _syncPetInfoNameFromActivePet();
+      return;
+    }
+    _dismissKeyboardSessionOnly();
+  }
+
+  /// 정보창을 닫기 전에 변경된 이름을 저장한다. 저장 불가면 닫지 않는다.
+  Future<bool> _savePetInfoNameIfDirtyBeforeClose() async {
+    if (!_isPetInfoNameDirty()) return true;
+    _dismissFocus();
+    return _persistPetInfoNameIfDirty();
   }
 
   Future<void> _refreshAll() async {
@@ -10283,7 +10398,7 @@ class _HomePageState extends State<HomePage>
       // 5) 상태 재조회
       try {
         await Future.wait([
-          _fetchActivePet(),
+          _fetchActivePet(syncYard: false),
           _fetchResidentPets(),
           _fetchRandomTicketCount(),
           _fetchTodayMealLogs(),
@@ -10293,6 +10408,9 @@ class _HomePageState extends State<HomePage>
       }
 
       if (!mounted) return;
+      // 신규 분양: 기본 스폰 위치(오두막 문 앞) 고정.
+      _pendingFreshAdoptPetId = _activePet?['id']?.toString();
+      _scheduleSyncActivePetToYardGame();
       _safeSetState(() {});
 
       // 성공 분기만: 게임메뉴 바깥 탭 가방 닫기와 동일하게 중앙 페이드 → 마당
@@ -10409,6 +10527,9 @@ class _HomePageState extends State<HomePage>
         break;
       case 'pet_naming':
         unawaited(_submitPetNaming());
+        return;
+      case 'pet_info_name':
+        unawaited(_submitPetInfoNameEdit());
         return;
       default:
         break;
@@ -11618,11 +11739,12 @@ class _HomePageState extends State<HomePage>
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
         if (_isNamingDialogOpen || _isPetNamingPanelClosing) ...[
-          // 이름 저장 전까지 마당/HUD 등 뒤 레이어 조작 차단.
+          // 바깥 탭으로 닫지 않는다(이름 짓기 필수). 뒤쪽 마당/HUD 입력만 막는다.
           Positioned.fill(
-            child: ModalBarrier(
-              dismissible: false,
-              color: Colors.black.withValues(alpha: 0.28),
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {},
+              child: const SizedBox.expand(),
             ),
           ),
           _buildInYardPetNamingPanel(),
@@ -11687,32 +11809,8 @@ class _HomePageState extends State<HomePage>
 
     if (!mounted) return;
 
-    if (_shouldUseFlamePetForActivePet()) {
-      final pet = _activePet;
-      final petId = pet?['id']?.toString();
-      if (pet != null && petId != null && petId.isNotEmpty) {
-        try {
-          await _yardGame
-              .showYardPet(
-                userPetId: petId,
-                speciesCode: _flameSpeciesCodeForPet(pet),
-                stage: _normalizePetStage(pet['stage']),
-              )
-              .timeout(
-                const Duration(seconds: 5),
-                onTimeout: () {
-                  debugPrint('startup YardGame spawn timeout: petId=$petId');
-                  return false;
-                },
-              );
-          await _syncResidentPetsToYardGame();
-        } catch (e, st) {
-          debugPrint('startup YardGame spawn failed (isolated): $e\n$st');
-        }
-      }
-    }
-
-    if (!mounted) return;
+    // 펫/resident spawn 은 로딩 dismiss 를 막지 않는다 (백그라운드 schedule).
+    _scheduleSyncActivePetToYardGame();
 
     _startupLoadingTimer?.cancel();
 
@@ -11750,10 +11848,8 @@ class _HomePageState extends State<HomePage>
       _showStartupLoadingOverlay = false;
     });
 
-    // 재시작 등으로 nickname 이 비어 있으면 이름 짓기 필수 창을 다시 연다.
-    if (mounted) {
-      unawaited(_ensurePendingPetNamingIfNeeded());
-    }
+    // 전원 종료 등으로 이름이 비어 있으면 강제 이름 짓기 패널을 다시 연다.
+    _ensurePendingPetNamingIfNeeded();
   }
 
   Future<void> _precacheIntroStoryImages() async {
@@ -13872,8 +13968,6 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _closePetNamingPanel({required String? result}) async {
-    // 이름 미입력 취소 닫기는 허용하지 않는다 (필수 온보딩).
-    if (result == null) return;
     if (_isPetNamingPanelClosing) return;
     _dismissFocus();
     _safeSetState(() => _isPetNamingPanelClosing = true);
@@ -13968,37 +14062,35 @@ class _HomePageState extends State<HomePage>
           },
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFFBF5).withValues(alpha: 0.60),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.07),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBF5).withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFFF6F0E6).withValues(alpha: 0.85),
+                  width: 1,
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      left: 14,
-                      top: 14,
-                      right: 14,
-                      child: Text(
-                        l10n.petNamingTitle,
-                        textAlign: TextAlign.left,
-                        style: titleStyle,
-                      ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.07),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    left: 14,
+                    top: 14,
+                    right: 14,
+                    child: Text(
+                      l10n.petNamingTitle,
+                      textAlign: TextAlign.left,
+                      style: titleStyle,
                     ),
+                  ),
                     Positioned(
                       left: 14,
                       top: 40,
@@ -14136,7 +14228,6 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   ],
-                ),
               ),
             ),
           ),
@@ -16907,6 +16998,7 @@ class _HomePageState extends State<HomePage>
       if (!canClose) return;
     }
     if (!mounted) return;
+    _syncPetInfoNameFromActivePet();
     _safeSetState(() {
       _isPetInfoBannerOpen = true;
       _gameMenuPanelOpen = false;
@@ -16937,12 +17029,27 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
+    if (!opening) {
+      await _closePetInfoBannerSavingName();
+      return;
+    }
+
     _safeSetState(() {
-      _isPetInfoBannerOpen = !_isPetInfoBannerOpen;
+      _syncPetInfoNameFromActivePet();
+      _isPetInfoBannerOpen = true;
     });
   }
 
   void _closePetInfoBanner() {
+    if (!_isPetInfoBannerOpen) return;
+    unawaited(_closePetInfoBannerSavingName());
+  }
+
+  /// 닫기 전에 이름 입력을 저장한다(프로필 패널과 동일 정책).
+  Future<void> _closePetInfoBannerSavingName() async {
+    if (!_isPetInfoBannerOpen) return;
+    final canClose = await _savePetInfoNameIfDirtyBeforeClose();
+    if (!mounted || !canClose) return;
     if (!_isPetInfoBannerOpen) return;
     _safeSetState(() {
       _isPetInfoBannerOpen = false;
@@ -16956,7 +17063,7 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _onGameMenuHudIconTapAsync() async {
     if (_isPetInfoBannerOpen) {
-      _closePetInfoBanner();
+      await _closePetInfoBannerSavingName();
       return;
     }
     if (!await _guardAccountAliveBeforeUserAction('open game menu')) return;
@@ -16998,7 +17105,8 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    _closePetInfoBanner();
+    await _closePetInfoBannerSavingName();
+    if (!mounted || _isPetInfoBannerOpen) return;
     await _waitForUiSettle();
     if (!mounted) return;
 
@@ -17078,12 +17186,6 @@ class _HomePageState extends State<HomePage>
     final species = _speciesForPet(pet) ?? <String, dynamic>{};
     final family = species['family']?.toString().toLowerCase() ?? '';
     final speciesDisplayName = _speciesDisplayNameForCurrentLocale(species);
-    final nickname = pet['nickname']?.toString();
-    final displayName = (nickname == null || nickname.isEmpty)
-        ? (speciesDisplayName.isNotEmpty
-              ? speciesDisplayName
-              : (_isEnglishLocale ? 'AvoPet' : '펫'))
-        : nickname;
     final typeDisplay = speciesDisplayName.isNotEmpty
         ? speciesDisplayName
         : (_isEnglishLocale ? 'AvoPet' : '펫');
@@ -17265,7 +17367,37 @@ class _HomePageState extends State<HomePage>
                         width: 38,
                         child: Text(l10n.petInfoNameLabel, style: labelStyle),
                       ),
-                      Expanded(child: metaValueBox(displayName)),
+                      Expanded(
+                        child: _buildKeyboardAccessoryTriggerField(
+                          key: 'pet_info_name',
+                          controller: _petInfoNameController,
+                          sourceFocusNode: _petInfoNameFocusNode,
+                          keyboardType: TextInputType.text,
+                          enabled: !_isPetInfoNameSaving,
+                          inputFormatters: [
+                            LengthLimitingTextInputFormatter(
+                              8,
+                              maxLengthEnforcement:
+                                  MaxLengthEnforcement.enforced,
+                            ),
+                          ],
+                          style: valueStyle,
+                          hintStyle: valueStyle.copyWith(
+                            color: const Color(0xFFB0B0B0),
+                          ),
+                          hintText: l10n.petNamingHint,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.52),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.45),
+                              width: 0.8,
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -21375,7 +21507,7 @@ class _HomePageState extends State<HomePage>
     }
 
     if (_isPetInfoBannerOpen) {
-      _closePetInfoBanner();
+      await _closePetInfoBannerSavingName();
       return;
     }
 

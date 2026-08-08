@@ -1,0 +1,10 @@
+.gitattributes text eol=lf
+.editorconfig text eol=lf
+
+*.dart text eol=lf
+*.arb text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.plist text eol=lf
+*.pbxproj text eol=lf

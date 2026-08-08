@@ -1,6 +1,6 @@
 {
-    "name": "vegepet",
-    "short_name": "vegepet",
+    "name": "AvoPet",
+    "short_name": "AvoPet",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

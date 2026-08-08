@@ -883,11 +883,15 @@ class YardGame extends FlameGame {
   }
 
   /// 종·단계 지정 Flame 펫을 마당에 표시한다 (active).
+  ///
+  /// [seedRandomAmbient] 를 false 로 주면 랜덤 배치 없이 기본 스폰 위치
+  /// (오두막 문 앞)를 사용한다. 신규 분양이 여기에 해당한다.
   Future<bool> showYardPet({
     required String userPetId,
     required String speciesCode,
     required String stage,
     Vector2? position,
+    bool? seedRandomAmbient,
   }) async {
     if (_petSpawnInFlight != null && _petSpawnInFlightUserId == userPetId) {
       debugPrint(
@@ -901,6 +905,7 @@ class YardGame extends FlameGame {
       speciesCode: speciesCode,
       stage: stage,
       position: position,
+      seedRandomAmbient: seedRandomAmbient,
     );
     _petSpawnInFlight = future;
     _petSpawnInFlightUserId = userPetId;
@@ -919,6 +924,7 @@ class YardGame extends FlameGame {
     required String speciesCode,
     required String stage,
     Vector2? position,
+    bool? seedRandomAmbient,
   }) async {
     try {
       _lastPetSpawnError = null;
@@ -953,7 +959,7 @@ class YardGame extends FlameGame {
       // 다른 펫으로 active 교체 시에는 이전 펫 위치를 물려받지 않는다.
       // (같은 userPetId 재스폰/단계 변경만 위치 유지)
       Vector2? spawnPosition = position;
-      var seedAmbient = position == null;
+      var seedAmbient = seedRandomAmbient ?? (position == null);
       if (spawnPosition == null &&
           existing != null &&
           _isAvoPetAlive(existing)) {

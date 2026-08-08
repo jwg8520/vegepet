@@ -1,7 +1,7 @@
-# VegePet Supabase RLS/RPC 보안 점검 설계안
+ AvoPet Supabase RLS/RPC 보안 점검 설계안
 
 > **문서 목적**: Supabase SQL을 바로 적용하기 전, 검토용 보안 설계안  
-> **기준 파일**: `lib/main.dart`, `docs/vegepet_mvp_spec.md`, `docs/wireframe_notes.md`  
+> **기준 파일**: `lib/main.dart`, `docs/avopet_mvp_spec.md`, `docs/wireframe_notes.md`
 > **작성 기준일**: 2026-05-31  
 > **상태**: 적용 전 검토용 (코드/SQL 미적용)
 
@@ -47,7 +47,7 @@ meal_logs → meal_diary_notes → pokedex_entries → user_items → user_pets 
 meal_logs → meal_diary_notes → pokedex_entries → user_items → user_pets → profiles(update) → signOut → signInAnonymously
 ```
 
-두 경로 모두 `TODO(vegepet/security)` 주석으로 "RLS 전제 + security definer RPC 이전 필요"를 명시하고 있습니다.
+두 경로 모두 `TODO(avopet/security)` 주석으로 "RLS 전제 + security definer RPC 이전 필요"를 명시하고 있습니다.
 
 ### 0.4 이미 확인된 위험 신호
 

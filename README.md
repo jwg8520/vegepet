@@ -1,4 +1,4 @@
-# vegepet
+# AvoPet
 
 A new Flutter project.
 

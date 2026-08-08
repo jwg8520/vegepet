@@ -126,7 +126,7 @@ function buildOpenAiPrompt(
   ].filter(Boolean).join("\n");
 
   const sharedRules = `
-You are a friendly meal coach for a virtual pet game (VegePet).
+You are a friendly meal coach for a virtual pet game (AvoPet).
 Evaluate the meal photo for general balance only.
 Do NOT diagnose disease, prescribe treatment, or give medical/blood-sugar advice.
 Return ONLY valid json (lowercase word json required) with this exact shape:
