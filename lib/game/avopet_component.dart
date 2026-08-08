@@ -136,10 +136,10 @@ class AvoPetComponent extends PositionComponent
     );
   }
 
-  /// 자동 ambient 일반 idle_sheet 연속 cycle 상한.
+  /// 자동 ambient 일반 idle_sheet: 1회 발동당 최대 cycle 수.
   static const int kMaxConsecutiveIdleReps = 8;
 
-  /// 자동 ambient 에서 연속으로 재생된 idle cycle 수.
+  /// 현재 idle 발동(bout)에서 재생한 cycle 수.
   /// happy/play/sittingIdle 및 수동 debug motion 은 집계하지 않는다.
   int _consecutiveIdleReps = 0;
 
@@ -265,19 +265,22 @@ class AvoPetComponent extends PositionComponent
       );
       size = Vector2.all(displaySize);
       if (seedRandomAmbient) {
-        // 재실행 복원: idle 스프라이트까지 onLoad 에서 준비하고,
-        // visualReady/ambient 는 onMount 이후(실제 렌더 가능 시점)로 미룬다.
+        // cold-start: 랜덤 위치 + idle 준비. ambient 는 onMount 이후.
         _relocateToRandomWalkablePosition();
         _facingLeft = _random.nextBool();
-        await _enterIdle(resetAuto: false);
-        _pendingAmbientBootstrap = true;
       } else {
+        // 신규 분양 등: 오두막 앞(또는 지정) 위치 유지. ambient 는 onMount 이후.
+        // seedRandomAmbient 는 "랜덤 배치"만 끄며 ambient loop 자체를 끄지 않는다.
         _facingLeft = true;
-        await _enterIdle(resetAuto: true);
       }
+      // visualReady 전(onLoad)에 idle bout/timer 를 돌리면 mount 전 generation
+      // 경합으로 ambient 가 영구히 끊길 수 있어, 양쪽 모두 mount 후 bootstrap.
+      await _enterIdle(resetAuto: false);
+      _pendingAmbientBootstrap = true;
       debugPrint(
         'AvoPetComponent onLoad done: id=$userPetId '
-        'assets=${_assets != null} anim=${_animChild != null}',
+        'assets=${_assets != null} anim=${_animChild != null} '
+        'seedAmbient=$seedRandomAmbient',
       );
     } catch (e, st) {
       _failVisualReady(e, st);
@@ -322,7 +325,7 @@ class AvoPetComponent extends PositionComponent
     }
   }
 
-  /// cold-start ambient: visualReady(mount) 이후에 일상 모션을 이어간다.
+  /// cold-start / fresh-adopt 공통: visualReady(mount) 이후 일상 모션을 시작한다.
   Future<void> _bootstrapAmbientAfterVisualReady() async {
     if (!isMounted || _assets == null) return;
     try {
@@ -364,22 +367,28 @@ class AvoPetComponent extends PositionComponent
 
   /// 현재 footprint 가 마당 mask 와 겹치면 최근접 안전 발 위치로 최소 보정한다.
   /// 정상 위치면 no-op. recovery 후에도 이동은 기존 collision 판정을 그대로 쓴다.
-  void resolveCollisionOverlapIfNeeded() {
-    if (!_isFootprintOverlappingMaskAt(position)) return;
+  ///
+  /// 반환: 보정 거리(px). 보정 없으면 0.
+  double resolveCollisionOverlapIfNeeded({String? reason}) {
+    if (!_isFootprintOverlappingMaskAt(position)) return 0;
+    final from = position.clone();
     final safe = _findNearestClearFootPosition();
     if (safe == null) {
       debugPrint(
         'AvoPetComponent collision recovery failed id=$userPetId '
-        'pos=$position',
+        'pos=$position reason=${reason ?? '-'}',
       );
-      return;
+      return 0;
     }
+    final distance = from.distanceTo(safe);
     debugPrint(
       'AvoPetComponent collision recovery id=$userPetId '
-      'from=$position to=$safe',
+      'from=$from to=$safe distance=${distance.toStringAsFixed(1)} '
+      'reason=${reason ?? '-'}',
     );
     position.setFrom(safe);
     _syncRenderPriorityByY();
+    return distance;
   }
 
   bool _isFootprintOverlappingMaskAt(Vector2 footPos) {
@@ -401,9 +410,9 @@ class AvoPetComponent extends PositionComponent
     const minY = 170.0;
     final maxY = YardGame.gameHeight - 36.0;
 
-    // 가까운 반경부터 확장. 스텝은 footprint 대비 충분히 촘촘하게.
-    const radii = <double>[4, 8, 12, 16, 24, 32, 48, 64, 96, 128];
-    const angles = 16;
+    // 가까운 반경부터 확장. stage footprint 소폭 증가에 대비해 촘촘히.
+    const radii = <double>[2, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64];
+    const angles = 24;
 
     Vector2? best;
     var bestDist2 = double.infinity;
@@ -431,13 +440,9 @@ class AvoPetComponent extends PositionComponent
   }
 
   Future<void> _startRandomAmbientMotion() async {
-    if (_consecutiveIdleReps >= kMaxConsecutiveIdleReps) {
-      await _runNonIdleAutoBehavior();
-      return;
-    }
     final roll = _random.nextDouble();
     if (roll < 0.28) {
-      await _playAutoIdleWithRepCap();
+      await _playAutoIdleBout();
     } else if (roll < 0.50) {
       _resetConsecutiveIdleReps();
       await playMotion(
@@ -459,42 +464,39 @@ class AvoPetComponent extends PositionComponent
   }
 
   /// 성장 단계 asset 을 제거/재스폰 없이 제자리에서 교체한다.
-  /// 위치·진행 중 모션을 유지하고, 새 단계 스프라이트로 같은 모션을 최소 1사이클 이어간다.
+  ///
+  /// 마당 발 위치(world foot = [position], anchor bottomCenter)를 유지한다.
+  /// 새 stage footprint 가 mask 와 겹칠 때만 최근접 안전 위치로 최소 보정한다.
+  /// 이동 중 성장이면 stale motion callback 을 끊고 idle → ambient 로 재시작한다.
   Future<void> applyStageInPlace(String newStage) async {
     final normalized = newStage;
     final newFolder = petStageAssetFolder(normalized);
     final newSize = petDisplaySizeForStage(normalized);
+    final oldStage = stage;
+    final oldFoot = position.clone();
+    final oldComponentPos = position.clone();
 
-    stage = normalized;
+    // adult ↔ teen 등 asset/size 동일하면 stage 문자열만 맞추고 위치는 그대로.
     if (newFolder == stageFolder && (newSize - displaySize).abs() < 0.01) {
+      stage = normalized;
       return;
     }
 
-    // 진행 상태 스냅샷 (애셋 로드 전·후 모두 동일하게 복원).
-    final keepPos = position.clone();
-    final keepFacing = _facingLeft;
-    final keepMotion = _motion;
-    final keepSitting = _isSitting;
-    final keepSittingIdleCycles = _sittingIdleCycleCount;
-    final keepMoving = _isMoving;
-    final keepMoveDir = _moveDirection.clone();
-    final keepMoveSpeed = _moveSpeed;
-    final keepMoveTimeLeft = _moveTimeLeft;
-    final keepManual = _manualControl;
-    final keepManualRun = _manualRunActive;
-    final keepEvent = _eventMotionActive;
-    final keepRepeat = max(1, _repeatRemaining);
-    final keepForceIdle = _forceIdleOnce;
-    final keepDogPlayCycles = _dogPlaySameFacingCycles;
-    final keepDogPlayFacing = _dogPlayFacingLeft;
-
-    // 진행 중 await 를 끊되, 비주얼(size/anim)은 새 애셋 준비 전까지 건드리지 않는다.
-    // (size 를 먼저 키우면 bottomCenter 기준 young 스프라이트가 위로 튀는 것처럼 보임)
+    // 진행 중 모션/이동을 먼저 끊는다 (stale timer 가 새 stage 위치를 덮지 않게).
     _autoTimer?.stop();
     _motionTimer?.stop();
     final gen = ++_motionGeneration;
     _pendingMoveCycleFinish = false;
+    _isMoving = false;
+    _moveTimeLeft = 0;
+    _moveDirection.setZero();
+    _manualControl = false;
+    _manualRunActive = false;
+    _eventMotionActive = false;
+    _forceIdleOnce = false;
+    final keepFacing = _facingLeft;
 
+    stage = normalized;
     stageFolder = newFolder;
     await PetSpriteAssets.preflightAssets(
       game,
@@ -508,121 +510,44 @@ class AvoPetComponent extends PositionComponent
     );
     if (!isMounted || gen != _motionGeneration) return;
 
-    // 애셋·크기·애니메이션을 한 번에 교체 (발 위치 keepPos 유지).
+    // 애셋·크기·애니메이션을 한 번에 교체 (발 위치 oldFoot 유지).
     _assets = loaded;
     displaySize = newSize;
     size = Vector2.all(displaySize);
-    position.setFrom(keepPos);
-    // stage footprint 변경으로 obstacle 과 겹칠 수 있어 최근접 안전 위치로 보정.
-    resolveCollisionOverlapIfNeeded();
-
+    position.setFrom(oldFoot);
     _facingLeft = keepFacing;
-    _isSitting = keepSitting;
-    _sittingIdleCycleCount = keepSittingIdleCycles;
-    _manualControl = keepManual;
-    _manualRunActive = keepManualRun;
-    _eventMotionActive = keepEvent;
-    _forceIdleOnce = keepForceIdle;
-    _dogPlaySameFacingCycles = keepDogPlayCycles;
-    _dogPlayFacingLeft = keepDogPlayFacing;
-    _repeatRemaining = keepRepeat;
-    _moveDirection = keepMoveDir;
-    _moveSpeed = keepMoveSpeed;
-    _moveTimeLeft = keepMoveTimeLeft;
-    _isMoving = keepMoving && !keepMoveDir.isZero();
+
+    final blockedBeforeRecovery = _isFootprintOverlappingMaskAt(position);
+    final recoveryDistance = resolveCollisionOverlapIfNeeded(
+      reason: 'stage:$oldStage->$normalized',
+    );
+    final finalFoot = position.clone();
+
+    debugPrint(
+      'Pet stage transition: id=$userPetId species=$speciesCode '
+      '$oldStage -> $normalized reused=true '
+      'oldFoot=$oldFoot oldComponentPosition=$oldComponentPos '
+      'newFootBeforeRecovery=$oldFoot '
+      'newFootprintBlocked=$blockedBeforeRecovery '
+      'recoveryApplied=${recoveryDistance > 0} '
+      'recoveryDistance=${recoveryDistance.toStringAsFixed(1)} '
+      'finalFoot=$finalFoot',
+    );
 
     final tune = game.petMotionTuneFor(
       speciesCode: speciesCode,
       stage: stage,
-      motion: keepMotion,
+      motion: PetMotion.idle,
     );
     _speedMultiplier = tune.speedMultiplier.clamp(0.25, 3.0);
 
-    await _continueMotionAfterStageSwap(
-      motion: keepMotion,
-      generation: gen,
-    );
-  }
-
-  /// 단계 교체 직후: 스냅샷한 모션을 새 스프라이트로 최소 1사이클 이어 재생.
-  Future<void> _continueMotionAfterStageSwap({
-    required PetMotion motion,
-    required int generation,
-  }) async {
-    if (!isMounted || generation != _motionGeneration || _assets == null) {
-      return;
+    // stage 전환 후: 동일 발 위치에서 idle → ambient 재시작.
+    await _enterIdle(resetAuto: false, generation: gen);
+    if (!isMounted || gen != _motionGeneration) return;
+    _resetConsecutiveIdleReps();
+    if (!_manualControl && !_eventMotionActive) {
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
     }
-
-    switch (motion) {
-      case PetMotion.idle:
-        await _enterIdle(resetAuto: false, generation: generation);
-        if (generation != _motionGeneration || !isMounted) return;
-        if (!_manualControl && !_eventMotionActive) {
-          unawaited(_holdAutoIdleRepsThenContinue(generation: generation));
-        }
-      case PetMotion.walk:
-      case PetMotion.run:
-        await _resumeDirectionalMoveAfterStageSwap(
-          motion,
-          generation: generation,
-        );
-      case PetMotion.sit:
-        _repeatRemaining = max(1, _repeatRemaining);
-        await _playSit(generation: generation);
-      case PetMotion.sittingIdle:
-        await _enterSittingIdle(resetAuto: true, generation: generation);
-      case PetMotion.stand:
-        await _playStand(generation: generation, force: true);
-      case PetMotion.happy:
-        _eventMotionActive = true;
-        _manualControl = true;
-        _autoTimer?.stop();
-        _repeatRemaining = max(1, _repeatRemaining);
-        await _playHappy(generation: generation);
-      case PetMotion.play:
-        _eventMotionActive = true;
-        _manualControl = true;
-        _autoTimer?.stop();
-        _repeatRemaining = max(1, _repeatRemaining);
-        await _playPlay(generation: generation);
-    }
-  }
-
-  Future<void> _resumeDirectionalMoveAfterStageSwap(
-    PetMotion motion, {
-    required int generation,
-  }) async {
-    if (generation != _motionGeneration || _assets == null) return;
-    if (motion != PetMotion.walk && motion != PetMotion.run) return;
-
-    _motion = motion;
-    _isSitting = false;
-    _pendingMoveCycleFinish = false;
-    _moveSpeed =
-        motion == PetMotion.run ? kAvoPetRunSpeed : kAvoPetWalkSpeed;
-
-    if (_moveDirection.isZero()) {
-      _moveDirection =
-          kAvoPetEightDirections[_random.nextInt(
-            kAvoPetEightDirections.length,
-          )];
-    }
-    _updateFacingFromDirection(_moveDirection);
-    _isMoving = true;
-
-    final source = motion == PetMotion.run
-        ? _assets!.runAnimation
-        : _assets!.walkAnimation;
-    final anim = _cloneAnimation(source, loop: true);
-    await _showAnimation(anim);
-    if (generation != _motionGeneration || !isMounted) return;
-
-    // 새 단계 스프라이트로 최소 1사이클은 이동·모션 유지.
-    final cycle = _animationCycleDuration(anim);
-    if (_moveTimeLeft < cycle) {
-      _moveTimeLeft = cycle;
-    }
-    _repeatRemaining = max(1, _repeatRemaining);
   }
 
   double _animationCycleDuration(SpriteAnimation animation) {
@@ -935,22 +860,16 @@ class AvoPetComponent extends PositionComponent
       return;
     }
 
-    // play/고양이 happy 직후 다음 자동 동작은 반드시 idle 1회.
+    // play/고양이 happy 직후 다음 자동 동작은 반드시 idle 1회(최대 8 cycle bout).
     if (_forceIdleOnce) {
       _forceIdleOnce = false;
-      await _playAutoIdleWithRepCap();
-      return;
-    }
-
-    // idle_sheet 연속 8 cycle 소모 후에는 idle 후보를 제외한다.
-    if (_consecutiveIdleReps >= kMaxConsecutiveIdleReps) {
-      await _runNonIdleAutoBehavior();
+      await _playAutoIdleBout();
       return;
     }
 
     final roll = _random.nextDouble();
     if (roll < 0.30) {
-      await _playAutoIdleWithRepCap();
+      await _playAutoIdleBout();
     } else if (roll < 0.55) {
       _resetConsecutiveIdleReps();
       await playMotion(
@@ -971,60 +890,100 @@ class AvoPetComponent extends PositionComponent
     _consecutiveIdleReps = 0;
   }
 
-  /// walk/run/sit 등 non-idle 자동 ambient (idle cap 도달 시 fallback 포함).
+  /// walk/run/sit 등 non-idle 자동 ambient.
+  /// non-idle 이 실제로 시작된 뒤에만 idle 카운터를 리셋한다.
   Future<void> _runNonIdleAutoBehavior() async {
-    if (_manualControl || _assets == null || _eventMotionActive) return;
-    _resetConsecutiveIdleReps();
+    if (_manualControl || _assets == null || _eventMotionActive) {
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
+      return;
+    }
     final roll = _random.nextDouble();
-    if (roll < 0.40) {
-      await playMotion(
-        PetMotion.walk,
-        fromAuto: true,
-        repeatCount: 1 + _random.nextInt(2),
+    final genBefore = _motionGeneration;
+    try {
+      if (roll < 0.40) {
+        await playMotion(
+          PetMotion.walk,
+          fromAuto: true,
+          repeatCount: 1 + _random.nextInt(2),
+        );
+      } else if (roll < 0.70) {
+        await playMotion(PetMotion.run, fromAuto: true, repeatCount: 1);
+      } else {
+        await playMotion(PetMotion.sit, fromAuto: true);
+      }
+      // playMotion 이 generation 을 올린 경우 = 실제 non-idle 진입.
+      if (_motionGeneration != genBefore) {
+        _resetConsecutiveIdleReps();
+      } else if (isMounted && !_manualControl && !_eventMotionActive) {
+        // early-return(예: sitting 중 walk 차단) 시 스케줄러가 죽지 않게.
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
+    } catch (e, st) {
+      debugPrint(
+        'AvoPetComponent non-idle ambient failed id=$userPetId: $e\n$st',
       );
-    } else if (roll < 0.70) {
-      await playMotion(PetMotion.run, fromAuto: true, repeatCount: 1);
-    } else {
-      await playMotion(PetMotion.sit, fromAuto: true);
+      if (!isMounted || _manualControl || _eventMotionActive) return;
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
     }
   }
 
-  /// 자동 ambient idle: cycle 단위로 연속 rep 를 세고 8 에서 끊는다.
-  Future<void> _playAutoIdleWithRepCap() async {
-    if (_manualControl || _assets == null || _eventMotionActive) return;
-    if (_consecutiveIdleReps >= kMaxConsecutiveIdleReps) {
-      await _runNonIdleAutoBehavior();
+  /// idle 1회 발동: 최대 [kMaxConsecutiveIdleReps] cycle 한 세트 후 반드시 non-idle.
+  /// bout 중간에 `_runAutoBehavior` 로 돌아가 idle 을 재뽑지 않는다.
+  Future<void> _playAutoIdleBout() async {
+    if (_manualControl || _assets == null || _eventMotionActive) {
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
       return;
     }
 
     final gen = _motionGeneration;
+    _resetConsecutiveIdleReps();
     await _enterIdle(resetAuto: false, generation: gen);
-    if (!isMounted || gen != _motionGeneration) return;
-    await _holdAutoIdleRepsThenContinue(generation: gen);
+    if (!isMounted || gen != _motionGeneration) {
+      if (isMounted && !_manualControl && !_eventMotionActive) {
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
+      return;
+    }
+    await _runIdleBoutThenNonIdle(generation: gen);
   }
 
-  /// 이미 idle 애니메이션 중인 상태에서 cycle 을 세며 대기한 뒤 다음 auto 로 넘긴다.
-  Future<void> _holdAutoIdleRepsThenContinue({int? generation}) async {
-    if (_manualControl || _assets == null || _eventMotionActive) return;
-    final gen = generation ?? _motionGeneration;
-    if (gen != _motionGeneration) return;
+  double _idleVisualCycleDuration() {
+    final base = _animationCycleDuration(_assets!.idleAnimation);
+    // 화면 재생은 baseStepTime / speedMultiplier.
+    return max(0.05, base / _speedMultiplier.clamp(0.25, 3.0));
+  }
 
-    final cycle = max(0.05, _animationCycleDuration(_assets!.idleAnimation));
+  /// 이미 idle 중인 1회 발동: cycle 을 세며(최대 8) 재생한 뒤 non-idle 로 넘긴다.
+  Future<void> _runIdleBoutThenNonIdle({int? generation}) async {
+    if (_manualControl || _assets == null || _eventMotionActive) {
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
+      return;
+    }
+    final gen = generation ?? _motionGeneration;
+    if (gen != _motionGeneration) {
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
+      return;
+    }
+
+    final cycle = _idleVisualCycleDuration();
+    // 기존 hold 길이와 비슷하되, 한 발동에서 최대 8 cycle 까지만.
     final desiredHold = _randomIdleDelay();
     var held = 0.0;
 
-    while (held < desiredHold &&
+    while (_consecutiveIdleReps < kMaxConsecutiveIdleReps &&
+        held < desiredHold &&
         isMounted &&
         gen == _motionGeneration &&
         _motion == PetMotion.idle &&
         !_manualControl &&
         !_eventMotionActive) {
-      if (_consecutiveIdleReps >= kMaxConsecutiveIdleReps) {
-        await _runNonIdleAutoBehavior();
+      await _waitDuration(cycle, generation: gen);
+      if (!isMounted || gen != _motionGeneration) {
+        if (isMounted && !_manualControl && !_eventMotionActive) {
+          _scheduleAutoBehavior(delay: _randomIdleDelay());
+        }
         return;
       }
-      await _waitDuration(cycle, generation: gen);
-      if (!isMounted || gen != _motionGeneration) return;
       if (_motion != PetMotion.idle || _manualControl || _eventMotionActive) {
         return;
       }
@@ -1032,13 +991,16 @@ class AvoPetComponent extends PositionComponent
       held += cycle;
     }
 
-    if (!isMounted || gen != _motionGeneration) return;
-    if (_manualControl || _eventMotionActive) return;
-    if (_consecutiveIdleReps >= kMaxConsecutiveIdleReps) {
-      await _runNonIdleAutoBehavior();
+    if (!isMounted || gen != _motionGeneration) {
+      if (isMounted && !_manualControl && !_eventMotionActive) {
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
       return;
     }
-    _scheduleAutoBehavior(delay: 0.05);
+    if (_manualControl || _eventMotionActive) return;
+
+    // idle 1회 발동 종료 → 반드시 non-idle (idle 재선택 없음).
+    await _runNonIdleAutoBehavior();
   }
 
   Future<void> _enterIdle({
@@ -1060,8 +1022,9 @@ class AvoPetComponent extends PositionComponent
     final anim = _cloneAnimation(_assets!.idleAnimation, loop: true);
     await _showAnimation(anim);
     if (resetAuto) {
-      // 이동 종료 후 등: idle hold 도 연속 rep cap 을 적용한다.
-      unawaited(_holdAutoIdleRepsThenContinue(generation: generation));
+      // 이동 종료 후 등: 새 idle 1회 발동(최대 8 cycle) 후 non-idle.
+      _resetConsecutiveIdleReps();
+      unawaited(_runIdleBoutThenNonIdle(generation: generation));
     }
   }
 
@@ -1383,6 +1346,8 @@ class AvoPetComponent extends PositionComponent
   /// 강아지 play: run 속도로 이동하며 사이클마다 방향 랜덤.
   /// 같은 좌/우를 최소 2사이클 본 뒤에만 반대 방향이 랜덤 후보에 포함.
   /// 장애물 충돌 시에는 즉시 방향 전환 허용(_handleMoveBlocked).
+  ///
+  /// 스프라이트: 4프레임 loop (4→1 즉시). 전 사이클 동일.
   Future<void> _playDogPlayMoving({int? generation}) async {
     if (_assets == null) return;
     _isSitting = false;
@@ -1392,37 +1357,44 @@ class AvoPetComponent extends PositionComponent
     _moveTimeLeft = double.infinity;
     _pendingMoveCycleFinish = false;
 
-    var remaining = _repeatRemaining;
+    var remaining = max(1, _repeatRemaining);
+    final loopAnim = _cloneAnimation(_assets!.playAnimation, loop: true);
+    await _showAnimation(loopAnim);
+    if (generation != null && generation != _motionGeneration) {
+      _stopMovement();
+      return;
+    }
+
     while (remaining > 0 && isMounted) {
       if (generation != null && generation != _motionGeneration) {
         _stopMovement();
         return;
       }
-
-      final allowFacingFlip = _dogPlaySameFacingCycles >= 2;
-      _assignDogPlayMoveDirection(allowFacingFlip: allowFacingFlip);
-      _isMoving = true;
-      _moveTimeLeft = double.infinity;
-
-      final facingBefore = _dogPlayFacingLeft;
-      _updateFacingFromDirection(_moveDirection);
-      if (facingBefore == null || facingBefore == _facingLeft) {
-        _dogPlaySameFacingCycles =
-            facingBefore == null ? 1 : _dogPlaySameFacingCycles + 1;
-      } else {
-        _dogPlaySameFacingCycles = 1;
-      }
-      _dogPlayFacingLeft = _facingLeft;
-
-      final anim = _cloneAnimation(_assets!.playAnimation, loop: false);
-      await _showAnimation(anim);
-      await _waitForAnimation(anim, generation: generation);
+      _beginDogPlayCycleMovement();
+      await _waitForAnimation(loopAnim, generation: generation);
       remaining--;
     }
 
     _stopMovement();
     _dogPlaySameFacingCycles = 0;
     _dogPlayFacingLeft = null;
+  }
+
+  void _beginDogPlayCycleMovement() {
+    final allowFacingFlip = _dogPlaySameFacingCycles >= 2;
+    _assignDogPlayMoveDirection(allowFacingFlip: allowFacingFlip);
+    _isMoving = true;
+    _moveTimeLeft = double.infinity;
+
+    final facingBefore = _dogPlayFacingLeft;
+    _updateFacingFromDirection(_moveDirection);
+    if (facingBefore == null || facingBefore == _facingLeft) {
+      _dogPlaySameFacingCycles =
+          facingBefore == null ? 1 : _dogPlaySameFacingCycles + 1;
+    } else {
+      _dogPlaySameFacingCycles = 1;
+    }
+    _dogPlayFacingLeft = _facingLeft;
   }
 
   void _assignDogPlayMoveDirection({required bool allowFacingFlip}) {

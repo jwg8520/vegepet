@@ -738,6 +738,15 @@ class YardGame extends FlameGame {
       _isAvoPetAlive(_avoPetComponent) &&
       (_avoPetComponent?.isVisualReady ?? false);
 
+  /// 마당에 있는 펫의 world foot position (anchor bottomCenter).
+  /// abort/discard 전에 호출해 stage 변경·retry 시 위치를 넘긴다.
+  Vector2? petWorldFootPosition(String userPetId) {
+    final pet = _petsById[userPetId];
+    if (pet == null) return null;
+    if (!(pet.isMounted || pet.parent != null)) return null;
+    return pet.position.clone();
+  }
+
   // ---------------------------------------------------------------------------
   // 활성 Flame 펫 tap hitbox 판정 API.
   //
@@ -979,17 +988,34 @@ class YardGame extends FlameGame {
   ///
   /// [seedRandomAmbient] 를 false 로 주면 랜덤 배치 없이 기본 스폰 위치
   /// (오두막 문 앞)를 사용한다. 신규 분양이 여기에 해당한다.
+  ///
+  /// [preferredFootPosition] 이 있으면 그 발 위치로 스폰/복원한다.
+  /// 동일 펫 stage 변경·timeout retry 등에서 위치를 잃지 않기 위해 사용한다.
+  /// cold-start(마당에 펫 없음)만 [seedRandomAmbient]: null → 랜덤 배치.
   Future<bool> showYardPet({
     required String userPetId,
     required String speciesCode,
     required String stage,
     Vector2? position,
+    Vector2? preferredFootPosition,
     bool? seedRandomAmbient,
   }) async {
+    // 동일 id 의 in-flight 가 있으면 먼저 join 한 뒤, 요청 stage 를 다시 적용한다.
+    // (이전처럼 in-flight Future 만 반환하면 stage 변경이 무시될 수 있다.)
     if (_petSpawnInFlight != null && _petSpawnInFlightUserId == userPetId) {
       debugPrint(
-        'YardGame: showYardPet join in-flight spawn (userPetId=$userPetId)',
+        'YardGame: showYardPet await in-flight then re-apply '
+        '(userPetId=$userPetId stage=$stage)',
       );
+      try {
+        await _petSpawnInFlight!;
+      } catch (_) {
+        // 실패여도 아래 impl 에서 재시도/복원을 진행한다.
+      }
+    }
+
+    if (_petSpawnInFlight != null && _petSpawnInFlightUserId == userPetId) {
+      // 여전히 동일 Future 가 잡혀 있으면(재진입) 합류만 한다.
       return _petSpawnInFlight!;
     }
 
@@ -998,6 +1024,7 @@ class YardGame extends FlameGame {
       speciesCode: speciesCode,
       stage: stage,
       position: position,
+      preferredFootPosition: preferredFootPosition,
       seedRandomAmbient: seedRandomAmbient,
     );
     _petSpawnInFlight = future;
@@ -1017,6 +1044,7 @@ class YardGame extends FlameGame {
     required String speciesCode,
     required String stage,
     Vector2? position,
+    Vector2? preferredFootPosition,
     bool? seedRandomAmbient,
   }) async {
     try {
@@ -1024,6 +1052,14 @@ class YardGame extends FlameGame {
       await _ensureGameLoaded();
 
       final existing = _petsById[userPetId];
+      // discard 전에 발 위치를 캡처 (incomplete discard 후에도 위치 보존).
+      Vector2? preservedFoot = preferredFootPosition ?? position;
+      if (preservedFoot == null &&
+          existing != null &&
+          (existing.isMounted || existing.parent != null)) {
+        preservedFoot = existing.position.clone();
+      }
+
       if (existing != null &&
           _isAvoPetAlive(existing) &&
           existing.speciesCode == speciesCode &&
@@ -1032,6 +1068,10 @@ class YardGame extends FlameGame {
         if (existing.stage != stage ||
             petStageAssetFolder(existing.stage) !=
                 petStageAssetFolder(stage)) {
+          debugPrint(
+            'YardGame: stage in-place id=$userPetId '
+            '${existing.stage} -> $stage foot=$preservedFoot',
+          );
           await existing.applyStageInPlace(stage);
         }
         // 다른 active 가 있으면 resident 로 강등.
@@ -1053,19 +1093,19 @@ class YardGame extends FlameGame {
       // 반쯤 남은(비주얼 미준비) 동일 id 컴포넌트는 재스폰 전에 제거한다.
       if (existing != null && !existing.isVisualReady) {
         debugPrint(
-          'YardGame: discarding incomplete pet before respawn id=$userPetId',
+          'YardGame: discarding incomplete pet before respawn id=$userPetId '
+          'preservedFoot=$preservedFoot',
         );
         await _discardPetComponent(existing, userPetId: userPetId);
       }
 
       // 다른 펫으로 active 교체 시에는 이전 펫 위치를 물려받지 않는다.
       // (같은 userPetId 재스폰/단계 변경만 위치 유지)
-      Vector2? spawnPosition = position;
-      var seedAmbient = seedRandomAmbient ?? (position == null);
-      if (spawnPosition == null &&
-          existing != null &&
-          _isAvoPetAlive(existing)) {
-        spawnPosition = existing.position.clone();
+      Vector2? spawnPosition = position ?? preferredFootPosition ?? preservedFoot;
+      // 발 위치가 확보되면 랜덤 ambient 배치를 쓰지 않는다.
+      // (stage 변경 / retry 가 cold-start 랜덤과 섞이지 않게)
+      var seedAmbient = seedRandomAmbient ?? (spawnPosition == null);
+      if (spawnPosition != null && seedRandomAmbient != true) {
         seedAmbient = false;
       }
 
@@ -1076,7 +1116,10 @@ class YardGame extends FlameGame {
         position: spawnPosition,
         seedRandomAmbient: seedAmbient,
       );
-      debugPrint('YardGame.showYardPet result=$ok id=$userPetId');
+      debugPrint(
+        'YardGame.showYardPet result=$ok id=$userPetId '
+        'spawnFoot=$spawnPosition seedAmbient=$seedAmbient',
+      );
       return ok;
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
@@ -1124,6 +1167,11 @@ class YardGame extends FlameGame {
         continue;
       }
       final existing = _petsById[spec.userPetId];
+      Vector2? preservedFoot;
+      if (existing != null && (existing.isMounted || existing.parent != null)) {
+        preservedFoot = existing.position.clone();
+      }
+
       if (existing != null &&
           _isAvoPetAlive(existing) &&
           existing.speciesCode == spec.speciesCode &&
@@ -1145,18 +1193,14 @@ class YardGame extends FlameGame {
         await _discardPetComponent(existing, userPetId: spec.userPetId);
       }
 
-      // 마당에 없던 resident: 위치 보존 재스폰은 유지, 신규(앱 재시작 등)는 랜덤 시드.
-      final preservedPet = _petsById[spec.userPetId];
-      final preserved = (preservedPet != null && _isAvoPetAlive(preservedPet))
-          ? preservedPet.position.clone()
-          : null;
+      // 마당에 있던 resident: 발 위치 보존. 신규(앱 재시작 등)만 랜덤 시드.
       await _spawnYardPetComponent(
         userPetId: spec.userPetId,
         speciesCode: spec.speciesCode,
         stage: spec.stage,
         isResident: true,
-        position: preserved,
-        seedRandomAmbient: preserved == null,
+        position: preservedFoot,
+        seedRandomAmbient: preservedFoot == null,
       );
     }
   }

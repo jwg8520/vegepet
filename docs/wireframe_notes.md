@@ -348,7 +348,7 @@ Cursor AI와 개발자는 이 문서를 참고해 Flutter UI 구조, 화면 전�
 ### 15.4 구현 원칙
 - 현재 기준은 고양이 2종 + 강아지 2종 총 4종(MVP)이다.
 - 도감 UI는 이 기준을 벗어나지 않도록 한다.
-- 코리·푸리는 MVP 도감에 표시하지 않는다.
+- canonical id: 1=cat_sco, 2=cat_rag, 3=dog_pom, 4=dog_bic.
 
 ---
 

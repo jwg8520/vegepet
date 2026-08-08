@@ -1,9 +1,15 @@
+import 'package:flutter/foundation.dart';
+
 /// AvoPet 종족 표시명·내부 코드명 매핑.
 ///
-/// - DB/에셋/내부 코드(`cat_sco` 등)는 유지한다.
+/// canonical Supabase `public.pet_species` (MVP 4종만):
+/// - 1 → cat_sco (스코티쉬 폴드)
+/// - 2 → cat_rag (랙돌)
+/// - 3 → dog_pom (포메라니안)
+/// - 4 → dog_bic (비숑)
+///
 /// - UI 표시명만 앱에서 override 한다.
-/// - 전체 6종 구조는 유지하되, MVP에서는 [availableInMvp] == true 인 4종만 사용한다.
-/// - DB `id` 가 재배치되어도 `code` 를 우선해 식별한다.
+/// - 식별은 **code 를 id 보다 우선**한다.
 class AvoPetSpeciesIdentity {
   const AvoPetSpeciesIdentity({
     required this.id,
@@ -11,7 +17,7 @@ class AvoPetSpeciesIdentity {
     required this.nameKo,
     required this.nameEn,
     required this.internalCode,
-    required this.availableInMvp,
+    this.availableInMvp = true,
   });
 
   final int id;
@@ -20,69 +26,48 @@ class AvoPetSpeciesIdentity {
   final String nameEn;
   final String internalCode;
 
-  /// false 인 종(코리/푸리)은 구조만 유지하고 MVP 선택·도감·랜덤 분양에서 제외.
+  /// 현재 canonical 4종은 모두 true. (하위 호환 필드)
   final bool availableInMvp;
 }
 
-const _species1 = AvoPetSpeciesIdentity(
+const _speciesSco = AvoPetSpeciesIdentity(
   id: 1,
   family: 'cat',
   nameKo: '스코티쉬 폴드',
   nameEn: 'Fold',
   internalCode: 'cat_sco',
-  availableInMvp: true,
 );
-const _species2 = AvoPetSpeciesIdentity(
+const _speciesRag = AvoPetSpeciesIdentity(
   id: 2,
   family: 'cat',
   nameKo: '랙돌',
   nameEn: 'Raggie',
   internalCode: 'cat_rag',
-  availableInMvp: true,
 );
-const _species3 = AvoPetSpeciesIdentity(
+const _speciesPom = AvoPetSpeciesIdentity(
   id: 3,
-  family: 'cat',
-  nameKo: '코리',
-  nameEn: 'Kori',
-  internalCode: 'cat_kor',
-  availableInMvp: false,
-);
-const _species4 = AvoPetSpeciesIdentity(
-  id: 4,
   family: 'dog',
   nameKo: '포메라니안',
   nameEn: 'Pom',
   internalCode: 'dog_pom',
-  availableInMvp: true,
 );
-const _species5 = AvoPetSpeciesIdentity(
-  id: 5,
+const _speciesBic = AvoPetSpeciesIdentity(
+  id: 4,
   family: 'dog',
   nameKo: '비숑',
   nameEn: 'Bichon',
   internalCode: 'dog_bic',
-  availableInMvp: true,
-);
-const _species6 = AvoPetSpeciesIdentity(
-  id: 6,
-  family: 'dog',
-  nameKo: '푸리',
-  nameEn: 'Puri',
-  internalCode: 'dog_pud',
-  availableInMvp: false,
 );
 
+/// Supabase pet_species.id → identity.
 const Map<int, AvoPetSpeciesIdentity> kSpeciesIdentityById = {
-  1: _species1,
-  2: _species2,
-  3: _species3,
-  4: _species4,
-  5: _species5,
-  6: _species6,
+  1: _speciesSco,
+  2: _speciesRag,
+  3: _speciesPom,
+  4: _speciesBic,
 };
 
-/// MVP 분양·도감·랜덤 분양에 사용하는 내부 코드 (푸리/코리 제외).
+/// MVP canonical 내부 코드 (source of truth).
 const Set<String> kMvpSpeciesInternalCodes = {
   'cat_sco',
   'cat_rag',
@@ -90,50 +75,37 @@ const Set<String> kMvpSpeciesInternalCodes = {
   'dog_bic',
 };
 
-/// 레거시 id 집합 (DB id 가 1/2/4/5 인 기존 시드용). code 우선 판정이 더 안전하다.
-const Set<int> kMvpSpeciesIds = {1, 2, 4, 5};
-
-/// MVP에서 제외하는 내부 코드 (향후 재추가 가능하도록 구조만 유지).
-const Set<String> kNonMvpSpeciesInternalCodes = {'cat_kor', 'dog_pud'};
+/// MVP canonical pet_species.id (Supabase 와 동일).
+const Set<int> kMvpSpeciesIds = {1, 2, 3, 4};
 
 const Map<String, AvoPetSpeciesIdentity> kSpeciesIdentityByOldName = {
   // 정식/현재 표시명 (한국어)
-  '스코티쉬 폴드': _species1,
-  '랙돌': _species2,
-  '코리안 숏헤어': _species3,
-  '포메라니안': _species4,
-  '비숑': _species5,
-  '푸들': _species6,
+  '스코티쉬 폴드': _speciesSco,
+  '랙돌': _speciesRag,
+  '포메라니안': _speciesPom,
+  '비숑': _speciesBic,
   // 정식/현재 표시명 (영어)
-  'Scottish Fold': _species1,
-  'Fold': _species1,
-  'Ragdoll': _species2,
-  'Raggie': _species2,
-  'Korean Shorthair': _species3,
-  'Pomeranian': _species4,
-  'Pom': _species4,
-  'Bichon': _species5,
-  'Poodle': _species6,
+  'Scottish Fold': _speciesSco,
+  'Fold': _speciesSco,
+  'Ragdoll': _speciesRag,
+  'Raggie': _speciesRag,
+  'Pomeranian': _speciesPom,
+  'Pom': _speciesPom,
+  'Bichon': _speciesBic,
   // 이전 짧은 표시명 (DB/캐시 호환)
-  '스코': _species1,
-  'Sco': _species1,
-  '돌리': _species2,
-  'Dolly': _species2,
-  '코리': _species3,
-  'Kori': _species3,
-  '포미': _species4,
-  'Pomi': _species4,
-  '비비': _species5,
-  'Bibi': _species5,
-  '푸리': _species6,
-  'Puri': _species6,
+  '스코': _speciesSco,
+  'Sco': _speciesSco,
+  '돌리': _speciesRag,
+  'Dolly': _speciesRag,
+  '포미': _speciesPom,
+  'Pomi': _speciesPom,
+  '비비': _speciesBic,
+  'Bibi': _speciesBic,
   // 내부 코드명
-  'cat_sco': _species1,
-  'cat_rag': _species2,
-  'cat_kor': _species3,
-  'dog_pom': _species4,
-  'dog_bic': _species5,
-  'dog_pud': _species6,
+  'cat_sco': _speciesSco,
+  'cat_rag': _speciesRag,
+  'dog_pom': _speciesPom,
+  'dog_bic': _speciesBic,
 };
 
 int? _speciesIdFromRow(Map<String, dynamic> species) {
@@ -187,7 +159,6 @@ bool isMvpSpeciesId(int? speciesId) {
 bool isMvpSpeciesInternalCode(String? code) {
   final normalized = code?.trim().toLowerCase() ?? '';
   if (normalized.isEmpty) return false;
-  if (kNonMvpSpeciesInternalCodes.contains(normalized)) return false;
   return kMvpSpeciesInternalCodes.contains(normalized);
 }
 
@@ -196,8 +167,7 @@ bool isMvpSpeciesRow(Map<String, dynamic>? species) {
 
   final code = species['code']?.toString().trim().toLowerCase() ?? '';
   if (code.isNotEmpty) {
-    if (kNonMvpSpeciesInternalCodes.contains(code)) return false;
-    if (kMvpSpeciesInternalCodes.contains(code)) return true;
+    return kMvpSpeciesInternalCodes.contains(code);
   }
 
   final identity = speciesIdentityFromSpeciesRow(species);
@@ -252,4 +222,37 @@ String speciesInternalCode(Map<String, dynamic>? species) {
   final code = species?['code']?.toString().trim();
   if (code != null && code.isNotEmpty) return code;
   return '';
+}
+
+/// debug: DB 로드 결과와 canonical id↔code 매핑이 어긋나면 경고한다.
+void debugWarnIfPetSpeciesIdentityMismatch(
+  List<Map<String, dynamic>> rows,
+) {
+  if (!kDebugMode) return;
+  if (rows.isEmpty) return;
+
+  const expected = <int, String>{
+    1: 'cat_sco',
+    2: 'cat_rag',
+    3: 'dog_pom',
+    4: 'dog_bic',
+  };
+
+  for (final row in rows) {
+    final id = _speciesIdFromRow(row);
+    final code = row['code']?.toString().trim().toLowerCase() ?? '';
+    if (id == null || code.isEmpty) continue;
+    final want = expected[id];
+    if (want != null && want != code) {
+      debugPrint(
+        'pet_species identity mismatch: id=$id code=$code expected=$want',
+      );
+    }
+    if (want == null && kMvpSpeciesInternalCodes.contains(code)) {
+      debugPrint(
+        'pet_species unexpected id for MVP code: id=$id code=$code '
+        '(canonical ids are 1..4)',
+      );
+    }
+  }
 }

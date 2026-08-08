@@ -5446,6 +5446,7 @@ class _HomePageState extends State<HomePage>
     }
 
     _petSpecies = List<Map<String, dynamic>>.from(data);
+    debugWarnIfPetSpeciesIdentityMismatch(_petSpecies);
     final mvp = _initialAdoptionSpecies;
     if (mvp.length < 4) {
       debugPrint(
@@ -5772,7 +5773,8 @@ class _HomePageState extends State<HomePage>
       _randomTicketCount = total;
     } catch (e) {
       debugPrint('fetch random ticket count failed: $e');
-      _randomTicketCount = 0;
+      // 조회 실패 시 0 으로 덮지 않는다.
+      // (RPC 성공 직후 ticket_remaining local 반영을 네트워크 오류가 지우지 않게)
     }
   }
 
@@ -6263,20 +6265,36 @@ class _HomePageState extends State<HomePage>
     // seedRandomAmbient:false(오두막 앞)가 보장되게 한다.
     final isFreshAdopt = _pendingFreshAdoptPetId == petId;
 
+    // abort/retry 전에 발 위치를 캡처해야 한다 (abort 후 map 에서 사라짐).
+    Vector2? preservedFoot = _yardGame.petWorldFootPosition(petId);
+
     // Flame spawn: visualReady(mount+idle) 까지 성공해야 shown=true.
     // timeout 시 불완전 컴포넌트를 정리한 뒤 1회 재시도한다.
     bool shown = false;
-    Future<bool> spawnOnce() {
+    Future<bool> spawnOnce({Vector2? footOverride}) {
       final fresh =
           isFreshAdopt || _pendingFreshAdoptPetId == petId;
+      final foot = footOverride ?? preservedFoot;
+      // 신규 분양: 오두막 앞(false). 마당에 이미 있는 동일 펫: 발 위치 유지(false).
+      // cold-start(펫 없음): null → 랜덤 ambient.
+      final bool? seed;
+      if (fresh) {
+        seed = false;
+      } else if (foot != null) {
+        seed = false;
+      } else {
+        seed = null;
+      }
       debugPrint(
-        'YardGame sync spawn begin petId=$petId freshAdopt=$fresh gen=$generation',
+        'YardGame sync spawn begin petId=$petId freshAdopt=$fresh '
+        'preserveFoot=$foot seed=$seed gen=$generation',
       );
       return _yardGame.showYardPet(
         userPetId: petId,
         speciesCode: code,
         stage: stage,
-        seedRandomAmbient: fresh ? false : null,
+        preferredFootPosition: fresh ? null : foot,
+        seedRandomAmbient: seed,
       );
     }
 
@@ -6284,11 +6302,13 @@ class _HomePageState extends State<HomePage>
       shown = await spawnOnce().timeout(const Duration(seconds: 12));
     } on TimeoutException {
       debugPrint('YardGame spawn timeout: petId=$petId — abort incomplete');
+      preservedFoot ??= _yardGame.petWorldFootPosition(petId);
       await _yardGame.abortPetSpawn(userPetId: petId);
       await _yardGame.waitUntilNoPetSpawnInFlight();
       shown = false;
     } catch (e, st) {
       debugPrint('YardGame sync spawn failed (isolated): $e\n$st');
+      preservedFoot ??= _yardGame.petWorldFootPosition(petId);
       await _yardGame.abortPetSpawn(userPetId: petId);
       await _yardGame.waitUntilNoPetSpawnInFlight();
       shown = false;
@@ -6298,11 +6318,12 @@ class _HomePageState extends State<HomePage>
         generation == _yardPetSyncGeneration &&
         mounted &&
         _activePet?['id']?.toString() == petId) {
-      debugPrint('YardGame sync: retry spawn once petId=$petId');
+      debugPrint('YardGame sync: retry spawn once petId=$petId foot=$preservedFoot');
       try {
+        preservedFoot ??= _yardGame.petWorldFootPosition(petId);
         await _yardGame.abortPetSpawn(userPetId: petId);
         await _yardGame.waitUntilNoPetSpawnInFlight();
-        shown = await spawnOnce();
+        shown = await spawnOnce(footOverride: preservedFoot);
       } catch (e, st) {
         debugPrint('YardGame sync spawn retry failed: $e\n$st');
         await _yardGame.abortPetSpawn(userPetId: petId);
@@ -6480,7 +6501,7 @@ class _HomePageState extends State<HomePage>
     return int.tryParse(v?.toString() ?? '') ?? 9999;
   }
 
-  /// MVP 분양·도감에 노출하는 종만 (푸리/코리 제외, 내부 6종 구조는 유지).
+  /// MVP canonical 4종만 반환한다.
   List<Map<String, dynamic>> _mvpPetSpecies() {
     return _petSpecies.where(isMvpSpeciesRow).toList();
   }
@@ -6488,12 +6509,10 @@ class _HomePageState extends State<HomePage>
   /// 최초 선택 분양창 전용 목록.
   /// 도감/졸업/이전 user_pets 와 무관하게 MVP 4종(code 기준)만 반환한다.
   List<Map<String, dynamic>> get _initialAdoptionSpecies {
-    const allowedCodes = <String>{'cat_sco', 'cat_rag', 'dog_pom', 'dog_bic'};
-
     final result =
         _petSpecies.where((species) {
           final code = _speciesInternalCode(species);
-          return allowedCodes.contains(code);
+          return kMvpSpeciesInternalCodes.contains(code);
         }).toList()..sort(
           (a, b) => _petSpeciesSortKey(a).compareTo(_petSpeciesSortKey(b)),
         );
@@ -7156,11 +7175,17 @@ class _HomePageState extends State<HomePage>
 
   /// 도감 완성 전: 성숙기면 식단도 분양권 안내로 막는다.
   /// 도감 완성 후: 식단 인증만 계속 허용 (애정도 증가 없음).
+  /// 도감 조회 실패 시에는 완료/미완료를 추정하지 않고 통신 오류로 처리한다.
   Future<bool> _blockMealIfMatureWithoutPokedexComplete() async {
     if (!_isCurrentPetMature()) return false;
-    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
+    final check = await _checkPokedexCompleteForCurrentUser();
     if (!mounted) return true;
-    if (isPokedexComplete) return false;
+    if (check.fetchFailed) {
+      debugPrint('meal block: pokedex complete check failed — no false incomplete');
+      _showCommunicationErrorNotice();
+      return true;
+    }
+    if (check.isComplete) return false;
     _showMaturityCompleteAlert();
     return true;
   }
@@ -7250,32 +7275,56 @@ class _HomePageState extends State<HomePage>
     return true;
   }
 
-  Future<bool> _isPokedexCompleteForCurrentUser() async {
+  /// canonical MVP 4종(internal code) 도감 등록 여부.
+  ///
+  /// - [isComplete]: 조회 성공 시에만 의미 있음
+  /// - [fetchFailed]: DB 조회 실패 (완료/미완료로 추정하지 말 것)
+  ///
+  /// 판정은 pet_species.id 가 아니라 `kMvpSpeciesInternalCodes` 기준이다.
+  Future<({bool isComplete, bool fetchFailed})>
+  _checkPokedexCompleteForCurrentUser() async {
     final user = supabase.auth.currentUser;
-    if (user == null) return false;
+    if (user == null) {
+      return (isComplete: false, fetchFailed: true);
+    }
 
     try {
-      // 완성 기준은 runtime 부분 로드된 _initialAdoptionSpecies 가 아니라
-      // canonical MVP 4종(kMvpSpeciesIds) 전체다.
-      final allSpeciesIds = Set<int>.from(kMvpSpeciesIds);
-
-      final rows = await supabase
+      final entryRows = await supabase
           .from('pokedex_entries')
           .select('pet_species_id')
           .eq('user_id', user.id);
 
-      final registeredSpeciesIds = <int>{};
-      for (final row in rows as List) {
+      final registeredIds = <int>{};
+      for (final row in entryRows as List) {
         final id = int.tryParse(row['pet_species_id']?.toString() ?? '');
-        if (id != null && allSpeciesIds.contains(id)) {
-          registeredSpeciesIds.add(id);
+        if (id != null) registeredIds.add(id);
+      }
+
+      if (registeredIds.isEmpty) {
+        return (isComplete: false, fetchFailed: false);
+      }
+
+      final speciesRows = await supabase
+          .from('pet_species')
+          .select('id, code')
+          .inFilter('id', registeredIds.toList());
+
+      final registeredCodes = <String>{};
+      for (final row in speciesRows as List) {
+        final code = row['code']?.toString().trim().toLowerCase() ?? '';
+        if (code.isNotEmpty && kMvpSpeciesInternalCodes.contains(code)) {
+          registeredCodes.add(code);
         }
       }
 
-      return allSpeciesIds.difference(registeredSpeciesIds).isEmpty;
+      return (
+        isComplete:
+            kMvpSpeciesInternalCodes.difference(registeredCodes).isEmpty,
+        fetchFailed: false,
+      );
     } catch (e, st) {
       debugPrint('pokedex complete check failed: $e\n$st');
-      return false;
+      return (isComplete: false, fetchFailed: true);
     }
   }
 
@@ -8212,11 +8261,8 @@ class _HomePageState extends State<HomePage>
       _safeSetState(() {});
 
       await _syncStageAfterAffectionChange(beforeStage: beforeStage);
-      // syncStage 내부에서도 schedule 하지만, 동일 단계 affection 만
-      // 바뀐 경우에도 표시 일관성을 위해 한 번 더 맞춘다.
-      if (mounted && beforeStage != nextStage) {
-        _scheduleSyncActivePetToYardGame();
-      }
+      // stage 변경 sync 는 _syncStageAfterAffectionChange 가 이미 await 한다.
+      // 여기서 다시 schedule 하면 중복 sync/race 만 만든다.
     } catch (e, st) {
       debugPrint('debug adjust affection failed: $e\n$st');
       if (!mounted) return;
@@ -8290,11 +8336,10 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  /// 디버그: 랜덤 분양권을 1장 사용해 랜덤 pet_species_id 가 반환되는지 확인한다.
+  /// 디버그: `use_random_adoption_ticket` RPC 만 호출한다.
   ///
-  /// SQL 함수 `public.use_random_adoption_ticket(p_user_id uuid)` 를 호출하고,
-  /// 반환되는 pet_species_id / ticket_remaining 을 스낵바로 보여준다.
-  /// 실제 분양(user_pets insert) 흐름까지는 이 단계에서 연결하지 않는다.
+  /// 서버 RPC 가 분양·티켓 차감까지 원자 처리하므로, 이 버튼도 실제 분양이 발생한다.
+  /// 가방 UX(이름짓기/마당 sync)는 타지 않는다 — 상태 확인용.
   Future<void> _debugUseRandomAdoptionTicket() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -9394,18 +9439,11 @@ class _HomePageState extends State<HomePage>
       return;
     }
     _dismissFocus();
-    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
-    if (!mounted) return;
-    if (isPokedexComplete) {
-      await _showPokedexCompleteTicketNotice();
-      return;
-    }
+    // 4종 완료 hard-block 은 클라이언트에서 하지 않는다.
+    // 후보 없음은 RPC 가 rollback + exception 으로 알려준다.
     final confirmed = await _confirmUseRandomTicket();
     if (!mounted || !confirmed) return;
     await _useRandomAdoptionTicketFromBag();
-    try {
-      await _fetchRandomTicketCount();
-    } catch (_) {}
   }
 
   /// 랜덤 분양권 분양까지 성공한 뒤: 설명 오버레이 제거 후 가방·게임메뉴 슬라브를 마당 상태로 내린다.
@@ -10285,49 +10323,13 @@ class _HomePageState extends State<HomePage>
     unawaited(_resolveRandomTicketUseConfirm(false));
   }
 
-  /// 도감에 아직 없는 MVP 종 중 하나를 무작위로 고른다.
+  /// 가방에서 랜덤 분양권을 사용해 새 아보펫을 분양받는다.
   ///
-  /// - [fetchFailed]: pokedex 조회 실패 (fail-closed — 후보를 추정하지 않음)
-  /// - [speciesId] null + fetchFailed false: 조회 성공, 미등록 후보 0
-  /// - [speciesId] non-null: 조회 성공, 분양 가능 후보
-  ///
-  /// 후보 source 는 runtime partial `_petSpecies` 가 아니라 canonical [kMvpSpeciesIds].
-  Future<({int? speciesId, bool fetchFailed})>
-  _pickRandomMvpSpeciesIdNotInPokedex(String userId) async {
-    final candidates = Set<int>.from(kMvpSpeciesIds);
-
-    try {
-      final rows = await supabase
-          .from('pokedex_entries')
-          .select('pet_species_id')
-          .eq('user_id', userId);
-      for (final row in rows as List) {
-        final id = int.tryParse(row['pet_species_id']?.toString() ?? '');
-        if (id != null) candidates.remove(id);
-      }
-    } catch (e) {
-      debugPrint('pick MVP species: pokedex fetch failed: $e');
-      return (speciesId: null, fetchFailed: true);
-    }
-
-    if (candidates.isEmpty) {
-      return (speciesId: null, fetchFailed: false);
-    }
-    final list = candidates.toList()..shuffle();
-    return (speciesId: list.first, fetchFailed: false);
-  }
-
-  /// 가방에서 랜덤 분양권을 실제로 사용해 새 아보펫을 분양받는다.
-  ///
-  /// 흐름:
-  ///   1) 보유 수량 / activePet 상태 가드
-  ///   2) `use_random_adoption_ticket` RPC 호출 → pet_species_id 획득
-  ///   3) 도감 중복 방어 체크(pokedex_entries)
-  ///   4) 졸업 완료된 기존 activePet 은 is_active=false 로만 비활성화
-  ///      (is_resident / graduated_at 은 유지 → 마당 거주 펫으로 남음)
-  ///   5) 새 user_pets insert (stage=baby, affection=0, is_active=true)
-  ///   6) 상태 재조회 + setState
-  ///   7) 기존 분양 직후와 동일한 _showNicknameDialog() 재사용
+  /// server-authoritative:
+  ///   `use_random_adoption_ticket` RPC 가 transaction 안에서
+  ///   후보 선택 · 기존 active 비활성 · 새 baby insert · ticket 차감까지 처리한다.
+  ///   Flutter 는 RPC 성공 후 상태 재조회 + fresh-adopt UX 만 담당한다.
+  ///   user_pets UPDATE/INSERT 및 ticket UPDATE 는 수행하지 않는다.
   Future<void> _useRandomAdoptionTicketFromBag() async {
     if (_isUsingRandomTicket) return;
 
@@ -10339,39 +10341,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
-    if (!mounted) return;
-    if (isPokedexComplete) {
-      await _showPokedexCompleteTicketNotice();
-      return;
-    }
-
-    // RPC 선차감 방지: 도감 조회 성공 + 미등록 후보 존재할 때만 RPC 허용.
-    final eligiblePick = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
-    if (!mounted) return;
-    if (eligiblePick.fetchFailed) {
-      debugPrint('random ticket: pokedex fetch failed — skip RPC');
-      _showCommunicationErrorNotice();
-      return;
-    }
-    final eligibleSpeciesId = eligiblePick.speciesId;
-    if (eligibleSpeciesId == null) {
-      final completeAgain = await _isPokedexCompleteForCurrentUser();
-      if (!mounted) return;
-      if (completeAgain) {
-        await _showPokedexCompleteTicketNotice();
-      } else {
-        debugPrint(
-          'random ticket: eligible null but pokedex incomplete — data mismatch',
-        );
-        _showCommunicationErrorNotice();
-      }
-      return;
-    }
-
-    // 현재 활성 펫이 아직 성숙기 졸업 처리가 끝나지 않은 상태라면 사용 불가.
-    // 성숙기 + is_resident=true + graduated_at!=null 셋이 모두 갖춰진 경우에만
-    // 새 펫을 분양받을 수 있다.
+    // UX guard only — DB 무결성 최종 방어는 서버 RPC.
     final currentPet = _activePet;
     final isCurrentGraduated =
         currentPet != null &&
@@ -10379,13 +10349,15 @@ class _HomePageState extends State<HomePage>
         currentPet['is_resident'] == true &&
         currentPet['graduated_at'] != null;
     if (currentPet != null && !isCurrentGraduated) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      await _showInteractionStatusMessage(l10n.snackTicketBlockedDuringGrowth);
       return;
     }
 
     setState(() => _isUsingRandomTicket = true);
 
     try {
-      // 1) RPC 호출
       dynamic rpcResult;
       try {
         rpcResult = await supabase.rpc(
@@ -10394,138 +10366,80 @@ class _HomePageState extends State<HomePage>
         );
       } catch (e) {
         if (!mounted) return;
-        debugPrint('random ticket rpc failed type=${e.runtimeType}');
-        _showCommunicationErrorNotice();
+        await _handleRandomAdoptionTicketRpcFailure(e);
         return;
       }
 
-      Map<String, dynamic>? payload;
-      if (rpcResult is Map) {
-        payload = Map<String, dynamic>.from(rpcResult);
-      } else if (rpcResult is List && rpcResult.isNotEmpty) {
-        final first = rpcResult.first;
-        if (first is Map) payload = Map<String, dynamic>.from(first);
-      }
-
+      // RPC 정상 반환 = DB transaction commit 완료. 이후 실패해도 RPC 재호출 금지.
+      final payload = _parseRandomAdoptionTicketRpcPayload(rpcResult);
       final speciesIdRaw = payload?['pet_species_id'];
-      var speciesId = speciesIdRaw is int
+      final speciesId = speciesIdRaw is int
           ? speciesIdRaw
           : int.tryParse(speciesIdRaw?.toString() ?? '');
+      final ticketRemainingRaw = payload?['ticket_remaining'];
+      final ticketRemaining = ticketRemainingRaw is int
+          ? ticketRemainingRaw
+          : int.tryParse(ticketRemainingRaw?.toString() ?? '');
+
       if (speciesId == null) {
-        if (!mounted) return;
-        debugPrint('random ticket rpc missing speciesId');
-        _showCommunicationErrorNotice();
-        return;
-      }
-
-      // MVP: 푸리/코리 등 비활성 종이 RPC에서 나와도 분양하지 않고 MVP 4종으로 대체.
-      if (!isMvpSpeciesId(speciesId)) {
-        final fallbackPick = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
-        if (!mounted) return;
-        if (fallbackPick.fetchFailed) {
-          await _fetchRandomTicketCount();
-          if (mounted) setState(() {});
-          debugPrint(
-            'random ticket fallback: pokedex fetch failed — skip continue',
-          );
-          _showCommunicationErrorNotice();
-          return;
-        }
-        final fallbackId = fallbackPick.speciesId;
-        if (fallbackId == null) {
-          await _fetchRandomTicketCount();
-          if (mounted) setState(() {});
-          final completeAgain = await _isPokedexCompleteForCurrentUser();
-          if (!mounted) return;
-          if (completeAgain) {
-            await _showPokedexCompleteTicketNotice();
-          } else {
-            debugPrint(
-              'random ticket fallback: eligible null but incomplete — mismatch',
-            );
-            _showCommunicationErrorNotice();
-          }
-          return;
-        }
         debugPrint(
-          'random adopt: non-MVP speciesId=$speciesId → MVP fallback=$fallbackId',
+          'random ticket rpc: missing pet_species_id payload=$payload',
         );
-        speciesId = fallbackId;
+        // 분양 자체는 서버에서 끝났을 수 있으므로 통신 오류로만 안내하고 refetch 시도.
+      } else {
+        debugPrint(
+          'random ticket rpc ok: speciesId=$speciesId '
+          'ticket_remaining=$ticketRemaining',
+        );
       }
 
-      // 2) Flutter 측 방어 체크 — 도감 중복 분양 차단
-      try {
-        final existingPokedex = await supabase
-            .from('pokedex_entries')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('pet_species_id', speciesId)
-            .maybeSingle();
-        if (existingPokedex != null) {
-          if (!mounted) return;
-          // 분양권 수량은 RPC 단계에서 이미 차감됐을 수 있으므로 재조회만 해둔다.
-          await _fetchRandomTicketCount();
-          if (mounted) setState(() {});
-          return;
-        }
-      } catch (e) {
-        debugPrint('pokedex precheck failed: $e');
-        // precheck 자체에 실패한 경우는 RPC 인터락이 살아있다고 가정하고 진행.
+      // 후속 refetch 실패해도 티켓을 다시 쓸 수 있다고 보이지 않게 즉시 반영.
+      if (ticketRemaining != null) {
+        _randomTicketCount = ticketRemaining < 0 ? 0 : ticketRemaining;
+        if (mounted) _safeSetState(() {});
       }
 
-      // 3) 졸업한 기존 펫은 is_active=false 로만 비활성화 (마당 거주 유지)
-      if (isCurrentGraduated) {
-        try {
-          await supabase
-              .from('user_pets')
-              .update({'is_active': false})
-              .eq('id', currentPet['id']);
-        } catch (e) {
-          if (!mounted) return;
-          debugPrint('random ticket deactivate failed type=${e.runtimeType}');
-          _showCommunicationErrorNotice();
-          return;
-        }
-      }
-
-      // 4) 새 user_pets insert
-      try {
-        await supabase.from('user_pets').insert({
-          'user_id': user.id,
-          'pet_species_id': speciesId,
-          'nickname': null,
-          'stage': 'baby',
-          'affection': 0,
-          'is_active': true,
-          'is_resident': false,
-          'graduated_at': null,
-        });
-      } catch (e) {
-        if (!mounted) return;
-        debugPrint('random ticket insert failed type=${e.runtimeType}');
-        _showCommunicationErrorNotice();
-        return;
-      }
-
-      // 5) 상태 재조회
+      var refetchOk = false;
       try {
         await Future.wait([
           _fetchActivePet(syncYard: false),
           _fetchResidentPets(),
-          _fetchRandomTicketCount(),
           _fetchTodayMealLogs(),
         ]);
+        // 실패해도 내부에서 0 덮어쓰지 않으므로 RPC remaining 이 유지된다.
+        await _fetchRandomTicketCount();
+        refetchOk = _activePet != null;
       } catch (e) {
-        debugPrint('post-adopt refetch failed: $e');
+        debugPrint('post-random-adopt refetch failed: $e');
+        if (ticketRemaining != null) {
+          _randomTicketCount = ticketRemaining < 0 ? 0 : ticketRemaining;
+        }
+        try {
+          await _fetchActivePet(syncYard: false);
+          await _fetchResidentPets();
+          refetchOk = _activePet != null;
+        } catch (e2) {
+          debugPrint('post-random-adopt refetch retry failed: $e2');
+        }
       }
 
       if (!mounted) return;
+
+      if (!refetchOk || _activePet == null) {
+        // RPC 는 성공. 분양 실패로 오인시키지 않고 통신/새로고침 안내만.
+        debugPrint(
+          'random ticket: RPC ok but activePet refetch failed — no RPC retry',
+        );
+        _showCommunicationErrorNotice();
+        _safeSetState(() {});
+        return;
+      }
+
       // 신규 분양: 기본 스폰 위치(오두막 문 앞) 고정.
       _pendingFreshAdoptPetId = _activePet?['id']?.toString();
       _scheduleSyncActivePetToYardGame();
       _safeSetState(() {});
 
-      // 성공 분기만: 게임메뉴 바깥 탭 가방 닫기와 동일하게 중앙 페이드 → 마당
       await _dismissBagPanelAfterTicketAdoptSuccessLikeBackdrop();
       if (!mounted) return;
 
@@ -10537,6 +10451,55 @@ class _HomePageState extends State<HomePage>
         _isUsingRandomTicket = false;
       }
     }
+  }
+
+  Map<String, dynamic>? _parseRandomAdoptionTicketRpcPayload(dynamic rpcResult) {
+    if (rpcResult is Map) {
+      return Map<String, dynamic>.from(rpcResult);
+    }
+    if (rpcResult is List && rpcResult.isNotEmpty) {
+      final first = rpcResult.first;
+      if (first is Map) return Map<String, dynamic>.from(first);
+    }
+    return null;
+  }
+
+  String _randomAdoptionTicketRpcErrorText(Object e) {
+    if (e is PostgrestException) {
+      final parts = <String>[
+        e.message,
+        if (e.details != null) '${e.details}',
+        if (e.hint != null) '${e.hint}',
+      ];
+      return parts.join(' ');
+    }
+    return e.toString();
+  }
+
+  /// RPC rollback 오류를 사용자 친화적으로 분기한다. raw exception 은 화면에 노출하지 않는다.
+  Future<void> _handleRandomAdoptionTicketRpcFailure(Object e) async {
+    final text = _randomAdoptionTicketRpcErrorText(e);
+    debugPrint('random ticket rpc failed: $text');
+
+    if (text.contains('분양 가능한 새 아보펫이 없어요')) {
+      await _showPokedexCompleteTicketNotice();
+      return;
+    }
+    if (text.contains('현재 육성 중인 아보펫이 있어요')) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      await _showInteractionStatusMessage(l10n.snackTicketBlockedDuringGrowth);
+      return;
+    }
+    if (text.contains('보유 중인 랜덤 분양권이 없어요')) {
+      try {
+        await _fetchRandomTicketCount();
+      } catch (_) {}
+      if (mounted) _safeSetState(() {});
+      return;
+    }
+
+    _showCommunicationErrorNotice();
   }
 
   // ----- 화면 전환 안정화용 helper -----
