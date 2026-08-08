@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:vegepet/features/pet/vegepet_species_identity.dart';
-import 'package:vegepet/l10n/app_localizations.dart';
-import 'package:vegepet/ui/vegepet_glass.dart';
+import 'package:avopet/features/pet/avopet_species_identity.dart';
+import 'package:avopet/l10n/app_localizations.dart';
+import 'package:avopet/ui/avopet_glass.dart';
 
 /// 현재 적용된 앱 locale 이 영어인지 확인. fontSize/창 높이/문구 분기에 사용한다.
 bool isEnglishLocale(BuildContext context) {
@@ -10,9 +10,9 @@ bool isEnglishLocale(BuildContext context) {
 }
 
 double gameMenuSubPanelTitleTop(BuildContext context) {
-  return kVegePetGameMenuSubPanelTitleTop +
+  return kAvoPetGameMenuSubPanelTitleTop +
       (isEnglishLocale(context)
-          ? kVegePetGameMenuSubPanelTitleTopEnOffset
+          ? kAvoPetGameMenuSubPanelTitleTopEnOffset
           : 0.0);
 }
 

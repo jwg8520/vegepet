@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:vegepet/ads/vegepet_admob_config.dart';
+import 'package:avopet/ads/avopet_admob_config.dart';
 
 /// 식단 인증용 전면 광고 preload / show 전담.
 ///
@@ -20,7 +20,7 @@ class MealInterstitialController {
 
   Future<void> preload() async {
     if (_disposed) return;
-    if (!VegePetAdMobConfig.hasUsableInterstitialUnitId) {
+    if (!AvoPetAdMobConfig.hasUsableInterstitialUnitId) {
       debugPrint('interstitial:skip:not_ready');
       return;
     }
@@ -30,7 +30,7 @@ class MealInterstitialController {
     debugPrint('interstitial:load_start');
     try {
       await InterstitialAd.load(
-        adUnitId: VegePetAdMobConfig.iosInterstitialAdUnitId,
+        adUnitId: AvoPetAdMobConfig.iosInterstitialAdUnitId,
         request: const AdRequest(),
         adLoadCallback: InterstitialAdLoadCallback(
           onAdLoaded: (ad) {

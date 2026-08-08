@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:vegepet/l10n/app_localizations.dart';
+import 'package:avopet/l10n/app_localizations.dart';
 
 // 게임 메뉴 가방 패널 / 놀아주기 드래그 등에서 쓰는 아이템 정보 모델.
 //

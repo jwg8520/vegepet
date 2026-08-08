@@ -22,26 +22,26 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:vegepet/ads/meal_interstitial_controller.dart';
-import 'package:vegepet/ads/vegepet_admob_config.dart';
-import 'package:vegepet/l10n/app_localizations.dart';
-import 'package:vegepet/features/bag/bag_models.dart';
-import 'package:vegepet/features/analysis/analysis_helpers.dart';
-import 'package:vegepet/features/analysis/analysis_models.dart';
-import 'package:vegepet/features/analysis/analysis_panel_content.dart';
-import 'package:vegepet/features/pet/vegepet_species_identity.dart';
-import 'package:vegepet/features/profile/profile_label_helpers.dart';
-import 'package:vegepet/features/profile/profile_select_helpers.dart';
-import 'package:vegepet/features/settings/support_documents.dart';
-import 'package:vegepet/game/petting_heart_tune.dart';
-import 'package:vegepet/game/pet_motion.dart';
-import 'package:vegepet/game/pet_motion_tune.dart';
-import 'package:vegepet/game/pet_collision_tune.dart';
-import 'package:vegepet/game/pet_shadow_tune.dart';
-import 'package:vegepet/game/yard_game.dart';
-import 'package:vegepet/ui/vegepet_glass.dart';
-import 'package:vegepet/ui/vegepet_gradient_text.dart';
-import 'package:vegepet/ui/vegepet_notice_dialog.dart';
+import 'package:avopet/ads/meal_interstitial_controller.dart';
+import 'package:avopet/ads/avopet_admob_config.dart';
+import 'package:avopet/l10n/app_localizations.dart';
+import 'package:avopet/features/bag/bag_models.dart';
+import 'package:avopet/features/analysis/analysis_helpers.dart';
+import 'package:avopet/features/analysis/analysis_models.dart';
+import 'package:avopet/features/analysis/analysis_panel_content.dart';
+import 'package:avopet/features/pet/avopet_species_identity.dart';
+import 'package:avopet/features/profile/profile_label_helpers.dart';
+import 'package:avopet/features/profile/profile_select_helpers.dart';
+import 'package:avopet/features/settings/support_documents.dart';
+import 'package:avopet/game/petting_heart_tune.dart';
+import 'package:avopet/game/pet_motion.dart';
+import 'package:avopet/game/pet_motion_tune.dart';
+import 'package:avopet/game/pet_collision_tune.dart';
+import 'package:avopet/game/pet_shadow_tune.dart';
+import 'package:avopet/game/yard_game.dart';
+import 'package:avopet/ui/avopet_glass.dart';
+import 'package:avopet/ui/avopet_gradient_text.dart';
+import 'package:avopet/ui/avopet_notice_dialog.dart';
 
 const _supabaseUrl = 'https://rzsioxnqljywhfyxccuh.supabase.co';
 // 보안 주의:
@@ -69,7 +69,7 @@ const _supabaseAnonKey = 'sb_publishable_y9uJosVyntByD4xBPr4AUA_q1i0Dlci';
 //   - 사용자 이메일 전체를 디버그 로그로 출력하지 않는다.
 // ============================================================================
 const _kGoogleIosClientId =
-    '256004504301-fbgm6n2kfj9lgnrjjp1as1f40c3rm3lp.apps.googleusercontent.com';
+    '256004504301-g1ipq16q7q000ujtfaplvl5ki3vn6nls.apps.googleusercontent.com';
 const _kGoogleWebClientId =
     '256004504301-tc68osd09lkv8g085p70ckljhjviaidd.apps.googleusercontent.com';
 
@@ -563,7 +563,7 @@ void main() async {
   if (!kIsWeb && Platform.isIOS) {
     try {
       await MobileAds.instance.initialize();
-      if (VegePetAdMobConfig.useTestAdUnitIds && kReleaseMode) {
+      if (AvoPetAdMobConfig.useTestAdUnitIds && kReleaseMode) {
         debugPrint('interstitial:config_warn:test_ids_enabled_in_release');
       }
     } catch (e) {
@@ -571,7 +571,7 @@ void main() async {
     }
   }
 
-  runApp(const VegePetApp());
+  runApp(const AvoPetApp());
 }
 
 Future<void> _precacheStartupLoadingLogo() async {
@@ -613,23 +613,23 @@ final supabase = Supabase.instance.client;
 // `_dependents.isEmpty is not true` assertion 이 발생할 수 있다. 전역 key 를
 // 통해 화면 전환 타이밍과의 충돌을 줄인다.
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
-const String _kLocalePrefKey = 'vegepet_locale_code';
+const String _kLocalePrefKey = 'avopet_locale_code';
 
 /// 앱 설치 단위 기기 식별자(진단·확장용). 사용자 UUID/이메일을 담지 않는다.
-const String _kDeviceIdPrefKey = 'vegepet_device_id';
+const String _kDeviceIdPrefKey = 'avopet_device_id';
 
 /// 이 기기의 현재 활성 로그인 세션 식별자. 단일 활성 기기 판정 기준값이다.
 /// 토큰·사용자 UUID 를 사용하지 않는 순수 랜덤 값이다.
-const String _kActiveSessionIdPrefKey = 'vegepet_active_session_id';
+const String _kActiveSessionIdPrefKey = 'avopet_active_session_id';
 
-class VegePetApp extends StatefulWidget {
-  const VegePetApp({super.key});
+class AvoPetApp extends StatefulWidget {
+  const AvoPetApp({super.key});
 
   @override
-  State<VegePetApp> createState() => _VegePetAppState();
+  State<AvoPetApp> createState() => _AvoPetAppState();
 }
 
-class _VegePetAppState extends State<VegePetApp> {
+class _AvoPetAppState extends State<AvoPetApp> {
   Locale _locale = const Locale('ko');
 
   @override
@@ -663,7 +663,7 @@ class _VegePetAppState extends State<VegePetApp> {
       locale: _locale,
       setLocale: _setLocale,
       child: MaterialApp(
-        title: 'VegePet',
+        title: 'AvoPet',
         debugShowCheckedModeBanner: false,
         navigatorKey: _rootNavigatorKey,
         locale: _locale,
@@ -967,16 +967,16 @@ class _HomePageState extends State<HomePage>
   int _toyPlayAttemptSeq = 0;
   bool _isPetInfoBannerOpen = false;
 
-  /// 베지펫 정보창 ↔ 놀아주기 창 전환 애니메이션 진행 중.
+  /// 아보펫 정보창 ↔ 놀아주기 창 전환 애니메이션 진행 중.
   bool _petToySwapInProgress = false;
 
-  /// 놀아주기를 베지펫 정보창의 「놀아주기」로 연 경우, 뒤로가기 시 정보창 복귀.
+  /// 놀아주기를 아보펫 정보창의 「놀아주기」로 연 경우, 뒤로가기 시 정보창 복귀.
   bool _toyOpenedFromPetBanner = false;
 
-  /// 베지펫 정보창 ↔ 먹이주기 패널 전환 애니메이션 진행 중.
+  /// 아보펫 정보창 ↔ 먹이주기 패널 전환 애니메이션 진행 중.
   bool _petMealSwapInProgress = false;
 
-  /// 먹이주기를 베지펫 정보창에서 연 경우, 뒤로가기 시 정보창 복귀.
+  /// 먹이주기를 아보펫 정보창에서 연 경우, 뒤로가기 시 정보창 복귀.
   bool _mealOpenedFromPetBanner = false;
 
   /// 놀아주기/먹이주기 외부 탭으로 마당 복귀 중(우측 메뉴 아이콘 [_hideGameMenuHudIcon] 과 동일).
@@ -985,7 +985,7 @@ class _HomePageState extends State<HomePage>
   bool _isMealPanelOpen = false;
   bool _gameMenuPanelOpen = false;
 
-  /// 메뉴창 슬라이드 아웃 중(베지펫 정보창 [_isPetInfoBannerOpen] 토글과 동일 패턴).
+  /// 메뉴창 슬라이드 아웃 중(아보펫 정보창 [_isPetInfoBannerOpen] 토글과 동일 패턴).
   bool _gameMenuPanelRetracting = false;
 
   /// 게임 메뉴 패널 내부에서 열리는 프로필 수정 창.
@@ -1243,21 +1243,21 @@ class _HomePageState extends State<HomePage>
   final AudioPlayer _sfxPlayer = AudioPlayer();
 
   static const String _kNoticeEventPushPrefKey =
-      'vegepet_notice_event_push_enabled';
+      'avopet_notice_event_push_enabled';
   static const String _kMealReminderPushPrefKey =
-      'vegepet_meal_reminder_push_enabled';
+      'avopet_meal_reminder_push_enabled';
   static const String _kBackgroundMusicPrefKey =
-      'vegepet_background_music_enabled';
-  static const String _kSoundEffectsPrefKey = 'vegepet_sound_effects_enabled';
+      'avopet_background_music_enabled';
+  static const String _kSoundEffectsPrefKey = 'avopet_sound_effects_enabled';
   static const String _kAdFirstMealSuccessDonePrefKey =
-      'vegepet_ad_first_meal_success_done';
-  static const String _kAdDailyCountPrefKey = 'vegepet_ad_daily_count';
-  static const String _kAdDailySlotsPrefKey = 'vegepet_ad_daily_slots';
-  static const String _kAdLastShownAtMsPrefKey = 'vegepet_ad_last_shown_at_ms';
+      'avopet_ad_first_meal_success_done';
+  static const String _kAdDailyCountPrefKey = 'avopet_ad_daily_count';
+  static const String _kAdDailySlotsPrefKey = 'avopet_ad_daily_slots';
+  static const String _kAdLastShownAtMsPrefKey = 'avopet_ad_last_shown_at_ms';
   /// 광고 일일 카운트가 기록된 "현지 날짜" (yyyy-MM-dd).
   /// 저장 key 문자열은 기존 설치 앱과의 호환을 위해 그대로 둔다.
   static const String _kAdRecordLocalDatePrefKey =
-      'vegepet_ad_record_kst_date';
+      'avopet_ad_record_local_date';
   static const Duration _kAdMinInterval = Duration(hours: 3);
   static const int _kAdDailyMaxCount = 2;
   static const int _kMealReminderNotificationIdBase = 120000;
@@ -1285,7 +1285,7 @@ class _HomePageState extends State<HomePage>
   /// 등장 전 패널을 화면 우측 밖에 둘 때의 left.
   static const double _kGameMenuPanelOffLeft = 844;
 
-  /// 좌측 베지펫 정보창 슬라이드·우측 게임 메뉴 슬라이드 공통.
+  /// 좌측 아보펫 정보창 슬라이드·우측 게임 메뉴 슬라이드 공통.
   static const Duration _kYardSidePanelSlideDuration = Duration(
     milliseconds: 240,
   );
@@ -1703,7 +1703,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 프로필 완료 → 선택 분양 → 분양 펫 이름 저장이 끝나기 전까지
-  /// 좌/우 상단 HUD 코너 버튼(베지펫 정보, 게임 메뉴) 터치를 막는다.
+  /// 좌/우 상단 HUD 코너 버튼(아보펫 정보, 게임 메뉴) 터치를 막는다.
   bool _isInitialOnboardingHudBlocked() {
     if (!_isProfileComplete()) return true;
     if (_isSavingProfile || _isProfileSetupClosing) return true;
@@ -3487,7 +3487,7 @@ class _HomePageState extends State<HomePage>
     _accountProfileWatchUserId = user.id;
 
     try {
-      final channel = supabase.channel('vegepet-profile-watch-${user.id}');
+      final channel = supabase.channel('avopet-profile-watch-${user.id}');
 
       channel.onPostgresChanges(
         event: PostgresChangeEvent.delete,
@@ -3757,17 +3757,17 @@ class _HomePageState extends State<HomePage>
 
     if (code == 'en') {
       return const _MealNotificationTexts(
-        title: 'VegePet Meal Time',
+        title: 'AvoPet Meal Time',
         messages: [
-          'VegePet may be getting hungry!',
-          'It’s time to give VegePet a healthy meal!',
+          'AvoPet may be getting hungry!',
+          'It’s time to give AvoPet a healthy meal!',
         ],
       );
     }
 
     return const _MealNotificationTexts(
-      title: '베지펫 식사 시간',
-      messages: ['베지펫이 배가 고플 시간이에요!', '베지펫에게 건강한 음식을 줄 시간이에요!'],
+      title: '아보펫 식사 시간',
+      messages: ['아보펫이 배가 고플 시간이에요!', '아보펫에게 건강한 음식을 줄 시간이에요!'],
     );
   }
 
@@ -3979,9 +3979,9 @@ class _HomePageState extends State<HomePage>
 
     try {
       await _initSoundIfNeeded();
-      // TODO(vegepet): 실제 BGM 파일 준비 후 assets/audio/bgm_yard.mp3를
+      // TODO(avopet): 실제 BGM 파일 준비 후 assets/audio/bgm_yard.mp3를
       // pubspec.yaml assets에 등록하고 재생 연결.
-      // TODO(vegepet): 실음원 연결 시 _bgmAssetUnavailable 처리 재검토.
+      // TODO(avopet): 실음원 연결 시 _bgmAssetUnavailable 처리 재검토.
       await _bgmPlayer.play(AssetSource('audio/bgm_yard.mp3'));
     } catch (e) {
       _bgmAssetUnavailable = true;
@@ -4004,9 +4004,9 @@ class _HomePageState extends State<HomePage>
 
     try {
       await _initSoundIfNeeded();
-      // TODO(vegepet): 실제 효과음 파일 준비 후 assets/audio/sfx_tap.mp3 등을
+      // TODO(avopet): 실제 효과음 파일 준비 후 assets/audio/sfx_tap.mp3 등을
       // pubspec.yaml assets에 등록하고 연결.
-      // TODO(vegepet): 효과음 파일 확장 시 _sfxAssetUnavailable 처리 세분화 검토.
+      // TODO(avopet): 효과음 파일 확장 시 _sfxAssetUnavailable 처리 세분화 검토.
       await _sfxPlayer.stop();
       await _sfxPlayer.play(AssetSource(assetPath));
     } catch (e) {
@@ -4157,9 +4157,9 @@ class _HomePageState extends State<HomePage>
 
       const details = NotificationDetails(
         android: AndroidNotificationDetails(
-          'vegepet_meal_reminders',
-          'VegePet Meal Reminders',
-          channelDescription: 'Daily scheduled reminders for VegePet meals.',
+          'avopet_meal_reminders',
+          'AvoPet Meal Reminders',
+          channelDescription: 'Daily scheduled reminders for AvoPet meals.',
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -4264,7 +4264,7 @@ class _HomePageState extends State<HomePage>
     required String enabledMessage,
     required String disabledMessage,
   }) async {
-    // TODO(vegepet): 추후 FCM/Supabase Edge Function 연동 시 이 토글 값을 수신 동의 상태로 사용
+    // TODO(avopet): 추후 FCM/Supabase Edge Function 연동 시 이 토글 값을 수신 동의 상태로 사용
     await _saveNoticeEventPushEnabled(enabled);
     if (mounted) {
       _safeSetState(() => _noticeEventPushEnabled = enabled);
@@ -5981,7 +5981,7 @@ class _HomePageState extends State<HomePage>
     return null;
   }
 
-  VegePetSpeciesIdentity? _speciesIdentityFromSpeciesRow(
+  AvoPetSpeciesIdentity? _speciesIdentityFromSpeciesRow(
     Map<String, dynamic>? species,
   ) => speciesIdentityFromSpeciesRow(species);
 
@@ -6246,7 +6246,7 @@ class _HomePageState extends State<HomePage>
     }
     await _syncResidentPetsToYardGame();
     debugPrint(
-      'YardGame sync result: shown=$shown, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
+      'YardGame sync result: shown=$shown, hasActiveAvoPet=${_yardGame.hasActiveAvoPet}, error=${_yardGame.lastPetSpawnError}',
     );
     if (mounted) {
       _safeSetState(() {
@@ -6276,7 +6276,7 @@ class _HomePageState extends State<HomePage>
 
   void _triggerPetHappyMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
-    if (!_yardGame.hasActiveVegePet) return;
+    if (!_yardGame.hasActiveAvoPet) return;
     final tuning = _motionTuneForActivePet(PetMotion.happy);
     _yardGame.playPetMotion(
       PetMotion.happy,
@@ -6287,7 +6287,7 @@ class _HomePageState extends State<HomePage>
 
   void _triggerPetPlayMotion() {
     if (!_shouldUseFlamePetForActivePet()) return;
-    if (!_yardGame.hasActiveVegePet) return;
+    if (!_yardGame.hasActiveAvoPet) return;
     final tuning = _motionTuneForActivePet(PetMotion.play);
     _yardGame.playPetMotion(
       PetMotion.play,
@@ -6298,7 +6298,7 @@ class _HomePageState extends State<HomePage>
 
   void _triggerPettingHeartEffect() {
     if (!_shouldUseFlamePetForActivePet()) return;
-    if (!_yardGame.hasActiveVegePet) return;
+    if (!_yardGame.hasActiveAvoPet) return;
     _yardGame.spawnPettingHeartBurst();
   }
 
@@ -7411,7 +7411,7 @@ class _HomePageState extends State<HomePage>
     int? maxLines,
     TextOverflow? overflow,
   }) {
-    return buildVegePetPastelBlueGradientButtonText(
+    return buildAvoPetPastelBlueGradientButtonText(
       text,
       fontSize: fontSize,
       fontWeight: fontWeight,
@@ -7803,7 +7803,7 @@ class _HomePageState extends State<HomePage>
   // --------------------------------------------------------------------------
 
   Future<bool> _confirmResetForTesting() async {
-    return _showVegePetConfirmDialog(
+    return _showAvoPetConfirmDialog(
       message: '개발용 전체 초기화를 진행할까요?',
       description: '현재 계정의 펫, 식단·도감 기록, 보유 아이템/분양권, 프로필 입력값이 초기화됩니다.',
       primaryLabel: '초기화',
@@ -7816,7 +7816,7 @@ class _HomePageState extends State<HomePage>
     // 보안 방어선(이중화): 호출 진입점인 디버그 패널이 release 에서 숨겨져 있어도,
     // 이 파괴적 초기화 함수 자체가 release 에서 절대 실행되지 않도록 가드한다.
     if (!kDebugMode) return;
-    // TODO(vegepet/security): 현재는 클라이언트에서 user_id 필터로 여러 테이블을 직접
+    // TODO(avopet/security): 현재는 클라이언트에서 user_id 필터로 여러 테이블을 직접
     //   delete/update 한다. RLS 가 전제되어야 안전하며, 향후 security definer RPC
     //   (예: debug_reset_user_data)로 이전해 서버에서 일괄 처리하도록 한다.
     _dismissFocus();
@@ -8981,7 +8981,7 @@ class _HomePageState extends State<HomePage>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: _buildVegePetGlassPanel(
+      child: _buildAvoPetGlassPanel(
         width: _kStoryPanelW,
         height: _kStoryPanelH,
         child: Stack(
@@ -9039,7 +9039,7 @@ class _HomePageState extends State<HomePage>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: _buildVegePetGlassPanel(
+      child: _buildAvoPetGlassPanel(
         width: _kAnalysisPanelW,
         height: _kAnalysisPanelH,
         child: Stack(
@@ -9231,13 +9231,13 @@ class _HomePageState extends State<HomePage>
     return bagWireframeRandomTicketDef(_effectiveRandomTicketCountForBag());
   }
 
-  /// VegePet 더미 아이콘 터치 정책:
+  /// AvoPet 더미 아이콘 터치 정책:
   /// 아이콘+라벨 구조에서는 실제 onTap을 반드시 48×48 아이콘 사각형 영역에만 연결한다.
   /// 라벨, 여백, 전체 타일 영역을 눌러서는 로직이 실행되면 안 된다.
   /// (스플래시/하이라이트는 borderRadius 20 기준으로 이 사각형 내부에만.)
   ///
   /// [child] 는 48×48 영역을 채우는 시각(보통 [Container] + [Icon]).
-  Widget _buildVegePetDummyIconInkWell({
+  Widget _buildAvoPetDummyIconInkWell({
     required VoidCallback? onTap,
     required Widget child,
   }) {
@@ -9252,7 +9252,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 와이어프레임용 48×48 카드형 슬롯. 추후 `Image.asset` 으로 교체하기 쉽게 한 곳에 모음.
-  /// 터치는 [_buildVegePetDummyIconInkWell] 와 동일: **아이콘 사각형만** onTap.
+  /// 터치는 [_buildAvoPetDummyIconInkWell] 와 동일: **아이콘 사각형만** onTap.
   /// 장난감·분양권은 놀아주기 창과 동일 PNG 아이콘을 쓴다.
   /// [enabled] false 이면 놀아주기 비활성 장난감과 같이 투명 처리하고 탭 무시.
   Widget _buildBagWireframeDummyTile({
@@ -9264,7 +9264,7 @@ class _HomePageState extends State<HomePage>
     final tile = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildVegePetDummyIconInkWell(
+        _buildAvoPetDummyIconInkWell(
           onTap: enabled ? onTap : null,
           child: assetPath != null
               ? _buildToyMenuIconVisual(item, true)
@@ -9664,7 +9664,7 @@ class _HomePageState extends State<HomePage>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: _buildVegePetGlassPanel(
+      child: _buildAvoPetGlassPanel(
         width: _kBagItemDetailW,
         height: _kBagItemDetailH,
         shadowBlurRadius: 10,
@@ -9819,7 +9819,7 @@ class _HomePageState extends State<HomePage>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '성숙기까지 육성 완료한 베지펫을 확인할 수 있어요.',
+                      '성숙기까지 육성 완료한 아보펫을 확인할 수 있어요.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -9830,7 +9830,7 @@ class _HomePageState extends State<HomePage>
                         padding: const EdgeInsets.symmetric(vertical: 24),
                         child: Center(
                           child: Text(
-                            '아직 도감에 등록된 베지펫이 없어요.',
+                            '아직 도감에 등록된 아보펫이 없어요.',
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -9840,14 +9840,14 @@ class _HomePageState extends State<HomePage>
                     else ...[
                       _buildPokedexSection(
                         title: '고양이',
-                        emptyText: '등록된 고양이 베지펫이 없어요.',
+                        emptyText: '등록된 고양이 아보펫이 없어요.',
                         entries: cats,
                         onSelectEntry: onSelectEntry,
                       ),
                       const SizedBox(height: 16),
                       _buildPokedexSection(
                         title: '강아지',
-                        emptyText: '등록된 강아지 베지펫이 없어요.',
+                        emptyText: '등록된 강아지 아보펫이 없어요.',
                         entries: dogs,
                         onSelectEntry: onSelectEntry,
                       ),
@@ -10013,7 +10013,7 @@ class _HomePageState extends State<HomePage>
             ),
             const SizedBox(height: 12),
             Text(
-              '베지펫 정보',
+              '아보펫 정보',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -10132,7 +10132,7 @@ class _HomePageState extends State<HomePage>
     return list.first;
   }
 
-  /// 가방에서 랜덤 분양권을 실제로 사용해 새 베지펫을 분양받는다.
+  /// 가방에서 랜덤 분양권을 실제로 사용해 새 아보펫을 분양받는다.
   ///
   /// 흐름:
   ///   1) 보유 수량 / activePet 상태 가드
@@ -10640,11 +10640,11 @@ class _HomePageState extends State<HomePage>
   }
 
   // --------------------------------------------------------------------------
-  // VegePet 공통 확인창 (240×116 · Glassmorphism · 844×390 좌표계)
-  // TODO(vegepet): 동일 양식의 1버튼(확인만) 알림창 — 필요 시 primary 전용 래퍼 추가.
+  // AvoPet 공통 확인창 (240×116 · Glassmorphism · 844×390 좌표계)
+  // TODO(avopet): 동일 양식의 1버튼(확인만) 알림창 — 필요 시 primary 전용 래퍼 추가.
   // --------------------------------------------------------------------------
 
-  Widget _buildVegePetPastelRedGradientButtonText(
+  Widget _buildAvoPetPastelRedGradientButtonText(
     String text, {
     double fontSize = 11,
     FontWeight fontWeight = FontWeight.w600,
@@ -11143,7 +11143,7 @@ class _HomePageState extends State<HomePage>
     _yardConfirmOverlayFadeController.value = 1;
   }
 
-  Widget _buildVegePetYardConfirmOverlayFade({required Widget child}) {
+  Widget _buildAvoPetYardConfirmOverlayFade({required Widget child}) {
     return AnimatedBuilder(
       animation: _yardConfirmOverlayFadeCurve,
       builder: (context, fadedChild) {
@@ -11157,7 +11157,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// Glassmorphism 패널 shell (ClipRRect + BackdropFilter + white 60%).
-  Widget _buildVegePetGlassPanel({
+  Widget _buildAvoPetGlassPanel({
     required double width,
     required double height,
     required Widget child,
@@ -11166,7 +11166,7 @@ class _HomePageState extends State<HomePage>
     Color? backgroundColor,
     double shadowBlurRadius = 12,
   }) {
-    return buildVegePetGlassPanel(
+    return buildAvoPetGlassPanel(
       width: width,
       height: height,
       child: child,
@@ -11201,8 +11201,8 @@ class _HomePageState extends State<HomePage>
     required Widget body,
     required VoidCallback onBack,
     bool showBackButton = true,
-    double width = kVegePetGameMenuPanelW,
-    double height = kVegePetGameMenuPanelH,
+    double width = kAvoPetGameMenuPanelW,
+    double height = kAvoPetGameMenuPanelH,
     double blurSigma = 10,
     double shadowBlurRadius = 12,
     double bodyTop = 48,
@@ -11233,26 +11233,26 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildVegePetConfirmDialogShell({
+  Widget _buildAvoPetConfirmDialogShell({
     required Widget child,
     required double width,
     required double height,
   }) {
-    return buildVegePetConfirmDialogShell(
+    return buildAvoPetConfirmDialogShell(
       child: child,
       width: width,
       height: height,
     );
   }
 
-  Widget _buildVegePetOneButtonNoticeDialog(VegePetNoticeConfig config) {
-    return buildVegePetOneButtonNoticeDialog(
+  Widget _buildAvoPetOneButtonNoticeDialog(AvoPetNoticeConfig config) {
+    return buildAvoPetOneButtonNoticeDialog(
       config,
       isEnglishLocale: _isEnglishLocale,
     );
   }
 
-  Widget _buildVegePetOneButtonNoticeOverlay(VegePetNoticeConfig config) {
+  Widget _buildAvoPetOneButtonNoticeOverlay(AvoPetNoticeConfig config) {
     if (!_isYardConfirmOverlayFadeVisible(config.isOpen)) {
       return const SizedBox.shrink();
     }
@@ -11265,12 +11265,12 @@ class _HomePageState extends State<HomePage>
       config.onOutsideTap?.call();
     }
 
-    final dialog = _buildVegePetOneButtonNoticeDialog(config);
+    final dialog = _buildAvoPetOneButtonNoticeDialog(config);
     final positionedDialog = Positioned(
-      left: kVegePetConfirmDialogLeft,
-      top: kVegePetConfirmDialogTop,
-      width: kVegePetConfirmDialogW,
-      height: kVegePetConfirmDialogH,
+      left: kAvoPetConfirmDialogLeft,
+      top: kAvoPetConfirmDialogTop,
+      width: kAvoPetConfirmDialogW,
+      height: kAvoPetConfirmDialogH,
       child: config.blockDialogPointerWithGestureDetector
           ? GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -11299,14 +11299,14 @@ class _HomePageState extends State<HomePage>
 
     final fadedChild = config.useFadeTransitionForOverlay
         ? FadeTransition(opacity: _yardConfirmOverlayFadeCurve, child: stack)
-        : _buildVegePetYardConfirmOverlayFade(child: stack);
+        : _buildAvoPetYardConfirmOverlayFade(child: stack);
 
     return Positioned.fill(child: fadedChild);
   }
 
   /// [primaryLabel] = A(하늘빛 그라데이션) → `true`, [secondaryLabel] = B(빨강 그라데이션) → `false`.
   /// [dimBarrier] 가 false 이면 배경 어둡게 처리 없음(분양권 확인 등).
-  Future<bool> _showVegePetConfirmDialog({
+  Future<bool> _showAvoPetConfirmDialog({
     required String message,
     String? description,
     required String primaryLabel,
@@ -11329,10 +11329,10 @@ class _HomePageState extends State<HomePage>
         final scale = min(sw / _kGameCanvasWidth, sh / _kGameCanvasHeight);
         final ox = (sw - _kGameCanvasWidth * scale) / 2;
         final oy = (sh - _kGameCanvasHeight * scale) / 2;
-        final dlgLeft = ox + kVegePetConfirmDialogLeft * scale;
-        final dlgTop = oy + kVegePetConfirmDialogTop * scale;
-        final dlgW = kVegePetConfirmDialogW * scale;
-        final dlgH = kVegePetConfirmDialogH * scale;
+        final dlgLeft = ox + kAvoPetConfirmDialogLeft * scale;
+        final dlgTop = oy + kAvoPetConfirmDialogTop * scale;
+        final dlgW = kAvoPetConfirmDialogW * scale;
+        final dlgH = kAvoPetConfirmDialogH * scale;
 
         return Dialog(
           insetPadding: EdgeInsets.zero,
@@ -11367,11 +11367,11 @@ class _HomePageState extends State<HomePage>
                     child: FittedBox(
                       fit: BoxFit.fill,
                       child: SizedBox(
-                        width: kVegePetConfirmDialogW,
-                        height: kVegePetConfirmDialogH,
-                        child: _buildVegePetConfirmDialogShell(
-                          width: kVegePetConfirmDialogW,
-                          height: kVegePetConfirmDialogH,
+                        width: kAvoPetConfirmDialogW,
+                        height: kAvoPetConfirmDialogH,
+                        child: _buildAvoPetConfirmDialogShell(
+                          width: kAvoPetConfirmDialogW,
+                          height: kAvoPetConfirmDialogH,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -11494,7 +11494,7 @@ class _HomePageState extends State<HomePage>
                                             ),
                                             child: Center(
                                               child:
-                                                  _buildVegePetPastelRedGradientButtonText(
+                                                  _buildAvoPetPastelRedGradientButtonText(
                                                     secondaryLabel,
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w600,
@@ -11996,8 +11996,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildNameInterlockNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isNameInterlockNoticeOpen,
         title: l10n.nameInterlockMain,
         body: l10n.nameInterlockSub,
@@ -12013,8 +12013,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildProfileSelectMissingNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isProfileSelectMissingNoticeOpen,
         title: l10n.profileSelectMissingNoticeTitle,
         body: l10n.profileSelectMissingNoticeBody,
@@ -12039,8 +12039,8 @@ class _HomePageState extends State<HomePage>
     final body =
         _pendingMaturityNoticeBody ??
         l10n.maturityCompleteNoticeBody(petNameSubject);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isMaturityCompleteNoticeOpen,
         title: l10n.maturityCompleteNoticeTitle,
         body: body,
@@ -12058,8 +12058,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildCommunicationErrorNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isCommunicationErrorNoticeOpen,
         title: l10n.communicationErrorTitle,
         body: l10n.communicationErrorBody,
@@ -12077,8 +12077,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildBootstrapErrorNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _status == _ViewStatus.error,
         title: l10n.bootstrapErrorTitle,
         body: l10n.bootstrapErrorBody,
@@ -12098,8 +12098,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildPokedexCompleteTicketNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isPokedexCompleteTicketNoticeOpen,
         title: l10n.pokedexCompleteTicketNoticeTitle,
         body: l10n.pokedexCompleteTicketNoticeBody,
@@ -12139,7 +12139,7 @@ class _HomePageState extends State<HomePage>
     );
 
     return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
+      child: _buildAvoPetYardConfirmOverlayFade(
         child: Stack(
           clipBehavior: Clip.none,
           fit: StackFit.expand,
@@ -12152,13 +12152,13 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: kVegePetConfirmDialogLeft,
-              top: kVegePetConfirmDialogTop,
-              width: kVegePetConfirmDialogW,
-              height: kVegePetConfirmDialogH,
-              child: _buildVegePetConfirmDialogShell(
-                width: kVegePetConfirmDialogW,
-                height: kVegePetConfirmDialogH,
+              left: kAvoPetConfirmDialogLeft,
+              top: kAvoPetConfirmDialogTop,
+              width: kAvoPetConfirmDialogW,
+              height: kAvoPetConfirmDialogH,
+              child: _buildAvoPetConfirmDialogShell(
+                width: kAvoPetConfirmDialogW,
+                height: kAvoPetConfirmDialogH,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -12296,8 +12296,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildAccountLinkSuccessNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isAccountLinkSuccessNoticeOpen,
         title: l10n.accountLinkSuccessTitle,
         body: l10n.accountLinkSuccessBody,
@@ -12311,8 +12311,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildMealRecognitionFailureNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isMealRecognitionFailureNoticeOpen,
         title: l10n.mealRecognitionFailureTitle,
         body: l10n.mealRecognitionFailureBody,
@@ -12327,8 +12327,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildMealVerificationLimitNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isMealVerificationLimitNoticeOpen,
         title: l10n.mealVerificationLimitTitle,
         body: l10n.mealVerificationLimitBody,
@@ -12343,8 +12343,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildWithdrawErrorNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isWithdrawErrorNoticeOpen,
         title: l10n.withdrawErrorNoticeTitle,
         body: l10n.withdrawErrorNoticeBody,
@@ -12365,8 +12365,8 @@ class _HomePageState extends State<HomePage>
     final l10n = AppLocalizations.of(context);
     final email = _linkedAccountEmail?.trim();
     final hasEmail = email != null && email.isNotEmpty;
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isLinkedAccountAddressNoticeOpen,
         title: l10n.accountAddressTitle,
         body: hasEmail ? email : l10n.accountAddressUnavailable,
@@ -12381,8 +12381,8 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildDuplicatePetNameNoticeGlobalOverlay() {
     final l10n = AppLocalizations.of(context);
-    return _buildVegePetOneButtonNoticeOverlay(
-      VegePetNoticeConfig(
+    return _buildAvoPetOneButtonNoticeOverlay(
+      AvoPetNoticeConfig(
         isOpen: _isDuplicatePetNameNoticeOpen,
         title: l10n.duplicatePetNameNoticeTitle,
         body: l10n.duplicatePetNameNoticeBody,
@@ -12401,9 +12401,9 @@ class _HomePageState extends State<HomePage>
     final isEn = _isEnglishLocale;
     final resetting = _isResettingToGuestAfterRemoteLogout;
 
-    return _buildVegePetConfirmDialogShell(
-      width: kVegePetConfirmDialogW,
-      height: kVegePetConfirmDialogH,
+    return _buildAvoPetConfirmDialogShell(
+      width: kAvoPetConfirmDialogW,
+      height: kAvoPetConfirmDialogH,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -12499,7 +12499,7 @@ class _HomePageState extends State<HomePage>
     }
 
     return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
+      child: _buildAvoPetYardConfirmOverlayFade(
         child: Stack(
           clipBehavior: Clip.none,
           fit: StackFit.expand,
@@ -12512,10 +12512,10 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: kVegePetConfirmDialogLeft,
-              top: kVegePetConfirmDialogTop,
-              width: kVegePetConfirmDialogW,
-              height: kVegePetConfirmDialogH,
+              left: kAvoPetConfirmDialogLeft,
+              top: kAvoPetConfirmDialogTop,
+              width: kAvoPetConfirmDialogW,
+              height: kAvoPetConfirmDialogH,
               child: _buildRemoteAccountLinkedLogoutNoticeDialog(),
             ),
           ],
@@ -12571,7 +12571,7 @@ class _HomePageState extends State<HomePage>
     }
 
     return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
+      child: _buildAvoPetYardConfirmOverlayFade(
         child: Stack(
           clipBehavior: Clip.none,
           fit: StackFit.expand,
@@ -12584,10 +12584,10 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: kVegePetConfirmDialogLeft,
-              top: kVegePetConfirmDialogTop,
-              width: kVegePetConfirmDialogW,
-              height: kVegePetConfirmDialogH,
+              left: kAvoPetConfirmDialogLeft,
+              top: kAvoPetConfirmDialogTop,
+              width: kAvoPetConfirmDialogW,
+              height: kAvoPetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
@@ -12617,9 +12617,9 @@ class _HomePageState extends State<HomePage>
       height: 1.25,
     );
 
-    return _buildVegePetConfirmDialogShell(
-      width: kVegePetConfirmDialogW,
-      height: kVegePetConfirmDialogH,
+    return _buildAvoPetConfirmDialogShell(
+      width: kAvoPetConfirmDialogW,
+      height: kAvoPetConfirmDialogH,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -12706,7 +12706,7 @@ class _HomePageState extends State<HomePage>
                           ],
                         ),
                         child: Center(
-                          child: _buildVegePetPastelRedGradientButtonText(
+                          child: _buildAvoPetPastelRedGradientButtonText(
                             l10n.cancelLabel,
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
@@ -12747,7 +12747,7 @@ class _HomePageState extends State<HomePage>
     );
 
     return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
+      child: _buildAvoPetYardConfirmOverlayFade(
         child: Stack(
           clipBehavior: Clip.none,
           fit: StackFit.expand,
@@ -12760,16 +12760,16 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: kVegePetConfirmDialogLeft,
-              top: kVegePetConfirmDialogTop,
-              width: kVegePetConfirmDialogW,
-              height: kVegePetConfirmDialogH,
+              left: kAvoPetConfirmDialogLeft,
+              top: kAvoPetConfirmDialogTop,
+              width: kAvoPetConfirmDialogW,
+              height: kAvoPetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
-                child: _buildVegePetConfirmDialogShell(
-                  width: kVegePetConfirmDialogW,
-                  height: kVegePetConfirmDialogH,
+                child: _buildAvoPetConfirmDialogShell(
+                  width: kAvoPetConfirmDialogW,
+                  height: kAvoPetConfirmDialogH,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -12938,7 +12938,7 @@ class _HomePageState extends State<HomePage>
     );
 
     return Positioned.fill(
-      child: _buildVegePetYardConfirmOverlayFade(
+      child: _buildAvoPetYardConfirmOverlayFade(
         child: Stack(
           clipBehavior: Clip.none,
           fit: StackFit.expand,
@@ -12953,16 +12953,16 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             Positioned(
-              left: kVegePetConfirmDialogLeft,
-              top: kVegePetConfirmDialogTop,
-              width: kVegePetConfirmDialogW,
-              height: kVegePetConfirmDialogH,
+              left: kAvoPetConfirmDialogLeft,
+              top: kAvoPetConfirmDialogTop,
+              width: kAvoPetConfirmDialogW,
+              height: kAvoPetConfirmDialogH,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
-                child: _buildVegePetConfirmDialogShell(
-                  width: kVegePetConfirmDialogW,
-                  height: kVegePetConfirmDialogH,
+                child: _buildAvoPetConfirmDialogShell(
+                  width: kAvoPetConfirmDialogW,
+                  height: kAvoPetConfirmDialogH,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -13167,7 +13167,7 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    return _buildVegePetGlassPanel(
+    return _buildAvoPetGlassPanel(
       width: _kCustomerCenterPanelW,
       height: _kCustomerCenterPanelH,
       shadowBlurRadius: 10,
@@ -13377,7 +13377,7 @@ class _HomePageState extends State<HomePage>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: _buildVegePetGlassPanel(
+      child: _buildAvoPetGlassPanel(
         width: _kAccountLinkPanelW,
         height: _kAccountLinkPanelH,
         shadowBlurRadius: 10,
@@ -13577,7 +13577,7 @@ class _HomePageState extends State<HomePage>
         _petMealSwapInProgress;
   }
 
-  /// 좌측 베지펫 정보 아이콘과 동일: 패널이 닫히는 동안(슬라이드/마당 페이드) 아이콘은 배경에 유지.
+  /// 좌측 아보펫 정보 아이콘과 동일: 패널이 닫히는 동안(슬라이드/마당 페이드) 아이콘은 배경에 유지.
   bool get _hideGameMenuHudIcon {
     if (_gameMenuSubOutsideDismissKind != _GameMenuSubOutsideDismissKind.none) {
       return false;
@@ -14925,7 +14925,7 @@ class _HomePageState extends State<HomePage>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'collision_mask.png의 빨간/불투명 영역은 베지펫 접근 불가 영역입니다.\n'
+          'collision_mask.png의 빨간/불투명 영역은 아보펫 접근 불가 영역입니다.\n'
           '파일 위치: assets/images/yard/collision_mask.png\n'
           '마스크 수정 후 Reload를 누르거나 hot restart 하세요.',
           style: TextStyle(color: Colors.white54, fontSize: 9),
@@ -15663,7 +15663,7 @@ class _HomePageState extends State<HomePage>
                         ),
                         onPressed: () {
                           if (!_shouldUseFlamePetForActivePet()) return;
-                          if (!_yardGame.hasActiveVegePet) return;
+                          if (!_yardGame.hasActiveAvoPet) return;
                           _yardGame.spawnPettingHeartBurst(force: true);
                         },
                         child: const Text(
@@ -16490,7 +16490,7 @@ class _HomePageState extends State<HomePage>
                     onPressed: () async {
                       final ok = await _yardGame.showCatScoBabyPetDebug();
                       debugPrint(
-                        'Pet Motion debug spawn: shown=$ok, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
+                        'Pet Motion debug spawn: shown=$ok, hasActiveAvoPet=${_yardGame.hasActiveAvoPet}, error=${_yardGame.lastPetSpawnError}',
                       );
                       if (mounted) _safeSetState(() {});
                     },
@@ -16928,7 +16928,7 @@ class _HomePageState extends State<HomePage>
 
     final opening = !_isPetInfoBannerOpen;
 
-    // 게임 메뉴 열림 ↔ 베지펫 정보창 상호 배타: 펫창을 켤 때 메뉴는 즉시 닫고 슬라이드 아웃과 동시 진행.
+    // 게임 메뉴 열림 ↔ 아보펫 정보창 상호 배타: 펫창을 켤 때 메뉴는 즉시 닫고 슬라이드 아웃과 동시 진행.
     if (opening &&
         (_gameMenuPanelOpen ||
             _gameMenuPanelRetracting ||
@@ -16949,7 +16949,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  /// 베지펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다(ripple 없음).
+  /// 아보펫 정보창이 열려 있으면 메뉴는 열지 않고 정보창만 닫는다(ripple 없음).
   void _onGameMenuHudIconTap() {
     unawaited(_onGameMenuHudIconTapAsync());
   }
@@ -17082,11 +17082,11 @@ class _HomePageState extends State<HomePage>
     final displayName = (nickname == null || nickname.isEmpty)
         ? (speciesDisplayName.isNotEmpty
               ? speciesDisplayName
-              : (_isEnglishLocale ? 'VegePet' : '펫'))
+              : (_isEnglishLocale ? 'AvoPet' : '펫'))
         : nickname;
     final typeDisplay = speciesDisplayName.isNotEmpty
         ? speciesDisplayName
-        : (_isEnglishLocale ? 'VegePet' : '펫');
+        : (_isEnglishLocale ? 'AvoPet' : '펫');
     final stage = _normalizePetStage(pet['stage']);
     final stageKo = _stageToKorean(stage);
     final affectionValue = (pet['affection'] as num?)?.toInt() ?? 0;
@@ -17496,7 +17496,7 @@ class _HomePageState extends State<HomePage>
     final displayName = (nickname == null || nickname.isEmpty)
         ? (speciesName.isNotEmpty
               ? speciesName
-              : (_isEnglishLocale ? 'VegePet' : '펫'))
+              : (_isEnglishLocale ? 'AvoPet' : '펫'))
         : nickname;
 
     return Padding(
@@ -18550,7 +18550,7 @@ class _HomePageState extends State<HomePage>
     final displayName = (nickname == null || nickname.isEmpty)
         ? (speciesName.isNotEmpty
               ? speciesName
-              : (_isEnglishLocale ? 'VegePet' : '펫'))
+              : (_isEnglishLocale ? 'AvoPet' : '펫'))
         : nickname;
     final stage = _normalizePetStage(pet['stage']);
     final stageKo = _stageToKorean(stage);
@@ -19501,7 +19501,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  /// 베지펫 정보창에서 연 놀아주기/먹이주기만 닫고 일반 마당으로 복귀한다.
+  /// 아보펫 정보창에서 연 놀아주기/먹이주기만 닫고 일반 마당으로 복귀한다.
   /// (뒤로가기 버튼의 정보창 복귀 경로와 구분)
   Future<void> _closePetChildPanelByOutsideTap() async {
     if (_petToySwapInProgress || _petMealSwapInProgress) return;
@@ -19613,8 +19613,8 @@ class _HomePageState extends State<HomePage>
       curve: _kYardSidePanelSlideCurve,
       left: targetLeft,
       top: _kGameMenuPanelTop,
-      width: kVegePetGameMenuPanelW,
-      height: kVegePetGameMenuPanelH,
+      width: kAvoPetGameMenuPanelW,
+      height: kAvoPetGameMenuPanelH,
       child: yardExit < 0.999
           ? _buildGameMenuPanelCrossfadeStack()
           : AnimatedOpacity(
@@ -19638,7 +19638,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  /// 메뉴 그리드 ↔ 하위 패널: 같은 좌표·같은 스택에서 동시 크로스페이드 (베지펫 정보창 ↔ 먹이·놀이).
+  /// 메뉴 그리드 ↔ 하위 패널: 같은 좌표·같은 스택에서 동시 크로스페이드 (아보펫 정보창 ↔ 먹이·놀이).
   Widget _buildGameMenuPanelCrossfadeStack() {
     return AnimatedBuilder(
       animation: Listenable.merge([
@@ -20133,8 +20133,8 @@ class _HomePageState extends State<HomePage>
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
-          width: kVegePetGameMenuPanelW,
-          height: kVegePetGameMenuPanelH,
+          width: kAvoPetGameMenuPanelW,
+          height: kAvoPetGameMenuPanelH,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.60),
             borderRadius: BorderRadius.circular(20),
@@ -20183,7 +20183,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// TODO(vegepet): Pretendard 폰트 asset 등록 후 fontFamily 연결.
+  /// TODO(avopet): Pretendard 폰트 asset 등록 후 fontFamily 연결.
   TextStyle _yardGameMenuTitleTextStyle() {
     return const TextStyle(
       fontSize: 16,
@@ -20224,7 +20224,7 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 단일 메뉴 셀: 48×48 타일 + 라벨(고정 높이), 전체 `_kYardGameMenuRowCellH`.
-  /// onTap 은 [_buildVegePetDummyIconInkWell] 로 **아이콘 사각형에만** 연결 (라벨/여백 비반응).
+  /// onTap 은 [_buildAvoPetDummyIconInkWell] 로 **아이콘 사각형에만** 연결 (라벨/여백 비반응).
   Widget _yardGameMenuItem({
     required IconData icon,
     required String label,
@@ -20246,7 +20246,7 @@ class _HomePageState extends State<HomePage>
               child: Semantics(
                 button: true,
                 label: label,
-                child: _buildVegePetDummyIconInkWell(
+                child: _buildAvoPetDummyIconInkWell(
                   onTap: onTap,
                   child: Container(
                     clipBehavior: Clip.antiAlias,
@@ -20788,7 +20788,7 @@ class _HomePageState extends State<HomePage>
     _gameMenuSubOutsideDismissController.value = 0.0;
   }
 
-  /// 게임 메뉴 슬라이드 패널 전체를 닫는다. (베지펫 정보창 닫기와 동일: open=false → 우측 슬라이드)
+  /// 게임 메뉴 슬라이드 패널 전체를 닫는다. (아보펫 정보창 닫기와 동일: open=false → 우측 슬라이드)
   Future<void> _closeGameMenuPanel() async {
     if (!_gameMenuPanelOpen || _gameMenuPanelRetracting) return;
     if (_isProfilePanelOpen) {
@@ -21008,9 +21008,9 @@ class _HomePageState extends State<HomePage>
   Widget _buildDietDiaryGameMenuGlassPanel() {
     final initialMonth = _clampDiaryMonth(_diaryVisibleMonth);
     // 식단일지/설정 글래스만 blur 완화(10→6). 헤더·달력 레이아웃은 _DietDiarySheetPanel 유지.
-    return _buildVegePetGlassPanel(
-      width: kVegePetGameMenuPanelW,
-      height: kVegePetGameMenuPanelH,
+    return _buildAvoPetGlassPanel(
+      width: kAvoPetGameMenuPanelW,
+      height: kAvoPetGameMenuPanelH,
       blurSigma: 6,
       child: RepaintBoundary(
         child: _DietDiarySheetPanel(
@@ -21932,9 +21932,9 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    return _buildVegePetGlassPanel(
-      width: kVegePetGameMenuPanelW,
-      height: kVegePetGameMenuPanelH,
+    return _buildAvoPetGlassPanel(
+      width: kAvoPetGameMenuPanelW,
+      height: kAvoPetGameMenuPanelH,
       blurSigma: supportDocBlur,
       child: Stack(
         clipBehavior: Clip.none,
@@ -23328,9 +23328,9 @@ class _HomePageState extends State<HomePage>
               Positioned(
                 left: 37,
                 top:
-                    kVegePetGameMenuSubPanelTitleTop +
+                    kAvoPetGameMenuSubPanelTitleTop +
                     (Localizations.localeOf(sheetContext).languageCode == 'en'
-                        ? kVegePetGameMenuSubPanelTitleTopEnOffset
+                        ? kAvoPetGameMenuSubPanelTitleTopEnOffset
                         : 0.0),
                 right: 8,
                 child: Text(
@@ -23443,7 +23443,7 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildProfileFormContent() {
     final l10n = AppLocalizations.of(context);
-    // TODO(vegepet): Pretendard 폰트 asset 등록 후 fontFamily를 명시적으로 연결.
+    // TODO(avopet): Pretendard 폰트 asset 등록 후 fontFamily를 명시적으로 연결.
     const titleStyle = TextStyle(
       fontSize: 16,
       fontWeight: FontWeight.w700,
@@ -24481,8 +24481,8 @@ class _DietDiarySheetPanelState extends State<_DietDiarySheetPanel> {
       final l10n = AppLocalizations.of(context);
       final isEnglish = Localizations.localeOf(context).languageCode == 'en';
       final embeddedTitleTop =
-          kVegePetGameMenuSubPanelTitleTop +
-          (isEnglish ? kVegePetGameMenuSubPanelTitleTopEnOffset : 0.0);
+          kAvoPetGameMenuSubPanelTitleTop +
+          (isEnglish ? kAvoPetGameMenuSubPanelTitleTopEnOffset : 0.0);
       final caption = widget.monthYearCaptionBuilder!(context, visibleMonth);
       Widget embeddedHeader({
         required String rightCaption,

@@ -9,7 +9,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appTitle => 'VegePet';
+  String get appTitle => 'AvoPet';
 
   @override
   String get settings => 'Settings';
@@ -93,7 +93,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get pushNoticeEventDescription =>
-      'Get announcements and event updates from VegePet.';
+      'Get announcements and event updates from AvoPet.';
 
   @override
   String get pushMealReminderDescription =>
@@ -118,14 +118,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Announcement and event notifications are off.';
 
   @override
-  String get mealNotificationMessage1 => 'VegePet may be getting hungry!';
+  String get mealNotificationMessage1 => 'AvoPet may be getting hungry!';
 
   @override
   String get mealNotificationMessage2 =>
-      'It\'s time to give VegePet a healthy meal!';
+      'It\'s time to give AvoPet a healthy meal!';
 
   @override
-  String get mealNotificationTitle => 'VegePet Meal Time';
+  String get mealNotificationTitle => 'AvoPet Meal Time';
 
   @override
   String get sound => 'Sound';
@@ -188,7 +188,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get legalNoticeDraft =>
-      'This in-app notice is a draft for VegePet and should be reviewed by legal and privacy professionals before release.';
+      'This in-app notice is a draft for AvoPet and should be reviewed by legal and privacy professionals before release.';
 
   @override
   String get lastUpdated => 'Last updated';
@@ -203,7 +203,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get petInfoTooltip => 'Pet Info';
 
   @override
-  String get petInfoTitle => 'VegePet';
+  String get petInfoTitle => 'AvoPet';
 
   @override
   String get petInfoNameLabel => 'Name';
@@ -356,11 +356,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retry => 'Retry';
 
   @override
-  String get initialAdoptionTitle => 'Adopt a Baby VegePet!';
+  String get initialAdoptionTitle => 'Adopt a Baby AvoPet!';
 
   @override
   String get initialAdoptionDescription =>
-      'VegePets grow by enjoying your healthy meals.';
+      'AvoPets grow by enjoying your healthy meals.';
 
   @override
   String get initialAdoptionDogSectionLabel => 'Dogs';
@@ -410,10 +410,10 @@ class AppLocalizationsEn extends AppLocalizations {
       '• Your changes are saved automatically when you close this panel.';
 
   @override
-  String get petNamingTitle => 'A Baby VegePet Has Arrived 🥹';
+  String get petNamingTitle => 'A Baby AvoPet Has Arrived 🥹';
 
   @override
-  String get petNamingSubtitle => 'Give your new VegePet a cute name!';
+  String get petNamingSubtitle => 'Give your new AvoPet a cute name!';
 
   @override
   String get petNamingHint => 'Enter a name';
@@ -459,21 +459,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bagItemRandomTicketDesc =>
-      'Earned when a VegePet reaches adulthood. Use it to adopt one random VegePet!';
+      'Earned when an AvoPet reaches adulthood. Use it to adopt one random AvoPet!';
 
   @override
   String get bagItemBoneDollName => 'Bone Toy';
 
   @override
   String get bagItemBoneDollDesc =>
-      'A bone-shaped toy that dog VegePets love. It has a veggie flavor when chewed.';
+      'A bone-shaped toy that dog AvoPets love. It has a veggie flavor when chewed.';
 
   @override
   String get bagItemYarnBallName => 'Yarn Ball';
 
   @override
   String get bagItemYarnBallDesc =>
-      'A yarn ball that cat VegePets love. Batting it around helps affection grow.';
+      'A yarn ball that cat AvoPets love. Batting it around helps affection grow.';
 
   @override
   String get randomTicketUseConfirmMessage => 'Use the Random Adoption Ticket?';
@@ -503,7 +503,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pokedexUnknownLabel => '???';
 
   @override
-  String get pokedexDefaultPetName => 'VegePet';
+  String get pokedexDefaultPetName => 'AvoPet';
 
   @override
   String get storyPanelTitle => 'Story';
@@ -559,7 +559,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get defaultPetName => 'Pet';
 
   @override
-  String get adoptionTitleAlt => 'Time to adopt a baby VegePet!';
+  String get adoptionTitleAlt => 'Time to adopt a baby AvoPet!';
 
   @override
   String get adoptionReceiveButtonExclaim => 'Adopt';
@@ -582,11 +582,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snackTicketBlockedDuringGrowth =>
-      'A VegePet is still growing. You can use this after it reaches adulthood.';
+      'An AvoPet is still growing. You can use this after it reaches adulthood.';
 
   @override
   String get snackTicketDuplicatePokedex =>
-      'A VegePet already registered in the Pokedex was returned. Please check the adoption flow.';
+      'An AvoPet already registered in the Pokedex was returned. Please check the adoption flow.';
 
   @override
   String get snackAdoptError =>
@@ -596,17 +596,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get snackPetActionInvalid => 'Pet info is unavailable.';
 
   @override
-  String get snackAdoptFirst => 'Please adopt a VegePet first.';
+  String get snackAdoptFirst => 'Please adopt an AvoPet first.';
 
   @override
-  String get snackPlayedToday => 'You already played with your VegePet today.';
+  String get snackPlayedToday => 'You already played with your AvoPet today.';
 
   @override
   String get snackRandomTicketGranted => 'You earned a Random Adoption Ticket!';
 
   @override
   String get snackStageReachedAdult =>
-      'Your VegePet reached the Adult stage! Raising complete!';
+      'Your AvoPet reached the Adult stage! Raising complete!';
 
   @override
   String get maturityCompleteNoticeTitle => 'Congratulations🎉';
@@ -627,11 +627,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get profileSelectMissingNoticeConfirm => 'OK';
 
   @override
-  String get pokedexCompleteTicketNoticeTitle => 'All VegePets Raised!';
+  String get pokedexCompleteTicketNoticeTitle => 'All AvoPets Raised!';
 
   @override
   String get pokedexCompleteTicketNoticeBody =>
-      'Please stay tuned until new VegePets arrive... 🥹';
+      'Please stay tuned until new AvoPets arrive... 🥹';
 
   @override
   String get pokedexCompleteTicketNoticeConfirm => 'OK';
@@ -661,7 +661,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get accountLinkInviteBody =>
-      'Link an account to restore your VegePet data after reinstalling the app or changing devices.';
+      'Link an account to restore your AvoPet data after reinstalling the app or changing devices.';
 
   @override
   String get accountLinkInviteLater => 'Later';
@@ -703,7 +703,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get duplicatePetNameNoticeBody =>
-      'A VegePet with this name already exists. Please choose a different name!';
+      'An AvoPet with this name already exists. Please choose a different name!';
 
   @override
   String get duplicatePetNameNoticeConfirm => 'OK';
@@ -783,7 +783,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackPetAlreadyGraduated => 'This VegePet has already graduated.';
+  String get snackPetAlreadyGraduated => 'This AvoPet has already graduated.';
 
   @override
   String snackPlayActionSuccess(String label) {
@@ -796,10 +796,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackAlreadyRaising => 'You already have a VegePet in training.';
+  String get snackAlreadyRaising => 'You already have an AvoPet in training.';
 
   @override
-  String get snackPetSelectInvalid => 'Please select a valid VegePet.';
+  String get snackPetSelectInvalid => 'Please select a valid AvoPet.';
 
   @override
   String snackAdoptSaveFailed(String error) {
@@ -827,7 +827,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String snackOldPetDeactivateFailed(String error) {
-    return 'Failed to deactivate the previous VegePet: $error';
+    return 'Failed to deactivate the previous AvoPet: $error';
   }
 
   @override
@@ -836,10 +836,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackNewPetAdopted => 'You\'ve adopted a new VegePet!';
+  String get snackNewPetAdopted => 'You\'ve adopted a new AvoPet!';
 
   @override
-  String get snackToyNotUsable => 'This toy can\'t be used with this VegePet.';
+  String get snackToyNotUsable => 'This toy can\'t be used with this AvoPet.';
 
   @override
   String get snackEnterName => 'Please enter a name.';
@@ -874,14 +874,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get snackStageGrewToYoung => 'Your VegePet grew into the Young stage!';
+  String get snackStageGrewToYoung => 'Your AvoPet grew into the Young stage!';
 
   @override
-  String get snackStageGrewToTeen => 'Your VegePet grew into the Teen stage!';
+  String get snackStageGrewToTeen => 'Your AvoPet grew into the Teen stage!';
 
   @override
   String get snackStageGrewToAdult =>
-      'Your VegePet reached the Adult stage! Raising complete!';
+      'Your AvoPet reached the Adult stage! Raising complete!';
 
   @override
   String snackGraduationFailed(String error) {
@@ -896,11 +896,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snackPlayedTodayAlready =>
-      'You already played with your VegePet today.';
+      'You already played with your AvoPet today.';
 
   @override
-  String get snackPettedTodayAlready =>
-      'You already petted your VegePet today.';
+  String get snackPettedTodayAlready => 'You already petted your AvoPet today.';
 
   @override
   String snackPetFetchFailed(String error) {
@@ -1152,7 +1151,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analysisNoRecord => 'No records';
 
   @override
-  String get interactionPetNameFallback => 'VegePet';
+  String get interactionPetNameFallback => 'AvoPet';
 
   @override
   String interactionPettingCat1(String petNameSubject, int affectionGain) {

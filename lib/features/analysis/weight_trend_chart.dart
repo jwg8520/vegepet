@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:vegepet/features/analysis/analysis_helpers.dart';
-import 'package:vegepet/features/analysis/analysis_models.dart';
+import 'package:avopet/features/analysis/analysis_helpers.dart';
+import 'package:avopet/features/analysis/analysis_models.dart';
 
 const Color kAnalysisWeightLineColor = Color(0xFF78AFA3);
 const Color kAnalysisTargetLineColor = Color(0xFFB7A7C8);

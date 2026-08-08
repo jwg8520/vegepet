@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vegepet/game/pet_sprite_assets.dart';
+import 'package:avopet/game/pet_sprite_assets.dart';
 
 /// 폴백/하위 호환용 (baby 표 기준).
 const double kPetCollisionDefaultWidth = 34;

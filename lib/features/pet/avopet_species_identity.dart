@@ -1,11 +1,11 @@
-/// VegePet 종족 표시명·내부 코드명 매핑.
+/// AvoPet 종족 표시명·내부 코드명 매핑.
 ///
 /// - DB/에셋/내부 코드(`cat_sco` 등)는 유지한다.
 /// - UI 표시명만 앱에서 override 한다.
 /// - 전체 6종 구조는 유지하되, MVP에서는 [availableInMvp] == true 인 4종만 사용한다.
 /// - DB `id` 가 재배치되어도 `code` 를 우선해 식별한다.
-class VegePetSpeciesIdentity {
-  const VegePetSpeciesIdentity({
+class AvoPetSpeciesIdentity {
+  const AvoPetSpeciesIdentity({
     required this.id,
     required this.family,
     required this.nameKo,
@@ -24,7 +24,7 @@ class VegePetSpeciesIdentity {
   final bool availableInMvp;
 }
 
-const _species1 = VegePetSpeciesIdentity(
+const _species1 = AvoPetSpeciesIdentity(
   id: 1,
   family: 'cat',
   nameKo: '스코티쉬 폴드',
@@ -32,7 +32,7 @@ const _species1 = VegePetSpeciesIdentity(
   internalCode: 'cat_sco',
   availableInMvp: true,
 );
-const _species2 = VegePetSpeciesIdentity(
+const _species2 = AvoPetSpeciesIdentity(
   id: 2,
   family: 'cat',
   nameKo: '랙돌',
@@ -40,7 +40,7 @@ const _species2 = VegePetSpeciesIdentity(
   internalCode: 'cat_rag',
   availableInMvp: true,
 );
-const _species3 = VegePetSpeciesIdentity(
+const _species3 = AvoPetSpeciesIdentity(
   id: 3,
   family: 'cat',
   nameKo: '코리',
@@ -48,7 +48,7 @@ const _species3 = VegePetSpeciesIdentity(
   internalCode: 'cat_kor',
   availableInMvp: false,
 );
-const _species4 = VegePetSpeciesIdentity(
+const _species4 = AvoPetSpeciesIdentity(
   id: 4,
   family: 'dog',
   nameKo: '포메라니안',
@@ -56,7 +56,7 @@ const _species4 = VegePetSpeciesIdentity(
   internalCode: 'dog_pom',
   availableInMvp: true,
 );
-const _species5 = VegePetSpeciesIdentity(
+const _species5 = AvoPetSpeciesIdentity(
   id: 5,
   family: 'dog',
   nameKo: '비숑',
@@ -64,7 +64,7 @@ const _species5 = VegePetSpeciesIdentity(
   internalCode: 'dog_bic',
   availableInMvp: true,
 );
-const _species6 = VegePetSpeciesIdentity(
+const _species6 = AvoPetSpeciesIdentity(
   id: 6,
   family: 'dog',
   nameKo: '푸리',
@@ -73,7 +73,7 @@ const _species6 = VegePetSpeciesIdentity(
   availableInMvp: false,
 );
 
-const Map<int, VegePetSpeciesIdentity> kSpeciesIdentityById = {
+const Map<int, AvoPetSpeciesIdentity> kSpeciesIdentityById = {
   1: _species1,
   2: _species2,
   3: _species3,
@@ -96,7 +96,7 @@ const Set<int> kMvpSpeciesIds = {1, 2, 4, 5};
 /// MVP에서 제외하는 내부 코드 (향후 재추가 가능하도록 구조만 유지).
 const Set<String> kNonMvpSpeciesInternalCodes = {'cat_kor', 'dog_pud'};
 
-const Map<String, VegePetSpeciesIdentity> kSpeciesIdentityByOldName = {
+const Map<String, AvoPetSpeciesIdentity> kSpeciesIdentityByOldName = {
   // 정식/현재 표시명 (한국어)
   '스코티쉬 폴드': _species1,
   '랙돌': _species2,
@@ -142,13 +142,13 @@ int? _speciesIdFromRow(Map<String, dynamic> species) {
   return int.tryParse(raw?.toString() ?? '');
 }
 
-VegePetSpeciesIdentity? _identityFromNameKey(String? raw) {
+AvoPetSpeciesIdentity? _identityFromNameKey(String? raw) {
   final key = raw?.trim();
   if (key == null || key.isEmpty) return null;
   return kSpeciesIdentityByOldName[key];
 }
 
-VegePetSpeciesIdentity? _identityFromCode(String? raw) {
+AvoPetSpeciesIdentity? _identityFromCode(String? raw) {
   final code = raw?.trim();
   if (code == null || code.isEmpty) return null;
   return kSpeciesIdentityByOldName[code] ??
@@ -156,7 +156,7 @@ VegePetSpeciesIdentity? _identityFromCode(String? raw) {
 }
 
 /// DB row → identity. **code 를 id 보다 우선**해 id 재배치/시드 차이에 안전하다.
-VegePetSpeciesIdentity? speciesIdentityFromSpeciesRow(
+AvoPetSpeciesIdentity? speciesIdentityFromSpeciesRow(
   Map<String, dynamic>? species,
 ) {
   if (species == null) return null;
@@ -209,7 +209,7 @@ bool isMvpSpeciesRow(Map<String, dynamic>? species) {
 
 String speciesDisplayNameKo(
   Map<String, dynamic>? species, {
-  String fallback = '베지펫',
+  String fallback = '아보펫',
 }) {
   final identity = speciesIdentityFromSpeciesRow(species);
   if (identity != null) return identity.nameKo;
@@ -221,7 +221,7 @@ String speciesDisplayNameKo(
 
 String speciesDisplayNameEn(
   Map<String, dynamic>? species, {
-  String fallback = 'VegePet',
+  String fallback = 'AvoPet',
 }) {
   final identity = speciesIdentityFromSpeciesRow(species);
   if (identity != null) return identity.nameEn;
@@ -237,8 +237,8 @@ String speciesDisplayNameEn(
 String speciesDisplayNameForLocale(
   Map<String, dynamic>? species, {
   required bool isEnglishLocale,
-  String fallbackKo = '베지펫',
-  String fallbackEn = 'VegePet',
+  String fallbackKo = '아보펫',
+  String fallbackEn = 'AvoPet',
 }) {
   return isEnglishLocale
       ? speciesDisplayNameEn(species, fallback: fallbackEn)

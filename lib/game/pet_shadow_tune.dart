@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vegepet/game/pet_sprite_assets.dart';
+import 'package:avopet/game/pet_sprite_assets.dart';
 
 /// 펫 그림자 기본 색상 (불투명 RGB). 적용 시 [PetShadowTuneConfig.opacity] 와 곱한다.
 const Color kPetShadowDefaultColor = Color(0xFF527A7B);

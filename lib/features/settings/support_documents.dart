@@ -1,4 +1,4 @@
-import 'package:vegepet/l10n/app_localizations.dart';
+import 'package:avopet/l10n/app_localizations.dart';
 
 enum SupportDocType { terms, privacy, operation, guardian, dataDeletion }
 
@@ -31,13 +31,13 @@ SupportDocument buildSupportDocument(
           SupportDocumentSection(
             title: isEn ? '1. Purpose' : '1. 목적',
             body: isEn
-                ? 'This document explains the basic rules and terms for using VegePet.'
-                : '베지펫 서비스 이용 조건과 기본 규칙을 안내합니다.',
+                ? 'This document explains the basic rules and terms for using AvoPet.'
+                : '아보펫 서비스 이용 조건과 기본 규칙을 안내합니다.',
           ),
           SupportDocumentSection(
-            title: isEn ? '2. What VegePet Provides' : '2. 서비스 내용',
+            title: isEn ? '2. What AvoPet Provides' : '2. 서비스 내용',
             body: isEn
-                ? 'VegePet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be limited during the MVP phase or added later.'
+                ? 'AvoPet provides meal photo verification, AI-based meal feedback, pet growth, and features such as the diary, bag, collection, and settings. Some features may be limited during the MVP phase or added later.'
                 : '식단 사진 인증, AI 기반 식단 평가, 펫 육성, 도감/가방/식단일지/설정 기능을 제공합니다. 일부 기능은 MVP 단계 또는 추후 업데이트 대상일 수 있습니다.',
           ),
           SupportDocumentSection(
@@ -73,13 +73,13 @@ SupportDocument buildSupportDocument(
           SupportDocumentSection(
             title: isEn ? '8. Use Restrictions' : '8. 이용 제한',
             body: isEn
-                ? 'VegePet may restrict service use for abuse, policy violations, or infringement of others’ rights.'
+                ? 'AvoPet may restrict service use for abuse, policy violations, or infringement of others’ rights.'
                 : '비정상 이용, 시스템 악용, 타인 권리 침해 시 서비스 이용이 제한될 수 있습니다.',
           ),
           SupportDocumentSection(
             title: isEn ? '9. Limitation of Liability' : '9. 책임 제한',
             body: isEn
-                ? 'Some features may be limited by network/device environments. VegePet does not guarantee health outcomes.'
+                ? 'Some features may be limited by network/device environments. AvoPet does not guarantee health outcomes.'
                 : '네트워크/기기 환경에 따라 일부 기능이 제한될 수 있으며, 앱은 건강 결과를 보장하지 않습니다.',
           ),
           SupportDocumentSection(
@@ -113,7 +113,7 @@ SupportDocument buildSupportDocument(
           SupportDocumentSection(
             title: isEn ? '4. Third-party Processing' : '4. 제3자 처리/외부 서비스',
             body: isEn
-                ? 'VegePet may use Supabase (auth/database/storage/functions), OpenAI (meal analysis), and platform services from Apple/Google. Remote push providers may be added later.'
+                ? 'AvoPet may use Supabase (auth/database/storage/functions), OpenAI (meal analysis), and platform services from Apple/Google. Remote push providers may be added later.'
                 : 'Supabase(인증/DB/스토리지/함수), OpenAI(식단 분석), Apple/Google 플랫폼 기능을 사용하며, 원격 푸시는 추후 FCM 등 외부 서비스를 사용할 수 있습니다.',
           ),
           SupportDocumentSection(
@@ -143,7 +143,7 @@ SupportDocument buildSupportDocument(
           SupportDocumentSection(
             title: isEn ? '9. Children & Guardians' : '9. 아동 및 보호자',
             body: isEn
-                ? 'Minor users should use VegePet under guardian guidance. Guardian verification may be required under local laws.'
+                ? 'Minor users should use AvoPet under guardian guidance. Guardian verification may be required under local laws.'
                 : '미성년자는 보호자 지도하에 사용을 권장하며, 관련 법령에 따라 보호자 동의가 필요할 수 있습니다.',
           ),
           SupportDocumentSection(
@@ -171,8 +171,8 @@ SupportDocument buildSupportDocument(
           SupportDocumentSection(
             title: isEn ? '1. Purpose' : '1. 운영 목적',
             body: isEn
-                ? 'Provide a stable meal-recording and VegePet growth experience.'
-                : '안정적인 식단 기록 및 베지펫 육성 경험 제공을 목적으로 운영합니다.',
+                ? 'Provide a stable meal-recording and AvoPet growth experience.'
+                : '안정적인 식단 기록 및 아보펫 육성 경험 제공을 목적으로 운영합니다.',
           ),
           SupportDocumentSection(
             title: isEn ? '2. Service Principles' : '2. 서비스 운영 원칙',
@@ -233,10 +233,10 @@ SupportDocument buildSupportDocument(
         title: l10n.guardianGuide,
         sections: [
           SupportDocumentSection(
-            title: isEn ? '1. About VegePet' : '1. 베지펫 소개',
+            title: isEn ? '1. About AvoPet' : '1. 아보펫 소개',
             body: isEn
-                ? 'VegePet is a gamified diet management app that combines meal verification with raising a virtual pet.'
-                : '베지펫은 식단 인증과 펫 육성을 결합한 게임형 식단관리 앱입니다.',
+                ? 'AvoPet is a gamified diet management app that combines meal verification with raising a virtual pet.'
+                : '아보펫은 식단 인증과 펫 육성을 결합한 게임형 식단관리 앱입니다.',
           ),
           SupportDocumentSection(
             title: isEn

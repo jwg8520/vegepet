@@ -9,7 +9,7 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
-  String get appTitle => 'VegePet';
+  String get appTitle => 'AvoPet';
 
   @override
   String get settings => '설정';
@@ -112,13 +112,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get noticeEventDisabled => '공지 및 이벤트 알림이 꺼졌어요.';
 
   @override
-  String get mealNotificationMessage1 => '베지펫이 배가 고플 시간이에요!';
+  String get mealNotificationMessage1 => '아보펫이 배가 고플 시간이에요!';
 
   @override
-  String get mealNotificationMessage2 => '베지펫에게 건강한 음식을 줄 시간이에요!';
+  String get mealNotificationMessage2 => '아보펫에게 건강한 음식을 줄 시간이에요!';
 
   @override
-  String get mealNotificationTitle => '베지펫 식사 시간';
+  String get mealNotificationTitle => '아보펫 식사 시간';
 
   @override
   String get sound => '사운드';
@@ -179,7 +179,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get legalNoticeDraft =>
-      '본 문서는 베지펫 앱 내 안내용 초안이며, 실제 출시 전 법무/개인정보 전문가 검토가 필요합니다.';
+      '본 문서는 아보펫 앱 내 안내용 초안이며, 실제 출시 전 법무/개인정보 전문가 검토가 필요합니다.';
 
   @override
   String get lastUpdated => '최종 업데이트';
@@ -194,7 +194,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get petInfoTooltip => '펫 정보';
 
   @override
-  String get petInfoTitle => '베지펫 정보';
+  String get petInfoTitle => '아보펫 정보';
 
   @override
   String get petInfoNameLabel => '이름';
@@ -342,10 +342,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get retry => '다시 시도';
 
   @override
-  String get initialAdoptionTitle => '아기 베지펫을 분양 받을 차례에요!';
+  String get initialAdoptionTitle => '아기 아보펫을 분양 받을 차례에요!';
 
   @override
-  String get initialAdoptionDescription => '베지펫은 사용자의 건강한 식단을 먹고 자라게 됩니다.';
+  String get initialAdoptionDescription => '아보펫은 사용자의 건강한 식단을 먹고 자라게 됩니다.';
 
   @override
   String get initialAdoptionDogSectionLabel => '강아지';
@@ -390,7 +390,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get profileAutoSaveHint => '• 프로필 변경 후 창을 나가면 자동으로 저장돼요!';
 
   @override
-  String get petNamingTitle => '아기 베지펫이 분양 되었어요🥹';
+  String get petNamingTitle => '아기 아보펫이 분양 되었어요🥹';
 
   @override
   String get petNamingSubtitle => '귀여운 이름을 지어주세요!';
@@ -439,21 +439,21 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get bagItemRandomTicketDesc =>
-      ' 성숙기를 달성하면 주는 베지펫 랜덤 분양양 티켓. 사용 시 귀여운 베지펫 1마리를 랜덤으로 분양받을 수 있다!';
+      ' 성숙기를 달성하면 주는 아보펫 랜덤 분양양 티켓. 사용 시 귀여운 아보펫 1마리를 랜덤으로 분양받을 수 있다!';
 
   @override
   String get bagItemBoneDollName => '뼈다귀 인형';
 
   @override
   String get bagItemBoneDollDesc =>
-      ' 강아지 베지펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.';
+      ' 강아지 아보펫들이 좋아하는 뼈다귀 모양의 장난감. 깨물면 채소맛이 느껴지는 특수 제작 장난감이다.';
 
   @override
   String get bagItemYarnBallName => '실뭉치';
 
   @override
   String get bagItemYarnBallDesc =>
-      ' 고양이 베지펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.';
+      ' 고양이 아보펫들이 좋아하는 실뭉치 장난감. 이리저리 툭툭 치고 노는 모습을 보면 애정이 솟아오르는 것 같다.';
 
   @override
   String get randomTicketUseConfirmMessage => '\'분양권(랜덤)\'을 사용하시겠습니까?';
@@ -483,7 +483,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pokedexUnknownLabel => '???';
 
   @override
-  String get pokedexDefaultPetName => '베지펫';
+  String get pokedexDefaultPetName => '아보펫';
 
   @override
   String get storyPanelTitle => '스토리';
@@ -538,7 +538,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get defaultPetName => '펫';
 
   @override
-  String get adoptionTitleAlt => '베지펫을 분양 받을 차례에요!';
+  String get adoptionTitleAlt => '아보펫을 분양 받을 차례에요!';
 
   @override
   String get adoptionReceiveButtonExclaim => '분양받기';
@@ -560,11 +560,11 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get snackTicketBlockedDuringGrowth =>
-      '현재 육성 중인 베지펫이 있어요. 성숙기 달성 후 사용할 수 있어요.';
+      '현재 육성 중인 아보펫이 있어요. 성숙기 달성 후 사용할 수 있어요.';
 
   @override
   String get snackTicketDuplicatePokedex =>
-      '이미 도감에 등록된 베지펫이 반환되었어요. 분양 로직을 확인해주세요.';
+      '이미 도감에 등록된 아보펫이 반환되었어요. 분양 로직을 확인해주세요.';
 
   @override
   String get snackAdoptError => '분양 결과를 해석할 수 없어요. 잠시 후 다시 시도해주세요.';
@@ -582,7 +582,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get snackRandomTicketGranted => '랜덤 분양권을 획득했어요!';
 
   @override
-  String get snackStageReachedAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+  String get snackStageReachedAdult => '아보펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
 
   @override
   String get maturityCompleteNoticeTitle => '축하합니다🎉';
@@ -602,10 +602,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get profileSelectMissingNoticeConfirm => '확인';
 
   @override
-  String get pokedexCompleteTicketNoticeTitle => '모든 베지펫 육성 완료!';
+  String get pokedexCompleteTicketNoticeTitle => '모든 아보펫 육성 완료!';
 
   @override
-  String get pokedexCompleteTicketNoticeBody => '새로운 베지펫들이 올 때까지 기다려주세요..🥹';
+  String get pokedexCompleteTicketNoticeBody => '새로운 아보펫들이 올 때까지 기다려주세요..🥹';
 
   @override
   String get pokedexCompleteTicketNoticeConfirm => '확인';
@@ -635,7 +635,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get accountLinkInviteBody =>
-      '계정을 연동하면 앱을 다시 설치하거나 기기를 변경해도 기존 베지펫 데이터를 불러올 수 있어요.';
+      '계정을 연동하면 앱을 다시 설치하거나 기기를 변경해도 기존 아보펫 데이터를 불러올 수 있어요.';
 
   @override
   String get accountLinkInviteLater => '나중에';
@@ -676,7 +676,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get duplicatePetNameNoticeBody =>
-      '이미 해당 이름의 베지펫이 존재합니다. 다른 이름으로 지어주세요!';
+      '이미 해당 이름의 아보펫이 존재합니다. 다른 이름으로 지어주세요!';
 
   @override
   String get duplicatePetNameNoticeConfirm => '확인';
@@ -753,7 +753,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get snackPetAlreadyGraduated => '이미 졸업 처리된 베지펫이에요.';
+  String get snackPetAlreadyGraduated => '이미 졸업 처리된 아보펫이에요.';
 
   @override
   String snackPlayActionSuccess(String label) {
@@ -802,14 +802,14 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String snackNewPetAdoptSaveFailed(String error) {
-    return '새 베지펫 분양 저장 실패: $error';
+    return '새 아보펫 분양 저장 실패: $error';
   }
 
   @override
-  String get snackNewPetAdopted => '새 베지펫이 분양되었어요!';
+  String get snackNewPetAdopted => '새 아보펫이 분양되었어요!';
 
   @override
-  String get snackToyNotUsable => '이 장난감은 이 베지펫에게 사용할 수 없어요.';
+  String get snackToyNotUsable => '이 장난감은 이 아보펫에게 사용할 수 없어요.';
 
   @override
   String get snackEnterName => '이름을 입력해주세요.';
@@ -843,13 +843,13 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get snackStageGrewToYoung => '베지펫이 유년기로 성장했어요!';
+  String get snackStageGrewToYoung => '아보펫이 유년기로 성장했어요!';
 
   @override
-  String get snackStageGrewToTeen => '베지펫이 성장기로 자랐어요!';
+  String get snackStageGrewToTeen => '아보펫이 성장기로 자랐어요!';
 
   @override
-  String get snackStageGrewToAdult => '베지펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
+  String get snackStageGrewToAdult => '아보펫이 성숙기에 도달했어요! 육성이 완료되었어요!';
 
   @override
   String snackGraduationFailed(String error) {
@@ -1115,7 +1115,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get analysisNoRecord => '기록 없음';
 
   @override
-  String get interactionPetNameFallback => '베지펫';
+  String get interactionPetNameFallback => '아보펫';
 
   @override
   String interactionPettingCat1(String petNameSubject, int affectionGain) {

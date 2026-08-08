@@ -3,13 +3,13 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 /// 게임 메뉴 하위 패널 대제목 top (한국어 14 · 영어 +1px, 뒤로가기 버튼은 9 고정).
-const double kVegePetGameMenuSubPanelTitleTop = 14;
-const double kVegePetGameMenuSubPanelTitleTopEnOffset = 1.0;
-const double kVegePetGameMenuPanelW = 246;
-const double kVegePetGameMenuPanelH = 310;
+const double kAvoPetGameMenuSubPanelTitleTop = 14;
+const double kAvoPetGameMenuSubPanelTitleTopEnOffset = 1.0;
+const double kAvoPetGameMenuPanelW = 246;
+const double kAvoPetGameMenuPanelH = 310;
 
 /// Glassmorphism 패널 shell (ClipRRect + BackdropFilter + white 60%).
-Widget buildVegePetGlassPanel({
+Widget buildAvoPetGlassPanel({
   required double width,
   required double height,
   required Widget child,
@@ -117,8 +117,8 @@ Widget buildGameMenuSubPanelShell({
   required VoidCallback onBack,
   required double titleTop,
   bool showBackButton = true,
-  double width = kVegePetGameMenuPanelW,
-  double height = kVegePetGameMenuPanelH,
+  double width = kAvoPetGameMenuPanelW,
+  double height = kAvoPetGameMenuPanelH,
   double blurSigma = 10,
   double shadowBlurRadius = 12,
   double bodyTop = 48,
@@ -134,7 +134,7 @@ Widget buildGameMenuSubPanelShell({
     bodyChild = Padding(padding: bodyPadding, child: body);
   }
 
-  return buildVegePetGlassPanel(
+  return buildAvoPetGlassPanel(
     width: width,
     height: height,
     blurSigma: blurSigma,

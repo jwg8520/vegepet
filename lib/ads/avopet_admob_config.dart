@@ -7,8 +7,8 @@ import 'package:flutter/foundation.dart';
 /// [iosInterstitialAdUnitIdProd] / Info.plist App ID 를 운영 값으로 교체한다.
 ///
 /// Android 광고는 이번 범위에서 설정하지 않는다.
-class VegePetAdMobConfig {
-  VegePetAdMobConfig._();
+class AvoPetAdMobConfig {
+  AvoPetAdMobConfig._();
 
   /// `true` 이면 항상 테스트 전면 광고 단위를 사용한다.
   /// release 빌드에서 이 값이 `true` 로 남아 있으면 로그로 경고한다.

@@ -1,11 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:vegepet/features/analysis/analysis_helpers.dart';
-import 'package:vegepet/features/analysis/analysis_models.dart';
-import 'package:vegepet/features/analysis/feedback_pie_chart.dart';
-import 'package:vegepet/features/analysis/weight_trend_chart.dart';
-import 'package:vegepet/l10n/app_localizations.dart';
+import 'package:avopet/features/analysis/analysis_helpers.dart';
+import 'package:avopet/features/analysis/analysis_models.dart';
+import 'package:avopet/features/analysis/feedback_pie_chart.dart';
+import 'package:avopet/features/analysis/weight_trend_chart.dart';
+import 'package:avopet/l10n/app_localizations.dart';
 
 /// 분석 패널 우측 상단 기간 선택 (대제목과 동일 y라인에 배치).
 class AnalysisPeriodSelector extends StatelessWidget {

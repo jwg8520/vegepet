@@ -4,18 +4,18 @@ import 'dart:ui' show BlurStyle, Canvas, MaskFilter, Offset, Paint, Rect;
 
 import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
-import 'package:vegepet/game/pet_collision_tune.dart';
-import 'package:vegepet/game/pet_motion.dart';
-import 'package:vegepet/game/pet_shadow_tune.dart';
-import 'package:vegepet/game/pet_sprite_assets.dart';
-import 'package:vegepet/game/yard_game.dart';
+import 'package:avopet/game/pet_collision_tune.dart';
+import 'package:avopet/game/pet_motion.dart';
+import 'package:avopet/game/pet_shadow_tune.dart';
+import 'package:avopet/game/pet_sprite_assets.dart';
+import 'package:avopet/game/yard_game.dart';
 
 /// 기본 스폰 위치 (844×390, 오두막 문 앞).
 final Vector2 kDefaultPetSpawnPosition = Vector2(380, 250);
 
 /// 하위 호환 alias.
 final Vector2 kCatScoBabySpawnPosition = kDefaultPetSpawnPosition;
-const double kVegePetDisplaySize = 72;
+const double kAvoPetDisplaySize = 72;
 
 /// 발밑 충돌 footprint (이동 차단 전용). sprite 전체 박스가 아니다.
 /// 런타임 값은 [PetCollisionTuneConfig] (종×단계). 아래는 기본값 alias.
@@ -29,20 +29,20 @@ const double kCatScoBabyCollisionFootprintH = kPetCollisionFootprintH;
 const double kCatScoBabyCollisionFootprintYOffset = kPetCollisionFootprintYOffset;
 
 /// walk / run 이동 속도 (논리 px/sec).
-const double kVegePetWalkSpeed = 38;
-const double kVegePetRunSpeed = 72;
+const double kAvoPetWalkSpeed = 38;
+const double kAvoPetRunSpeed = 72;
 
 /// 펫 렌더 우선순위 베이스. 발 y 를 더해 아래쪽 펫이 앞에 오도록 한다.
 /// (지면 2·연기 3 위, 하트 이펙트보다 아래)
-const int kVegePetPriorityBase = 100;
-const int kVegePetPriorityYSpan = 500;
+const int kAvoPetPriorityBase = 100;
+const int kAvoPetPriorityYSpan = 500;
 
 typedef PetMoveValidator = bool Function(Vector2 current, Vector2 next);
 
 typedef PetFootprintMoveValidator =
     bool Function(List<Vector2> currentPoints, List<Vector2> nextPoints);
 
-final List<Vector2> kVegePetEightDirections = [
+final List<Vector2> kAvoPetEightDirections = [
   Vector2(0, -1),
   Vector2(0, 1),
   Vector2(-1, 0),
@@ -54,9 +54,9 @@ final List<Vector2> kVegePetEightDirections = [
 ];
 
 /// Flame 마당 펫 컴포넌트 (종·단계별 스프라이트, 독립 상태 머신).
-class VegePetComponent extends PositionComponent
+class AvoPetComponent extends PositionComponent
     with HasGameReference<YardGame> {
-  VegePetComponent({
+  AvoPetComponent({
     required this.userPetId,
     required this.speciesCode,
     required this.stage,
@@ -72,10 +72,10 @@ class VegePetComponent extends PositionComponent
          anchor: Anchor.bottomCenter,
          size: Vector2.all(petDisplaySizeForStage(stage)),
          // 발 y 기준 정렬. update 에서 갱신 (아래쪽 펫이 위쪽 펫·그림자 앞에).
-         priority: kVegePetPriorityBase +
+         priority: kAvoPetPriorityBase +
              (initialPosition ?? kDefaultPetSpawnPosition).y.round().clamp(
                0,
-               kVegePetPriorityYSpan,
+               kAvoPetPriorityYSpan,
              ),
        );
 
@@ -114,7 +114,7 @@ class VegePetComponent extends PositionComponent
   bool? _dogPlayFacingLeft;
 
   Vector2 _moveDirection = Vector2.zero();
-  double _moveSpeed = kVegePetWalkSpeed;
+  double _moveSpeed = kAvoPetWalkSpeed;
   double _moveTimeLeft = 0;
 
   bool _manualRunActive = false;
@@ -204,7 +204,7 @@ class VegePetComponent extends PositionComponent
   Future<void> onLoad() async {
     await super.onLoad();
     debugPrint(
-      'VegePetComponent onLoad: id=$userPetId species=$speciesCode '
+      'AvoPetComponent onLoad: id=$userPetId species=$speciesCode '
       'stage=$stage folder=$stageFolder size=$displaySize',
     );
     await PetSpriteAssets.preflightAssets(
@@ -420,12 +420,12 @@ class VegePetComponent extends PositionComponent
     _isSitting = false;
     _pendingMoveCycleFinish = false;
     _moveSpeed =
-        motion == PetMotion.run ? kVegePetRunSpeed : kVegePetWalkSpeed;
+        motion == PetMotion.run ? kAvoPetRunSpeed : kAvoPetWalkSpeed;
 
     if (_moveDirection.isZero()) {
       _moveDirection =
-          kVegePetEightDirections[_random.nextInt(
-            kVegePetEightDirections.length,
+          kAvoPetEightDirections[_random.nextInt(
+            kAvoPetEightDirections.length,
           )];
     }
     _updateFacingFromDirection(_moveDirection);
@@ -462,8 +462,8 @@ class VegePetComponent extends PositionComponent
   /// 발 위치(y)가 클수록 앞에 그려 아래쪽 펫·그림자가 위쪽 펫을 가리게 한다.
   void _syncRenderPriorityByY() {
     final next =
-        kVegePetPriorityBase +
-        position.y.round().clamp(0, kVegePetPriorityYSpan);
+        kAvoPetPriorityBase +
+        position.y.round().clamp(0, kAvoPetPriorityYSpan);
     if (priority != next) {
       priority = next;
     }
@@ -576,7 +576,7 @@ class VegePetComponent extends PositionComponent
       candidates.add(-_moveDirection);
     }
     candidates.addAll(
-      List<Vector2>.from(kVegePetEightDirections)..shuffle(_random),
+      List<Vector2>.from(kAvoPetEightDirections)..shuffle(_random),
     );
 
     for (final dir in candidates) {
@@ -596,7 +596,7 @@ class VegePetComponent extends PositionComponent
     if (_assets == null) return;
     if (direction.isZero()) return;
     if (_isSitting || _eventMotionActive) {
-      debugPrint('[VegePet] manual run ignored (sitting/event)');
+      debugPrint('[AvoPet] manual run ignored (sitting/event)');
       return;
     }
 
@@ -607,7 +607,7 @@ class VegePetComponent extends PositionComponent
 
     _speedMultiplier = speedMultiplier.clamp(0.25, 3.0);
     _motion = PetMotion.run;
-    _moveSpeed = kVegePetRunSpeed;
+    _moveSpeed = kAvoPetRunSpeed;
     _moveDirection = direction.normalized();
     _isMoving = true;
     _moveTimeLeft = double.infinity;
@@ -650,14 +650,14 @@ class VegePetComponent extends PositionComponent
         motion != PetMotion.sittingIdle &&
         motion != PetMotion.sit) {
       if (fromAuto) {
-        debugPrint('[VegePet] $motion blocked while sitting');
+        debugPrint('[AvoPet] $motion blocked while sitting');
         _scheduleAutoBehavior(delay: _randomIdleDelay());
         return;
       }
       if (motion == PetMotion.idle ||
           motion == PetMotion.walk ||
           motion == PetMotion.run) {
-        debugPrint('[VegePet] $motion blocked while sitting');
+        debugPrint('[AvoPet] $motion blocked while sitting');
         return;
       }
     }
@@ -667,7 +667,7 @@ class VegePetComponent extends PositionComponent
         _isSitting &&
         _sittingIdleCycleCount < 1 &&
         fromAuto) {
-      debugPrint('[VegePet] stand blocked until sittingIdle >= 1');
+      debugPrint('[AvoPet] stand blocked until sittingIdle >= 1');
       await _enterSittingIdle(resetAuto: true);
       return;
     }
@@ -806,11 +806,11 @@ class VegePetComponent extends PositionComponent
     _pendingMoveCycleFinish = false;
     _motion = motion;
     _isSitting = false;
-    _moveSpeed = motion == PetMotion.run ? kVegePetRunSpeed : kVegePetWalkSpeed;
+    _moveSpeed = motion == PetMotion.run ? kAvoPetRunSpeed : kAvoPetWalkSpeed;
 
     _moveDirection =
-        kVegePetEightDirections[_random.nextInt(
-          kVegePetEightDirections.length,
+        kAvoPetEightDirections[_random.nextInt(
+          kAvoPetEightDirections.length,
         )];
     _updateFacingFromDirection(_moveDirection);
     _isMoving = true;
@@ -1015,7 +1015,7 @@ class VegePetComponent extends PositionComponent
       return;
     }
     if (!force && _sittingIdleCycleCount < 1) {
-      debugPrint('[VegePet] stand blocked: sittingIdleCycleCount=0');
+      debugPrint('[AvoPet] stand blocked: sittingIdleCycleCount=0');
       await _enterSittingIdle(resetAuto: true, generation: generation);
       return;
     }
@@ -1121,7 +1121,7 @@ class VegePetComponent extends PositionComponent
     _isSitting = false;
     _dogPlaySameFacingCycles = 0;
     _dogPlayFacingLeft = null;
-    _moveSpeed = kVegePetRunSpeed;
+    _moveSpeed = kAvoPetRunSpeed;
     _moveTimeLeft = double.infinity;
     _pendingMoveCycleFinish = false;
 
@@ -1159,7 +1159,7 @@ class VegePetComponent extends PositionComponent
   }
 
   void _assignDogPlayMoveDirection({required bool allowFacingFlip}) {
-    final shuffled = List<Vector2>.from(kVegePetEightDirections)
+    final shuffled = List<Vector2>.from(kAvoPetEightDirections)
       ..shuffle(_random);
 
     Vector2? pickFrom(Iterable<Vector2> dirs, {required bool requireReachable}) {
@@ -1177,7 +1177,7 @@ class VegePetComponent extends PositionComponent
     final chosen =
         pickFrom(shuffled, requireReachable: true) ??
         pickFrom(shuffled, requireReachable: false) ??
-        kVegePetEightDirections[_random.nextInt(kVegePetEightDirections.length)]
+        kAvoPetEightDirections[_random.nextInt(kAvoPetEightDirections.length)]
             .clone();
 
     _moveDirection = chosen;

@@ -2,7 +2,7 @@ import 'dart:ui';
 
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
-import 'package:vegepet/game/petting_heart_tune.dart';
+import 'package:avopet/game/petting_heart_tune.dart';
 
 /// 중앙 기준 하트 Path (size = 전체 높이 기준).
 Path buildHeartPath(double size) {

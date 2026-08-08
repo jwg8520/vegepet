@@ -1,4 +1,4 @@
-import 'package:vegepet/features/analysis/analysis_models.dart';
+import 'package:avopet/features/analysis/analysis_models.dart';
 
 /// 기기 현지 날짜 기준 "오늘" (시/분/초 절삭).
 DateTime analysisLocalToday() {

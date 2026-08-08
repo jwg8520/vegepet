@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vegepet/game/pet_motion.dart';
-import 'package:vegepet/game/pet_sprite_assets.dart';
+import 'package:avopet/game/pet_motion.dart';
+import 'package:avopet/game/pet_sprite_assets.dart';
 
 /// 모션 튜닝 대상 종.
 const List<String> kPetMotionSpeciesCodes = [

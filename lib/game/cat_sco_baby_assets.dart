@@ -1,2 +1,2 @@
 // 하위 호환: 신규 로더는 pet_sprite_assets.dart 를 사용한다.
-export 'package:vegepet/game/pet_sprite_assets.dart';
+export 'package:avopet/game/pet_sprite_assets.dart';

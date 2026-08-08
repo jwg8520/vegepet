@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:vegepet/features/analysis/analysis_models.dart';
+import 'package:avopet/features/analysis/analysis_models.dart';
 
 const Color kAnalysisPiePerfect = Color(0xFFA8B8AE);
 const Color kAnalysisPieTop1 = Color(0xFFB8AFC5);

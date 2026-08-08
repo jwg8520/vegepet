@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 /// 그라데이션 클리핑 영역 밖으로 나가 흰색으로 보이는 문제가 있다.
 /// → 그라데이션 텍스트는 line height 를 1.15 이상으로 키우고, gradient bounds 도
 /// 텍스트 실제 높이를 그대로 채우도록 유지한다.
-Widget buildVegePetPastelBlueGradientButtonText(
+Widget buildAvoPetPastelBlueGradientButtonText(
   String text, {
   double fontSize = 14,
   FontWeight fontWeight = FontWeight.w600,

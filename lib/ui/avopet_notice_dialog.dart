@@ -1,25 +1,25 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:vegepet/ui/vegepet_gradient_text.dart';
+import 'package:avopet/ui/avopet_gradient_text.dart';
 
-/// VegePet 공통 확인창 — 844×390 논리좌표 (화면에는 FittedBox 와 동일 스케일로 맞춤).
-const double kVegePetConfirmDialogLeft = 302;
-const double kVegePetConfirmDialogTop = 129;
-const double kVegePetConfirmDialogW = 240;
-const double kVegePetConfirmDialogH = 116;
+/// AvoPet 공통 확인창 — 844×390 논리좌표 (화면에는 FittedBox 와 동일 스케일로 맞춤).
+const double kAvoPetConfirmDialogLeft = 302;
+const double kAvoPetConfirmDialogTop = 129;
+const double kAvoPetConfirmDialogW = 240;
+const double kAvoPetConfirmDialogH = 116;
 
-const double kVegePetNoticeHorizontalPadding = 16;
-const double kVegePetNoticeBodyWidth =
-    kVegePetConfirmDialogW - kVegePetNoticeHorizontalPadding * 2;
-const int kVegePetNoticeBodyDefaultMaxLines = 3;
-const double kVegePetNoticeButtonHorizontalInset = 8;
-const double kVegePetNoticeButtonWidth =
-    kVegePetConfirmDialogW - kVegePetNoticeButtonHorizontalInset * 2;
+const double kAvoPetNoticeHorizontalPadding = 16;
+const double kAvoPetNoticeBodyWidth =
+    kAvoPetConfirmDialogW - kAvoPetNoticeHorizontalPadding * 2;
+const int kAvoPetNoticeBodyDefaultMaxLines = 3;
+const double kAvoPetNoticeButtonHorizontalInset = 8;
+const double kAvoPetNoticeButtonWidth =
+    kAvoPetConfirmDialogW - kAvoPetNoticeButtonHorizontalInset * 2;
 
 /// 마당 240×116 Glassmorphism 단일 확인 버튼 알림창 공통 설정.
-class VegePetNoticeConfig {
-  const VegePetNoticeConfig({
+class AvoPetNoticeConfig {
+  const AvoPetNoticeConfig({
     required this.isOpen,
     required this.title,
     required this.body,
@@ -58,7 +58,7 @@ class VegePetNoticeConfig {
   final bool blockDialogPointerWithGestureDetector;
 }
 
-Widget buildVegePetConfirmDialogShell({
+Widget buildAvoPetConfirmDialogShell({
   required Widget child,
   required double width,
   required double height,
@@ -91,8 +91,8 @@ Widget buildVegePetConfirmDialogShell({
   );
 }
 
-Widget buildVegePetOneButtonNoticeDialog(
-  VegePetNoticeConfig config, {
+Widget buildAvoPetOneButtonNoticeDialog(
+  AvoPetNoticeConfig config, {
   required bool isEnglishLocale,
 }) {
   final isEn = isEnglishLocale;
@@ -104,17 +104,17 @@ Widget buildVegePetOneButtonNoticeDialog(
     resolvedBodyMaxLines = isEn
         ? (config.bodyMaxLinesEn ??
               config.bodyMaxLinesKo ??
-              kVegePetNoticeBodyDefaultMaxLines)
+              kAvoPetNoticeBodyDefaultMaxLines)
         : (config.bodyMaxLinesKo ??
               config.bodyMaxLinesEn ??
-              kVegePetNoticeBodyDefaultMaxLines);
+              kAvoPetNoticeBodyDefaultMaxLines);
   } else {
     resolvedBodyMaxLines =
-        config.bodyMaxLines ?? kVegePetNoticeBodyDefaultMaxLines;
+        config.bodyMaxLines ?? kAvoPetNoticeBodyDefaultMaxLines;
   }
 
   Widget titleBodyColumn = SizedBox(
-    width: kVegePetNoticeBodyWidth,
+    width: kAvoPetNoticeBodyWidth,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -158,18 +158,18 @@ Widget buildVegePetOneButtonNoticeDialog(
     );
   }
 
-  return buildVegePetConfirmDialogShell(
-    width: kVegePetConfirmDialogW,
-    height: kVegePetConfirmDialogH,
+  return buildAvoPetConfirmDialogShell(
+    width: kAvoPetConfirmDialogW,
+    height: kAvoPetConfirmDialogH,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
-              kVegePetNoticeHorizontalPadding,
-              kVegePetNoticeHorizontalPadding,
-              kVegePetNoticeHorizontalPadding,
+              kAvoPetNoticeHorizontalPadding,
+              kAvoPetNoticeHorizontalPadding,
+              kAvoPetNoticeHorizontalPadding,
               0,
             ),
             child: Align(alignment: Alignment.topLeft, child: titleBodyColumn),
@@ -178,9 +178,9 @@ Widget buildVegePetOneButtonNoticeDialog(
         const SizedBox(height: 2),
         Padding(
           padding: const EdgeInsets.fromLTRB(
-            kVegePetNoticeButtonHorizontalInset,
+            kAvoPetNoticeButtonHorizontalInset,
             0,
-            kVegePetNoticeButtonHorizontalInset,
+            kAvoPetNoticeButtonHorizontalInset,
             8,
           ),
           child: Material(
@@ -191,7 +191,7 @@ Widget buildVegePetOneButtonNoticeDialog(
               borderRadius: BorderRadius.circular(14),
               child: Ink(
                 height: 30,
-                width: kVegePetNoticeButtonWidth,
+                width: kAvoPetNoticeButtonWidth,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
@@ -208,7 +208,7 @@ Widget buildVegePetOneButtonNoticeDialog(
                   ],
                 ),
                 child: Center(
-                  child: buildVegePetPastelBlueGradientButtonText(
+                  child: buildAvoPetPastelBlueGradientButtonText(
                     config.primaryLabel,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
