@@ -7,11 +7,13 @@ import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vegepet/game/pet_collision_tune.dart';
 import 'package:vegepet/game/petting_heart_effect.dart';
 import 'package:vegepet/game/petting_heart_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
 import 'package:vegepet/game/pet_motion_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
+import 'package:vegepet/game/pet_sprite_assets.dart';
 import 'package:vegepet/game/vegepet_component.dart';
 
 /// Flame 마당 논리 캔버스 폭 (기존 Flutter 844×390 좌표계와 동일).
@@ -272,6 +274,7 @@ class YardGame extends FlameGame {
   _PetCollisionDebugComponent? _petCollisionDebug;
 
   final PetShadowTuneStore _petShadowTunes = PetShadowTuneStore();
+  final PetCollisionTuneStore _petCollisionTunes = PetCollisionTuneStore();
   final PettingHeartTuneConfig _pettingHeartTune = PettingHeartTuneConfig();
 
   final Completer<void> _onLoadCompleter = Completer<void>();
@@ -364,6 +367,52 @@ class YardGame extends FlameGame {
   }
 
   // ---------------------------------------------------------------------------
+  // 펫 이동 collision footprint 튜닝. 종×단계별.
+  // ---------------------------------------------------------------------------
+
+  PetCollisionTuneStore get petCollisionTunes => _petCollisionTunes;
+
+  PetCollisionTuneConfig petCollisionTuneFor({
+    required String speciesCode,
+    required String stage,
+  }) {
+    return _petCollisionTunes.forPet(speciesCode: speciesCode, stage: stage);
+  }
+
+  void applyPetCollisionTunes(PetCollisionTuneStore store) {
+    _petCollisionTunes.applyAll(store);
+  }
+
+  void updatePetCollisionTune({
+    required String speciesCode,
+    required String stage,
+    double? width,
+    double? height,
+    double? offsetX,
+    double? offsetY,
+  }) {
+    final tune = _petCollisionTunes.forPet(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
+    if (width != null) tune.width = width;
+    if (height != null) tune.height = height;
+    if (offsetX != null) tune.offsetX = offsetX;
+    if (offsetY != null) tune.offsetY = offsetY;
+  }
+
+  void resetPetCollisionTune({
+    required String speciesCode,
+    required String stage,
+  }) {
+    _petCollisionTunes.resetSlot(speciesCode: speciesCode, stage: stage);
+  }
+
+  void resetAllPetCollisionTunes() {
+    _petCollisionTunes.resetAllToDefaults();
+  }
+
+  // ---------------------------------------------------------------------------
   // 펫 모션 튜닝 (spd/rep). 종×단계×모션별.
   // ---------------------------------------------------------------------------
 
@@ -447,6 +496,7 @@ class YardGame extends FlameGame {
     int? durationMs,
     double? scaleStart,
     double? scaleEnd,
+    int? burstIntervalMs,
   }) {
     if (enabled != null) _pettingHeartTune.enabled = enabled;
     if (color != null) _pettingHeartTune.color = color;
@@ -458,6 +508,9 @@ class YardGame extends FlameGame {
     if (durationMs != null) _pettingHeartTune.durationMs = durationMs;
     if (scaleStart != null) _pettingHeartTune.scaleStart = scaleStart;
     if (scaleEnd != null) _pettingHeartTune.scaleEnd = scaleEnd;
+    if (burstIntervalMs != null) {
+      _pettingHeartTune.burstIntervalMs = burstIntervalMs;
+    }
   }
 
   void resetPettingHeartTune() {
@@ -480,6 +533,24 @@ class YardGame extends FlameGame {
         startPosition: Vector2(startX, startY),
       ),
     );
+  }
+
+  /// 하트를 [count]개, [burstIntervalMs] 간격으로 연속 생성한다.
+  void spawnPettingHeartBurst({
+    int count = kPettingHeartDefaultBurstCount,
+    bool force = false,
+  }) {
+    if (!force && !_pettingHeartTune.enabled) return;
+    if (!_isVegePetAlive(_vegePetComponent)) return;
+
+    final intervalMs = _pettingHeartTune.burstIntervalMs.clamp(0, 2000);
+    for (var i = 0; i < count; i++) {
+      final delay = Duration(milliseconds: intervalMs * i);
+      Future<void>.delayed(delay, () {
+        if (!_isVegePetAlive(_vegePetComponent)) return;
+        spawnPettingHeart(force: force);
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -728,15 +799,25 @@ class YardGame extends FlameGame {
     bool isDebugOnly = false,
     bool isResident = false,
     Vector2? position,
+    bool? seedRandomAmbient,
   }) async {
     final epoch = ++_petMutationEpoch;
+    final seedAmbient = seedRandomAmbient ?? (position == null);
 
     if (isResident) {
       await _removePetById(userPetId, bumpEpoch: false);
     } else {
-      // active 교체 시 resident 는 유지한다.
-      await removeActivePetComponent(bumpEpoch: false);
-      // 동일 id 가 resident 로 남아 있으면 제거 후 active 로 재스폰.
+      // 이전 active 가 다른 펫이면 제거하지 않고 resident 로 강등(위치 유지).
+      final previous = _vegePetComponent;
+      if (previous != null &&
+          previous.userPetId != userPetId &&
+          _isVegePetAlive(previous)) {
+        previous.isResident = true;
+        _vegePetComponent = null;
+        _activePetUserId = null;
+      } else {
+        await removeActivePetComponent(bumpEpoch: false);
+      }
       await _removePetById(userPetId, bumpEpoch: false);
     }
 
@@ -752,6 +833,7 @@ class YardGame extends FlameGame {
       isDebugOnly: isDebugOnly,
       isResident: isResident,
       initialPosition: position,
+      seedRandomAmbient: seedAmbient,
       canMoveFootprintTo: (current, next) => canPetFootprintMoveTo(
         current,
         next,
@@ -844,29 +926,39 @@ class YardGame extends FlameGame {
 
       final existing = _petsById[userPetId];
       if (existing != null &&
-          _activePetUserId == userPetId &&
           _isVegePetAlive(existing) &&
-          !existing.isResident &&
-          existing.speciesCode == speciesCode &&
-          existing.stage == stage) {
-        debugPrint('YardGame: yard pet already shown (userPetId=$userPetId)');
+          existing.speciesCode == speciesCode) {
+        // 동일 펫: 단계만 바뀌면 제자리 교체 (사라졌다 나타나기 방지).
+        if (existing.stage != stage ||
+            petStageAssetFolder(existing.stage) !=
+                petStageAssetFolder(stage)) {
+          await existing.applyStageInPlace(stage);
+        }
+        // 다른 active 가 있으면 resident 로 강등.
+        final previous = _vegePetComponent;
+        if (previous != null &&
+            previous.userPetId != userPetId &&
+            _isVegePetAlive(previous)) {
+          previous.isResident = true;
+        }
+        existing.isResident = false;
         _vegePetComponent = existing;
+        _activePetUserId = userPetId;
+        debugPrint(
+          'YardGame: yard pet in-place update (userPetId=$userPetId stage=$stage)',
+        );
         return true;
       }
 
-      // stage/species 변경 재스폰 시 현재 위치를 유지한다 (오두막 앞 순간이동 방지).
+      // 다른 펫으로 active 교체 시에는 이전 펫 위치를 물려받지 않는다.
+      // (같은 userPetId 재스폰/단계 변경만 위치 유지)
       Vector2? spawnPosition = position;
-      if (spawnPosition == null) {
-        final live =
-            (existing != null && _isVegePetAlive(existing))
-            ? existing
-            : (_vegePetComponent != null &&
-                    _isVegePetAlive(_vegePetComponent)
-                ? _vegePetComponent
-                : null);
-        if (live != null) {
-          spawnPosition = live.position.clone();
-        }
+      var seedAmbient = position == null;
+      if (spawnPosition == null &&
+          existing != null &&
+          _isVegePetAlive(existing)) {
+        spawnPosition = existing.position.clone();
+        seedAmbient = false;
       }
 
       return await _spawnYardPetComponent(
@@ -874,6 +966,7 @@ class YardGame extends FlameGame {
         speciesCode: speciesCode,
         stage: stage,
         position: spawnPosition,
+        seedRandomAmbient: seedAmbient,
       );
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
@@ -897,6 +990,7 @@ class YardGame extends FlameGame {
   }
 
   /// resident 펫 목록을 Flame 마당과 동기화한다 (active 제외).
+  /// 기존 마당 펫 위치는 유지한다 (격자 재배치/순간이동 없음).
   Future<void> syncResidentYardPets(
     List<({String userPetId, String speciesCode, String stage})> pets,
   ) async {
@@ -912,34 +1006,39 @@ class YardGame extends FlameGame {
       }
     }
 
-    var index = 0;
     for (final spec in pets) {
       if (_activePetUserId == spec.userPetId) {
-        index++;
         continue;
       }
       final existing = _petsById[spec.userPetId];
       if (existing != null &&
           _isVegePetAlive(existing) &&
-          existing.isResident &&
-          existing.speciesCode == spec.speciesCode &&
-          existing.stage == spec.stage) {
-        index++;
+          existing.speciesCode == spec.speciesCode) {
+        if (existing.stage != spec.stage ||
+            petStageAssetFolder(existing.stage) !=
+                petStageAssetFolder(spec.stage)) {
+          await existing.applyStageInPlace(spec.stage);
+        }
+        existing.isResident = true;
+        if (identical(_vegePetComponent, existing)) {
+          _vegePetComponent = null;
+          _activePetUserId = null;
+        }
         continue;
       }
 
-      final spawnPos = Vector2(
-        260 + (index % 5) * 72.0,
-        255 + (index ~/ 5) * 28.0,
-      );
+      // 마당에 없던 resident: 위치 보존 재스폰은 유지, 신규(앱 재시작 등)는 랜덤 시드.
+      final preserved = (existing != null && _isVegePetAlive(existing))
+          ? existing.position.clone()
+          : null;
       await _spawnYardPetComponent(
         userPetId: spec.userPetId,
         speciesCode: spec.speciesCode,
         stage: spec.stage,
         isResident: true,
-        position: spawnPos,
+        position: preserved,
+        seedRandomAmbient: preserved == null,
       );
-      index++;
     }
   }
 
@@ -1442,7 +1541,7 @@ class _CloudComponent extends SpriteComponent {
 class _PetCollisionDebugComponent extends Component {
   _PetCollisionDebugComponent({required YardGame game})
     : _game = game,
-      super(priority: 9);
+      super(priority: 750);
 
   final YardGame _game;
   bool visibleOverride = true;

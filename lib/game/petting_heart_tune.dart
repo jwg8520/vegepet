@@ -17,6 +17,7 @@ class PettingHeartTuneConfig {
     this.durationMs = kPettingHeartDefaultDurationMs,
     this.scaleStart = kPettingHeartDefaultScaleStart,
     this.scaleEnd = kPettingHeartDefaultScaleEnd,
+    this.burstIntervalMs = kPettingHeartDefaultBurstIntervalMs,
   }) : color = color ?? kPettingHeartDefaultColor;
 
   bool enabled;
@@ -29,6 +30,9 @@ class PettingHeartTuneConfig {
   int durationMs;
   double scaleStart;
   double scaleEnd;
+
+  /// 연속 하트(버스트) 사이 간격.
+  int burstIntervalMs;
 
   double get durationSeconds =>
       (durationMs <= 0 ? kPettingHeartDefaultDurationMs : durationMs) / 1000.0;
@@ -44,6 +48,7 @@ class PettingHeartTuneConfig {
     durationMs = kPettingHeartDefaultDurationMs;
     scaleStart = kPettingHeartDefaultScaleStart;
     scaleEnd = kPettingHeartDefaultScaleEnd;
+    burstIntervalMs = kPettingHeartDefaultBurstIntervalMs;
   }
 
   void copyFrom(PettingHeartTuneConfig other) {
@@ -57,6 +62,7 @@ class PettingHeartTuneConfig {
     durationMs = other.durationMs;
     scaleStart = other.scaleStart;
     scaleEnd = other.scaleEnd;
+    burstIntervalMs = other.burstIntervalMs;
   }
 
   PettingHeartTuneConfig clone() {
@@ -71,6 +77,7 @@ class PettingHeartTuneConfig {
       durationMs: durationMs,
       scaleStart: scaleStart,
       scaleEnd: scaleEnd,
+      burstIntervalMs: burstIntervalMs,
     );
   }
 }
@@ -79,14 +86,19 @@ const bool kPettingHeartDefaultEnabled = true;
 const double kPettingHeartDefaultOpacity = 1.0;
 const double kPettingHeartDefaultSize = 15.7;
 const double kPettingHeartDefaultOffsetX = -0.7;
-const double kPettingHeartDefaultOffsetY = 2.0;
+const double kPettingHeartDefaultOffsetY = 12.9;
 const double kPettingHeartDefaultRiseDistance = 36.0;
 const int kPettingHeartDefaultDurationMs = 2500;
 const double kPettingHeartDefaultScaleStart = 0.85;
 const double kPettingHeartDefaultScaleEnd = 1.13;
+const int kPettingHeartDefaultBurstIntervalMs = 459;
+const int kPettingHeartDefaultBurstCount = 3;
 
 /// debug 쓰다듬기 하트 튜닝 값 SharedPreferences 저장/복원.
 class PettingHeartTunePreferences {
+  /// v2: 첨부 표 기준 기본값(oY 12.9, gap 459). 구 저장값은 무시하고 재시드.
+  static const int schemaVersion = 2;
+  static const String keySchemaVersion = 'debug_petting_heart_schema_v';
   static const String keyEnabled = 'debug_petting_heart_enabled';
   static const String keyColorHex = 'debug_petting_heart_color_hex';
   static const String keyOpacity = 'debug_petting_heart_opacity';
@@ -97,11 +109,16 @@ class PettingHeartTunePreferences {
   static const String keyDurationMs = 'debug_petting_heart_duration_ms';
   static const String keyScaleStart = 'debug_petting_heart_scale_start';
   static const String keyScaleEnd = 'debug_petting_heart_scale_end';
+  static const String keyBurstIntervalMs =
+      'debug_petting_heart_burst_interval_ms';
 
   static Future<PettingHeartTuneConfig> load() async {
     final config = PettingHeartTuneConfig();
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (prefs.getInt(keySchemaVersion) != schemaVersion) {
+        return config;
+      }
       if (!prefs.containsKey(keyEnabled)) {
         return config;
       }
@@ -126,6 +143,9 @@ class PettingHeartTunePreferences {
           prefs.getDouble(keyScaleStart) ?? kPettingHeartDefaultScaleStart;
       config.scaleEnd =
           prefs.getDouble(keyScaleEnd) ?? kPettingHeartDefaultScaleEnd;
+      config.burstIntervalMs =
+          prefs.getInt(keyBurstIntervalMs) ??
+          kPettingHeartDefaultBurstIntervalMs;
     } catch (e) {
       debugPrint('PettingHeartTunePreferences.load failed: $e');
       config.resetToDefaults();
@@ -136,6 +156,7 @@ class PettingHeartTunePreferences {
   static Future<void> save(PettingHeartTuneConfig config) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(keySchemaVersion, schemaVersion);
       await prefs.setBool(keyEnabled, config.enabled);
       await prefs.setString(keyColorHex, colorToHex(config.color));
       await prefs.setDouble(keyOpacity, config.opacity);
@@ -146,6 +167,7 @@ class PettingHeartTunePreferences {
       await prefs.setInt(keyDurationMs, config.durationMs);
       await prefs.setDouble(keyScaleStart, config.scaleStart);
       await prefs.setDouble(keyScaleEnd, config.scaleEnd);
+      await prefs.setInt(keyBurstIntervalMs, config.burstIntervalMs);
     } catch (e) {
       debugPrint('PettingHeartTunePreferences.save failed: $e');
     }

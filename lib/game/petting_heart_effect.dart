@@ -32,7 +32,8 @@ class PettingHeartEffectComponent extends PositionComponent {
        super(
          position: startPosition.clone(),
          anchor: Anchor.center,
-         priority: 9,
+         // 펫 Y-sort(100~600) 위에 항상 표시.
+         priority: 700,
        );
 
   final PettingHeartTuneConfig _tune;

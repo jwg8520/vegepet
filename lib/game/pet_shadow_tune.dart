@@ -8,12 +8,14 @@ import 'package:vegepet/game/pet_sprite_assets.dart';
 const Color kPetShadowDefaultColor = Color(0xFF527A7B);
 
 const bool kPetShadowDefaultEnabled = true;
-const double kPetShadowDefaultOpacity = 0.68;
-const double kPetShadowDefaultOffsetX = 4.0;
-const double kPetShadowDefaultOffsetY = -10.1;
-const double kPetShadowDefaultWidthScale = 0.74;
-const double kPetShadowDefaultHeightScale = 0.16;
-const double kPetShadowDefaultBlurSigma = 0.5;
+
+/// 표에 없는 필드/폴백용 (enabled·color 공통).
+const double kPetShadowDefaultOpacity = 0.56;
+const double kPetShadowDefaultOffsetX = -0.4;
+const double kPetShadowDefaultOffsetY = -13.4;
+const double kPetShadowDefaultWidthScale = 0.56;
+const double kPetShadowDefaultHeightScale = 0.17;
+const double kPetShadowDefaultBlurSigma = 0.7;
 
 /// debug 슬라이더와 동일한 scale 허용 범위.
 const double kPetShadowWidthScaleMin = 0.2;
@@ -51,6 +53,153 @@ String petShadowTuneKey({
   return '$speciesCode|$folder';
 }
 
+PetShadowTuneConfig _shadowSpec({
+  required double opac,
+  required double oX,
+  required double oY,
+  required double wSc,
+  required double hSc,
+  required double blur,
+}) {
+  return PetShadowTuneConfig(
+    enabled: kPetShadowDefaultEnabled,
+    color: kPetShadowDefaultColor,
+    opacity: opac,
+    offsetX: oX,
+    offsetY: oY,
+    widthScale: wSc,
+    heightScale: hSc,
+    blurSigma: blur,
+  );
+}
+
+/// 표 기준 빌트인 기본값 (종×단계). 런타임 mutate 금지 — clone 해서 사용.
+PetShadowTuneConfig kPetShadowBuiltInDefaultFor({
+  required String speciesCode,
+  required String stage,
+}) {
+  final folder = petStageAssetFolder(stage);
+  switch (speciesCode) {
+    case 'cat_sco':
+      return switch (folder) {
+        'young' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -15.9,
+          wSc: 0.61,
+          hSc: 0.19,
+          blur: 0.7,
+        ),
+        'teen' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -19.4,
+          wSc: 0.61,
+          hSc: 0.21,
+          blur: 0.7,
+        ),
+        'baby' || _ => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -13.4,
+          wSc: 0.54,
+          hSc: 0.19,
+          blur: 0.7,
+        ),
+      };
+    case 'cat_rag':
+      return switch (folder) {
+        'young' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -15.9,
+          wSc: 0.61,
+          hSc: 0.19,
+          blur: 0.7,
+        ),
+        'teen' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -19.4,
+          wSc: 0.61,
+          hSc: 0.21,
+          blur: 0.7,
+        ),
+        'baby' || _ => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -13.4,
+          wSc: 0.56,
+          hSc: 0.17,
+          blur: 0.7,
+        ),
+      };
+    case 'dog_bic':
+      return switch (folder) {
+        'young' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -15.9,
+          wSc: 0.56,
+          hSc: 0.19,
+          blur: 0.7,
+        ),
+        'teen' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -19.4,
+          wSc: 0.56,
+          hSc: 0.21,
+          blur: 0.7,
+        ),
+        'baby' || _ => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -13.4,
+          wSc: 0.56,
+          hSc: 0.17,
+          blur: 0.7,
+        ),
+      };
+    case 'dog_pom':
+      return switch (folder) {
+        'young' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -15.9,
+          wSc: 0.56,
+          hSc: 0.19,
+          blur: 0.7,
+        ),
+        'teen' => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -18.6,
+          wSc: 0.56,
+          hSc: 0.21,
+          blur: 0.7,
+        ),
+        'baby' || _ => _shadowSpec(
+          opac: 0.56,
+          oX: -0.4,
+          oY: -13.4,
+          wSc: 0.56,
+          hSc: 0.17,
+          blur: 0.7,
+        ),
+      };
+    default:
+      return _shadowSpec(
+        opac: kPetShadowDefaultOpacity,
+        oX: kPetShadowDefaultOffsetX,
+        oY: kPetShadowDefaultOffsetY,
+        wSc: kPetShadowDefaultWidthScale,
+        hSc: kPetShadowDefaultHeightScale,
+        blur: kPetShadowDefaultBlurSigma,
+      );
+  }
+}
+
 /// 펫 그림자 debug/런타임 튜닝 설정 (한 슬롯).
 class PetShadowTuneConfig {
   PetShadowTuneConfig({
@@ -82,14 +231,19 @@ class PetShadowTuneConfig {
   }
 
   void resetToDefaults() {
-    enabled = kPetShadowDefaultEnabled;
-    color = kPetShadowDefaultColor;
-    opacity = kPetShadowDefaultOpacity;
-    offsetX = kPetShadowDefaultOffsetX;
-    offsetY = kPetShadowDefaultOffsetY;
-    widthScale = kPetShadowDefaultWidthScale;
-    heightScale = kPetShadowDefaultHeightScale;
-    blurSigma = kPetShadowDefaultBlurSigma;
+    // 종·단계 미지정 폴백 (cat_sco baby).
+    copyFrom(
+      kPetShadowBuiltInDefaultFor(speciesCode: 'cat_sco', stage: 'baby'),
+    );
+  }
+
+  void resetToDefaultFor({
+    required String speciesCode,
+    required String stage,
+  }) {
+    copyFrom(
+      kPetShadowBuiltInDefaultFor(speciesCode: speciesCode, stage: stage),
+    );
   }
 
   void copyFrom(PetShadowTuneConfig other) {
@@ -130,29 +284,31 @@ class PetShadowTuneConfig {
     };
   }
 
-  factory PetShadowTuneConfig.fromJson(Map<String, dynamic> json) {
-    final config = PetShadowTuneConfig();
-    config.enabled = json['enabled'] as bool? ?? kPetShadowDefaultEnabled;
+  factory PetShadowTuneConfig.fromJson(
+    Map<String, dynamic> json, {
+    String speciesCode = 'cat_sco',
+    String stage = 'baby',
+  }) {
+    final d = kPetShadowBuiltInDefaultFor(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
+    final config = PetShadowTuneConfig(
+      enabled: json['enabled'] as bool? ?? d.enabled,
+      color: d.color,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? d.opacity,
+      offsetX: (json['offsetX'] as num?)?.toDouble() ?? d.offsetX,
+      offsetY: (json['offsetY'] as num?)?.toDouble() ?? d.offsetY,
+      widthScale: (json['widthScale'] as num?)?.toDouble() ?? d.widthScale,
+      heightScale: (json['heightScale'] as num?)?.toDouble() ?? d.heightScale,
+      blurSigma: (json['blurSigma'] as num?)?.toDouble() ?? d.blurSigma,
+    );
     final hex = json['colorHex']?.toString();
     if (hex != null && hex.isNotEmpty) {
       final parsed = PetShadowTunePreferences.parseHexColor(hex);
       if (parsed != null) config.color = parsed;
     }
-    config.opacity =
-        (json['opacity'] as num?)?.toDouble() ?? kPetShadowDefaultOpacity;
-    config.offsetX =
-        (json['offsetX'] as num?)?.toDouble() ?? kPetShadowDefaultOffsetX;
-    config.offsetY =
-        (json['offsetY'] as num?)?.toDouble() ?? kPetShadowDefaultOffsetY;
-    config.widthScale = clampPetShadowWidthScale(
-      (json['widthScale'] as num?)?.toDouble() ?? kPetShadowDefaultWidthScale,
-    );
-    config.heightScale = clampPetShadowHeightScale(
-      (json['heightScale'] as num?)?.toDouble() ??
-          kPetShadowDefaultHeightScale,
-    );
-    config.blurSigma =
-        (json['blurSigma'] as num?)?.toDouble() ?? kPetShadowDefaultBlurSigma;
+    config.clampScales();
     return config;
   }
 }
@@ -165,14 +321,19 @@ class PetShadowTuneStore {
 
   final Map<String, PetShadowTuneConfig> _byKey = {};
 
-  Map<String, PetShadowTuneConfig> get entries =>
-      Map.unmodifiable(_byKey);
+  Map<String, PetShadowTuneConfig> get entries => Map.unmodifiable(_byKey);
 
   void ensureAllSlots() {
     for (final species in kPetShadowSpeciesCodes) {
       for (final stage in kPetShadowStageFolders) {
         final key = petShadowTuneKey(speciesCode: species, stage: stage);
-        _byKey.putIfAbsent(key, PetShadowTuneConfig.new);
+        _byKey.putIfAbsent(
+          key,
+          () => kPetShadowBuiltInDefaultFor(
+            speciesCode: species,
+            stage: stage,
+          ),
+        );
       }
     }
   }
@@ -182,12 +343,20 @@ class PetShadowTuneStore {
     required String stage,
   }) {
     final key = petShadowTuneKey(speciesCode: speciesCode, stage: stage);
-    return _byKey.putIfAbsent(key, PetShadowTuneConfig.new);
+    return _byKey.putIfAbsent(
+      key,
+      () => kPetShadowBuiltInDefaultFor(
+        speciesCode: speciesCode,
+        stage: stage,
+      ),
+    );
   }
 
   void applyAll(PetShadowTuneStore other) {
     for (final entry in other._byKey.entries) {
-      _byKey.putIfAbsent(entry.key, PetShadowTuneConfig.new).copyFrom(entry.value);
+      _byKey
+          .putIfAbsent(entry.key, PetShadowTuneConfig.new)
+          .copyFrom(entry.value);
     }
     ensureAllSlots();
   }
@@ -203,13 +372,18 @@ class PetShadowTuneStore {
     required String speciesCode,
     required String stage,
   }) {
-    forPet(speciesCode: speciesCode, stage: stage).resetToDefaults();
+    forPet(speciesCode: speciesCode, stage: stage).resetToDefaultFor(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
   }
 
   void resetAllToDefaults() {
     ensureAllSlots();
-    for (final config in _byKey.values) {
-      config.resetToDefaults();
+    for (final species in kPetShadowSpeciesCodes) {
+      for (final stage in kPetShadowStageFolders) {
+        resetSlot(speciesCode: species, stage: stage);
+      }
     }
   }
 
@@ -223,7 +397,8 @@ class PetShadowTuneStore {
 
 /// debug 펫 그림자 튜닝 값 SharedPreferences 저장/복원 (종×단계 맵).
 class PetShadowTunePreferences {
-  static const String keyMapJson = 'debug_pet_shadow_tune_map_v1';
+  /// v2: 표 기준 종×단계 기본값. 구 v1 저장값은 무시하고 새 기본값으로 시드.
+  static const String keyMapJson = 'debug_pet_shadow_tune_map_v2';
 
   // 구버전 단일 슬롯 키 (마이그레이션용).
   static const String keyEnabled = 'debug_pet_shadow_enabled';
@@ -247,8 +422,13 @@ class PetShadowTunePreferences {
             final key = entry.key.toString();
             final value = entry.value;
             if (value is Map) {
+              final parts = key.split('|');
+              final species = parts.isNotEmpty ? parts[0] : 'cat_sco';
+              final stage = parts.length > 1 ? parts[1] : 'baby';
               store._byKey[key] = PetShadowTuneConfig.fromJson(
                 Map<String, dynamic>.from(value),
+                speciesCode: species,
+                stage: stage,
               );
             }
           }
@@ -258,30 +438,7 @@ class PetShadowTunePreferences {
         return store;
       }
 
-      // 구버전 단일 설정이 있으면 모든 슬롯에 복제.
-      if (prefs.containsKey(keyEnabled)) {
-        final legacy = PetShadowTuneConfig();
-        legacy.enabled = prefs.getBool(keyEnabled) ?? kPetShadowDefaultEnabled;
-        final hex = prefs.getString(keyColorHex);
-        if (hex != null && hex.isNotEmpty) {
-          final parsed = parseHexColor(hex);
-          if (parsed != null) legacy.color = parsed;
-        }
-        legacy.opacity =
-            prefs.getDouble(keyOpacity) ?? kPetShadowDefaultOpacity;
-        legacy.offsetX =
-            prefs.getDouble(keyOffsetX) ?? kPetShadowDefaultOffsetX;
-        legacy.offsetY =
-            prefs.getDouble(keyOffsetY) ?? kPetShadowDefaultOffsetY;
-        legacy.widthScale =
-            prefs.getDouble(keyWidthScale) ?? kPetShadowDefaultWidthScale;
-        legacy.heightScale =
-            prefs.getDouble(keyHeightScale) ?? kPetShadowDefaultHeightScale;
-        legacy.blurSigma =
-            prefs.getDouble(keyBlurSigma) ?? kPetShadowDefaultBlurSigma;
-        legacy.clampScales();
-        store.fillAllFrom(legacy);
-      }
+      // 구버전 단일 설정이 있으면 표 기본값 유지 (단일 값으로 덮지 않음).
     } catch (e) {
       debugPrint('PetShadowTunePreferences.load failed: $e');
       store.resetAllToDefaults();

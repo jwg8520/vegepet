@@ -345,8 +345,15 @@ Deno.serve(async (req) => {
     });
 
     const currentAffection = Number(activePet.affection ?? 0);
-    const affectionGain = gainForResult(resultType);
-    const nextAffection = currentAffection + affectionGain;
+    const stage = String(activePet.stage ?? "").toLowerCase();
+    const isAdult =
+      stage === "adult" || Number.isFinite(currentAffection) && currentAffection >= 110;
+    const baseGain = gainForResult(resultType);
+    // 성숙기(성체) 이후에는 애정도를 올리지 않는다. (도감 완성 후 식단 유지 모드)
+    const affectionGain = isAdult ? 0 : baseGain;
+    const nextAffection = isAdult
+      ? currentAffection
+      : currentAffection + affectionGain;
 
     if (resultType === "uncertain") {
       return jsonResponse({
@@ -376,14 +383,16 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: "Failed to save meal log" }, 500);
     }
 
-    const { error: updateError } = await adminClient
-      .from("user_pets")
-      .update({ affection: nextAffection })
-      .eq("id", activePet.id);
+    if (!isAdult && affectionGain !== 0) {
+      const { error: updateError } = await adminClient
+        .from("user_pets")
+        .update({ affection: nextAffection })
+        .eq("id", activePet.id);
 
-    if (updateError) {
-      console.error("user_pets update failed:", updateError);
-      return jsonResponse({ ok: false, error: "Failed to update affection" }, 500);
+      if (updateError) {
+        console.error("user_pets update failed:", updateError);
+        return jsonResponse({ ok: false, error: "Failed to update affection" }, 500);
+      }
     }
 
     return jsonResponse({

@@ -36,6 +36,7 @@ import 'package:vegepet/features/settings/support_documents.dart';
 import 'package:vegepet/game/petting_heart_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
 import 'package:vegepet/game/pet_motion_tune.dart';
+import 'package:vegepet/game/pet_collision_tune.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/yard_game.dart';
 import 'package:vegepet/ui/vegepet_glass.dart';
@@ -437,6 +438,15 @@ String _pickInteractionTemplate(List<String> templates) {
 }
 
 /// AI 판정 결과 + feedback_codes/feedback_text → 앱 표시용 감성 메시지.
+/// 애정도 증가 없는 식단 모드에서 `(+N💕)` 표기를 제거한다.
+String _stripMealAffectionGainSuffix(String message) {
+  return message
+      .replaceAll(RegExp(r'\s*\(\+\d+💕\)'), '')
+      .replaceAll(RegExp(r'\s*\(\+\d+❤︎?\)'), '')
+      .replaceAll(RegExp(r'\s*\(\+\d+\)'), '')
+      .trim();
+}
+
 String _buildAiStatusMessage({
   required String? resultType,
   required List<String> feedbackCodes,
@@ -451,12 +461,14 @@ String _buildAiStatusMessage({
       : _petNameWithSubjectParticle(petName);
   final petNameTopic = isEnglish ? petName : _petNameWithTopicParticle(petName);
 
+  late final String message;
   switch (resultType) {
     case 'perfect':
-      return _pickInteractionTemplate([
+      message = _pickInteractionTemplate([
         l10n.mealPerfectMessage1(petNameSubject, affectionGain),
         l10n.mealPerfectMessage2(petNameTopic, affectionGain),
       ]);
+      break;
     case 'good':
       {
         final fromCodes = _localizedMealFeedbackForInteraction(
@@ -473,7 +485,7 @@ String _buildAiStatusMessage({
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
-          return _pickInteractionTemplate([
+          message = _pickInteractionTemplate([
             l10n.mealGoodFeedbackMessage1(
               petNameSubject,
               feedback,
@@ -481,8 +493,10 @@ String _buildAiStatusMessage({
             ),
             l10n.mealGoodFeedbackMessage2(petName, feedback, affectionGain),
           ]);
+        } else {
+          message = l10n.mealGoodFallbackMessage(petNameSubject);
         }
-        return l10n.mealGoodFallbackMessage(petNameSubject);
+        break;
       }
     case 'bad':
       {
@@ -500,17 +514,24 @@ String _buildAiStatusMessage({
           }
         }
         if (feedback != null && feedback.isNotEmpty) {
-          return _pickInteractionTemplate([
+          message = _pickInteractionTemplate([
             l10n.mealBadFeedbackMessage1(petName, feedback, affectionGain),
             l10n.mealBadFeedbackMessage2(petNameTopic, feedback, affectionGain),
           ]);
+        } else {
+          message = l10n.mealBadFallbackMessage(petName);
         }
-        return l10n.mealBadFallbackMessage(petName);
+        break;
       }
     case 'uncertain':
     default:
       return l10n.mealRecognitionRetryMessage;
   }
+
+  if (affectionGain <= 0) {
+    return _stripMealAffectionGainSuffix(message);
+  }
+  return message;
 }
 
 /// Edge Function 응답의 status 를 정규화한다.
@@ -825,6 +846,8 @@ class _HomePageState extends State<HomePage>
   bool _isNamingDialogOpen = false;
   bool _canShowActivePetDuringNaming = false;
   bool _isPetNamingPanelClosing = false;
+  /// 이름 짓기 필수 플로우 진행 중(재진입 가드).
+  bool _isShowingNicknameDialog = false;
   final TextEditingController _petNamingController = TextEditingController();
   final FocusNode _petNamingFocusNode = FocusNode();
   Completer<String?>? _petNamingCompleter;
@@ -858,6 +881,11 @@ class _HomePageState extends State<HomePage>
 
   /// debug 전용 cat_sco baby 모션 테스트 패널 (release 미노출).
   bool _isPetMotionTestPanelOpen = false;
+
+  /// debug 전용 펫 collision footprint 튜닝 패널 (release 미노출).
+  bool _isCollisionTunePanelOpen = false;
+  String _collisionTuneSpeciesCode = 'cat_sco';
+  String _collisionTuneStage = 'baby';
 
   /// debug 전용 펫 그림자 튜닝 패널 (release 미노출).
   bool _isShadowTunePanelOpen = false;
@@ -1528,6 +1556,7 @@ class _HomePageState extends State<HomePage>
     unawaited(_loadPetShadowTuneFromPrefs());
     unawaited(_loadPetMotionTuneFromPrefs());
     unawaited(_loadPettingHeartTuneFromPrefs());
+    unawaited(_loadPetCollisionTuneFromPrefs());
     _startStartupFakeProgress();
     _bootstrap();
     _startAccountHealthCheckTimer();
@@ -1575,14 +1604,12 @@ class _HomePageState extends State<HomePage>
     _gameMenuSubOutsideDismissController.dispose();
     _yardConfirmOverlayFadeController.dispose();
     _interactionStatusAnimationController.dispose();
+    _cancelPendingPetNamingWait();
     _petNamingPanelEnterController.dispose();
     _petShadowColorHexController.dispose();
     _pettingHeartColorHexController.dispose();
     _petNamingController.dispose();
     _petNamingFocusNode.dispose();
-    if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
-      _petNamingCompleter!.complete(null);
-    }
     if (_randomTicketUseConfirmCompleter != null &&
         !_randomTicketUseConfirmCompleter!.isCompleted) {
       _randomTicketUseConfirmCompleter!.complete(false);
@@ -1880,8 +1907,8 @@ class _HomePageState extends State<HomePage>
       _isWithdrawFinalConfirmOpen = false;
       _isWithdrawErrorNoticeOpen = false;
 
+      _cancelPendingPetNamingWait();
       _isNamingDialogOpen = false;
-      _isPetNamingPanelClosing = false;
       _canShowActivePetDuringNaming = false;
 
       _showIntroStoryOverlay = false;
@@ -3015,6 +3042,7 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionInFlight = false;
+        _cancelPendingPetNamingWait();
         _isNamingDialogOpen = false;
         _canShowActivePetDuringNaming = false;
         _isAdopting = false;
@@ -3529,6 +3557,7 @@ class _HomePageState extends State<HomePage>
     _isInitialAdoptionPanelVisible = false;
     _isInitialAdoptionPanelClosing = false;
     _isInitialAdoptionInFlight = false;
+    _cancelPendingPetNamingWait();
     _isNamingDialogOpen = false;
     _canShowActivePetDuringNaming = false;
     _isAdopting = false;
@@ -6157,7 +6186,30 @@ class _HomePageState extends State<HomePage>
     debugPrint(
       'YardGame sync result: shown=$shown, hasActiveVegePet=${_yardGame.hasActiveVegePet}, error=${_yardGame.lastPetSpawnError}',
     );
-    if (mounted) _safeSetState(() {});
+    if (mounted) {
+      _safeSetState(() {
+        _syncShadowTuneSlotToActivePet();
+      });
+    }
+  }
+
+  /// Shadow Tune 편집 슬롯을 현재 활성 펫의 종·단계(asset 폴더)에 맞춘다.
+  void _syncShadowTuneSlotToActivePet() {
+    final pet = _activePet;
+    if (pet == null) return;
+    if (!_shouldUseFlamePetForActivePet()) return;
+    final code = _flameSpeciesCodeForPet(pet);
+    if (code.isEmpty) return;
+    if (!kPetShadowSpeciesCodes.contains(code)) return;
+    final stageFolder = _flameStageAssetFolder(
+      _normalizePetStage(pet['stage']),
+    );
+    if (_shadowTuneSpeciesCode == code && _shadowTuneStage == stageFolder) {
+      return;
+    }
+    _shadowTuneSpeciesCode = code;
+    _shadowTuneStage = stageFolder;
+    _syncShadowColorHexFromEditing();
   }
 
   void _triggerPetHappyMotion() {
@@ -6185,7 +6237,7 @@ class _HomePageState extends State<HomePage>
   void _triggerPettingHeartEffect() {
     if (!_shouldUseFlamePetForActivePet()) return;
     if (!_yardGame.hasActiveVegePet) return;
-    _yardGame.spawnPettingHeart();
+    _yardGame.spawnPettingHeartBurst();
   }
 
   // 도감 entry 에서 종 이름을 안전하게 꺼낸다 (새 표시명 override 적용).
@@ -6532,9 +6584,9 @@ class _HomePageState extends State<HomePage>
     }
 
     // DB stage 가 바뀌었으면 Flame 펫도 즉시 단계 asset 으로 맞춘다.
-    // (디버그 애정도 조작 / 식단·교감 성장 공통)
+    // 모션(happy/play)보다 먼저 끝나야 다음 단계 모습으로 재생된다.
     if (normalizedBefore != null && normalizedBefore != targetStage) {
-      _scheduleSyncActivePetToYardGame();
+      await _syncActivePetToYardGame();
     }
 
     final petId = _activePet?['id']?.toString() ?? '';
@@ -6922,6 +6974,50 @@ class _HomePageState extends State<HomePage>
     return affection >= 110;
   }
 
+  /// 도감 완성 전: 성숙기면 식단도 분양권 안내로 막는다.
+  /// 도감 완성 후: 식단 인증만 계속 허용 (애정도 증가 없음).
+  Future<bool> _blockMealIfMatureWithoutPokedexComplete() async {
+    if (!_isCurrentPetMature()) return false;
+    final isPokedexComplete = await _isPokedexCompleteForCurrentUser();
+    if (!mounted) return true;
+    if (isPokedexComplete) return false;
+    _showMaturityCompleteAlert();
+    return true;
+  }
+
+  /// 최근 성숙기(졸업) 달성 펫. 식단 전용 모드 상태메시지 기준.
+  Map<String, dynamic>? _latestMaturedPetForMealMessage() {
+    Map<String, dynamic>? latest;
+    DateTime? latestAt;
+
+    void consider(Map<String, dynamic>? pet) {
+      if (pet == null) return;
+      final raw = pet['graduated_at']?.toString();
+      if (raw == null || raw.isEmpty) return;
+      final at = DateTime.tryParse(raw);
+      if (at == null) return;
+      if (latestAt == null || !at.isBefore(latestAt!)) {
+        latestAt = at;
+        latest = pet;
+      }
+    }
+
+    for (final pet in _residentPets) {
+      consider(pet);
+    }
+    consider(_activePet);
+    return latest ?? (_isCurrentPetMature() ? _activePet : null);
+  }
+
+  String _petDisplayNameFrom(
+    Map<String, dynamic>? pet,
+    AppLocalizations l10n,
+  ) {
+    final name = pet?['nickname']?.toString().trim();
+    if (name != null && name.isNotEmpty) return name;
+    return l10n.interactionPetNameFallback;
+  }
+
   void _showMaturityCompleteAlert() {
     _showYardNoticeSync(
       isOpen: () => _isMaturityCompleteNoticeOpen,
@@ -7088,32 +7184,23 @@ class _HomePageState extends State<HomePage>
           })
           .eq('id', petId);
 
-      await _fetchActivePet();
+      await _fetchActivePet(syncYard: false);
 
       if (!mounted) return;
       setState(() => _isInteracting = false);
 
-      // 성공 판정 직후 이벤트 모션 (교감 메시지와 독립).
+      // 성장 단계 반영을 먼저 끝낸 뒤, 다음 단계 모습으로 이벤트 모션 재생.
+      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+
       if (isPlay) {
         _triggerPetPlayMotion();
       } else {
         _triggerPetHappyMotion();
       }
 
-      final eventPetId = petId.toString();
-      if (isPlay) {
-        await _showInteractionStatusMessage(
-          _interactionPlaySuccessMessage(affectionGain: affectionGain),
-          eventKey: 'play_success:$today:$eventPetId',
-        );
-      } else {
-        await _showInteractionStatusMessage(
-          _interactionPettingSuccessMessage(affectionGain: affectionGain),
-          eventKey: 'petting:$today:$eventPetId',
-        );
-      }
-
-      await _syncStageAfterAffectionChange(beforeStage: beforeStage);
+      // 놀아주기/쓰다듬기 성공 교감 메시지는 비활성.
+      // 문구 헬퍼(_interactionPlaySuccessMessage / _interactionPettingSuccessMessage)와
+      // 놀아주기 실패 메시지는 유지.
 
       _triggerPettingHeartEffect();
     } catch (e) {
@@ -7410,65 +7497,111 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // 분양 직후 마당 캔버스(844×390) 위 이름 짓기 패널.
+  // 분양 직후·앱 재시작 시 마당 위 이름 짓기 패널.
   // 허용 문자: 한글/영문 대소문자/숫자, 길이 2~8자, 공백·특수문자 금지.
-  // 패널이 닫히고 한 frame 양보된 뒤 Supabase 저장/스낵바를 수행한다.
-  Future<void> _showNicknameDialog() async {
+  // nickname 이 null/빈 값이면 저장 성공 전까지 닫히지 않는다.
+  bool _activePetNeedsNickname() {
     final pet = _activePet;
-    if (pet == null || !mounted) return;
+    if (pet == null) return false;
+    final nick = pet['nickname']?.toString().trim() ?? '';
+    return nick.isEmpty;
+  }
 
-    final petId = pet['id']?.toString();
-    if (petId == null || petId.isEmpty) return;
-
-    _dismissFocus();
-    _petNamingController.clear();
-
-    final completer = Completer<String?>();
-    _petNamingCompleter = completer;
-
-    _safeSetState(() {
-      _isNamingDialogOpen = true;
-      _canShowActivePetDuringNaming = true;
-      _isPetNamingPanelClosing = false;
-    });
+  /// 로그아웃/계정 리셋 등에서 대기 중인 이름 짓기 Future 를 풀어 준다.
+  void _cancelPendingPetNamingWait() {
+    if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
+      _petNamingCompleter!.complete(null);
+    }
+    _petNamingCompleter = null;
+    _isPetNamingPanelClosing = false;
     _petNamingPanelEnterController.stop();
     _petNamingPanelEnterController.value = 0;
-    unawaited(_petNamingPanelEnterController.forward());
+    _petNamingController.clear();
+  }
 
-    final nickname = await completer.future;
-    _petNamingCompleter = null;
-
-    if (!mounted || nickname == null) return;
-
-    // Dialog dispose(특히 TextEditingController dispose)가 끝난 뒤 DB 작업/상태
-    // 갱신이 일어나도록 한 frame 양보.
-    await _waitForUiSettle();
+  /// 로딩/부트스트랩 이후: 이름 없는 활성 펫이면 이름 짓기 창을 연다.
+  Future<void> _ensurePendingPetNamingIfNeeded() async {
     if (!mounted) return;
+    if (_status != _ViewStatus.ready) return;
+    if (_showIntroStoryOverlay || _introStoryFadingOut) return;
+    if (_showStartupLoadingOverlay) return;
+    if (!_isProfileComplete()) return;
+    if (_isInitialAdoptionPanelVisible ||
+        _isInitialAdoptionPanelClosing ||
+        _isInitialAdoptionInFlight) {
+      return;
+    }
+    if (!_activePetNeedsNickname()) return;
+    if (_isShowingNicknameDialog || _isNamingDialogOpen) return;
+    await _showNicknameDialog();
+  }
 
+  Future<void> _showNicknameDialog() async {
+    if (_isShowingNicknameDialog) return;
+    _isShowingNicknameDialog = true;
     try {
-      await supabase
-          .from('user_pets')
-          .update({'nickname': nickname})
-          .eq('id', petId);
+      while (mounted && _activePetNeedsNickname()) {
+        final pet = _activePet;
+        if (pet == null) return;
 
-      await _fetchActivePet(syncYard: false);
+        final petId = pet['id']?.toString();
+        if (petId == null || petId.isEmpty) return;
 
-      if (!mounted) return;
-      _safeSetState(() {});
+        _dismissFocus();
+        _petNamingController.clear();
 
-      // 이름 저장 후 Flame pet 재동기화는 UI 와 분리.
-      _scheduleSyncActivePetToYardGame();
+        final completer = Completer<String?>();
+        _petNamingCompleter = completer;
 
-      await _waitForUiSettle();
-      if (!mounted) return;
-    } catch (e) {
-      if (!mounted) return;
+        _safeSetState(() {
+          _isNamingDialogOpen = true;
+          _canShowActivePetDuringNaming = true;
+          _isPetNamingPanelClosing = false;
+        });
+        _petNamingPanelEnterController.stop();
+        _petNamingPanelEnterController.value = 0;
+        unawaited(_petNamingPanelEnterController.forward());
 
-      // 이름 저장에 실패하면 사용자가 다시 시도할 수 있도록 한 frame 양보 후
-      // 같은 다이얼로그를 재호출한다.
-      await _waitForUiSettle();
-      if (!mounted) return;
-      await _showNicknameDialog();
+        final nickname = await completer.future;
+        _petNamingCompleter = null;
+
+        if (!mounted) return;
+        // 취소/강제 종료로 null 이면 다시 연다 (이름 없이 진행 불가).
+        if (nickname == null) {
+          await _waitForUiSettle();
+          continue;
+        }
+
+        await _waitForUiSettle();
+        if (!mounted) return;
+
+        try {
+          await supabase
+              .from('user_pets')
+              .update({'nickname': nickname})
+              .eq('id', petId);
+
+          await _fetchActivePet(syncYard: false);
+
+          if (!mounted) return;
+          _safeSetState(() {});
+
+          _scheduleSyncActivePetToYardGame();
+
+          await _waitForUiSettle();
+          if (!mounted) return;
+          // 로컬 상태가 비어 있으면 다시 연다.
+          if (!_activePetNeedsNickname()) return;
+        } catch (e) {
+          if (!mounted) return;
+          debugPrint('pet naming save failed type=${e.runtimeType}');
+          _showCommunicationErrorNotice();
+          await _waitForUiSettle();
+          // 저장 실패 → 다시 이름 창.
+        }
+      }
+    } finally {
+      _isShowingNicknameDialog = false;
     }
   }
 
@@ -7532,16 +7665,9 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionInFlight = false;
+        _cancelPendingPetNamingWait();
         _isNamingDialogOpen = false;
         _canShowActivePetDuringNaming = false;
-        _isPetNamingPanelClosing = false;
-        _petNamingController.clear();
-        if (_petNamingCompleter != null && !_petNamingCompleter!.isCompleted) {
-          _petNamingCompleter!.complete(null);
-        }
-        _petNamingCompleter = null;
-        _petNamingPanelEnterController.stop();
-        _petNamingPanelEnterController.value = 0;
         _isToyMenuOpen = false;
         _isToyDropHovering = false;
         _isCompletingToyPlay = false;
@@ -7729,6 +7855,7 @@ class _HomePageState extends State<HomePage>
         _isInitialAdoptionPanelVisible = false;
         _isInitialAdoptionPanelClosing = false;
         _isInitialAdoptionInFlight = false;
+        _cancelPendingPetNamingWait();
         _isNamingDialogOpen = false;
         _canShowActivePetDuringNaming = false;
         _isAdopting = false;
@@ -11359,6 +11486,7 @@ class _HomePageState extends State<HomePage>
           _buildKeyboardDismissBarrier(context),
           _buildKeyboardAccessoryOverlay(context),
           if (kDebugMode) _buildFullScreenYardTuningOverlay(),
+          if (kDebugMode) _buildFullScreenCollisionTuneOverlay(),
           if (kDebugMode) _buildFullScreenPetMotionTestOverlay(),
           if (kDebugMode) _buildFullScreenShadowTuneOverlay(),
           if (kDebugMode) _buildFullScreenHeartTuneOverlay(),
@@ -11429,8 +11557,16 @@ class _HomePageState extends State<HomePage>
         if (shouldMountProfileSetup)
           _buildInYardProfileSetupPanel(visible: _isProfileSetupPanelVisible),
         if (shouldMountInitialAdoption) _buildInYardAdoptionPanel(),
-        if (_isNamingDialogOpen || _isPetNamingPanelClosing)
+        if (_isNamingDialogOpen || _isPetNamingPanelClosing) ...[
+          // 이름 저장 전까지 마당/HUD 등 뒤 레이어 조작 차단.
+          Positioned.fill(
+            child: ModalBarrier(
+              dismissible: false,
+              color: Colors.black.withValues(alpha: 0.28),
+            ),
+          ),
           _buildInYardPetNamingPanel(),
+        ],
         _buildBagItemDetailGlobalOverlay(),
         _buildAccountLinkPanelGlobalOverlay(),
         _buildCustomerCenterPanelGlobalOverlay(),
@@ -11553,6 +11689,11 @@ class _HomePageState extends State<HomePage>
     setState(() {
       _showStartupLoadingOverlay = false;
     });
+
+    // 재시작 등으로 nickname 이 비어 있으면 이름 짓기 필수 창을 다시 연다.
+    if (mounted) {
+      unawaited(_ensurePendingPetNamingIfNeeded());
+    }
   }
 
   Future<void> _precacheIntroStoryImages() async {
@@ -13335,12 +13476,6 @@ class _HomePageState extends State<HomePage>
                 },
               ),
             ),
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: 8,
-            child: _buildResidentPetRow(),
-          ),
         ],
       ),
     );
@@ -13677,6 +13812,8 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _closePetNamingPanel({required String? result}) async {
+    // 이름 미입력 취소 닫기는 허용하지 않는다 (필수 온보딩).
+    if (result == null) return;
     if (_isPetNamingPanelClosing) return;
     _dismissFocus();
     _safeSetState(() => _isPetNamingPanelClosing = true);
@@ -15040,9 +15177,13 @@ class _HomePageState extends State<HomePage>
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
         borderRadius: BorderRadius.circular(6),
-        onTap: () => _safeSetState(
-          () => _isShadowTunePanelOpen = !_isShadowTunePanelOpen,
-        ),
+        onTap: () => _safeSetState(() {
+          final opening = !_isShadowTunePanelOpen;
+          _isShadowTunePanelOpen = opening;
+          if (opening) {
+            _syncShadowTuneSlotToActivePet();
+          }
+        }),
         child: const Padding(
           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
@@ -15463,10 +15604,10 @@ class _HomePageState extends State<HomePage>
                         onPressed: () {
                           if (!_shouldUseFlamePetForActivePet()) return;
                           if (!_yardGame.hasActiveVegePet) return;
-                          _yardGame.spawnPettingHeart(force: true);
+                          _yardGame.spawnPettingHeartBurst(force: true);
                         },
                         child: const Text(
-                          'Spawn Heart',
+                          'Spawn Heart x3',
                           style: TextStyle(fontSize: 11),
                         ),
                       ),
@@ -15583,6 +15724,19 @@ class _HomePageState extends State<HomePage>
                       max: 2500,
                       onChanged: (v) {
                         _yardGame.updatePettingHeartTune(durationMs: v.round());
+                        _safeSetState(() {});
+                        unawaited(_persistPettingHeartTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'gap',
+                      value: heart.burstIntervalMs.toDouble(),
+                      min: 50,
+                      max: 800,
+                      onChanged: (v) {
+                        _yardGame.updatePettingHeartTune(
+                          burstIntervalMs: v.round(),
+                        );
                         _safeSetState(() {});
                         unawaited(_persistPettingHeartTune());
                       },
@@ -15769,6 +15923,266 @@ class _HomePageState extends State<HomePage>
             child: _buildPetMotionTestToggleButton(),
           ),
         ],
+      ),
+    );
+  }
+
+  /// debug 전용: Collision Tune 패널 (Yard Tune 버튼 위).
+  Widget _buildFullScreenCollisionTuneOverlay() {
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isCollisionTunePanelOpen)
+            Positioned(
+              left: 16,
+              top: 72,
+              bottom: 96,
+              width: 292,
+              child: _buildCollisionTunePanelContent(),
+            ),
+          Positioned(
+            left: 16,
+            bottom: 52,
+            child: _buildCollisionTuneToggleButton(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCollisionTuneToggleButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _safeSetState(
+          () => _isCollisionTunePanelOpen = !_isCollisionTunePanelOpen,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            'Collision Tune',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadPetCollisionTuneFromPrefs() async {
+    final store = await PetCollisionTunePreferences.load();
+    _yardGame.applyPetCollisionTunes(store);
+    if (mounted) _safeSetState(() {});
+  }
+
+  Future<void> _persistPetCollisionTune() async {
+    await PetCollisionTunePreferences.save(_yardGame.petCollisionTunes);
+  }
+
+  PetCollisionTuneConfig get _editingPetCollisionTune {
+    return _yardGame.petCollisionTuneFor(
+      speciesCode: _collisionTuneSpeciesCode,
+      stage: _collisionTuneStage,
+    );
+  }
+
+  Widget _buildCollisionTunePanelContent() {
+    final tune = _editingPetCollisionTune;
+    return Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Pet Collision Tune (species × stage)',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '이동 footprint. adult 는 teen 슬롯 사용.',
+              style: TextStyle(color: Colors.white54, fontSize: 9),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Species',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final code in kPetCollisionSpeciesCodes)
+                  _buildPetMotionTuneTargetChip(
+                    label: code,
+                    selected: _collisionTuneSpeciesCode == code,
+                    onTap: () =>
+                        _safeSetState(() => _collisionTuneSpeciesCode = code),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Stage',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final stage in kPetCollisionStageFolders)
+                  _buildPetMotionTuneTargetChip(
+                    label: stage,
+                    selected: _collisionTuneStage == stage,
+                    onTap: () =>
+                        _safeSetState(() => _collisionTuneStage = stage),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Editing: $_collisionTuneSpeciesCode / $_collisionTuneStage',
+              style: const TextStyle(color: Colors.white54, fontSize: 9),
+            ),
+            const SizedBox(height: 6),
+            _buildPetCollisionToggleRow(),
+            const SizedBox(height: 6),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildYardTuningSliderRow(
+                      label: 'w',
+                      value: tune.width,
+                      min: 8,
+                      max: 80,
+                      onChanged: (v) {
+                        _yardGame.updatePetCollisionTune(
+                          speciesCode: _collisionTuneSpeciesCode,
+                          stage: _collisionTuneStage,
+                          width: v,
+                        );
+                        _safeSetState(() {});
+                        unawaited(_persistPetCollisionTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'h',
+                      value: tune.height,
+                      min: 4,
+                      max: 60,
+                      onChanged: (v) {
+                        _yardGame.updatePetCollisionTune(
+                          speciesCode: _collisionTuneSpeciesCode,
+                          stage: _collisionTuneStage,
+                          height: v,
+                        );
+                        _safeSetState(() {});
+                        unawaited(_persistPetCollisionTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oX',
+                      value: tune.offsetX,
+                      min: -40,
+                      max: 40,
+                      onChanged: (v) {
+                        _yardGame.updatePetCollisionTune(
+                          speciesCode: _collisionTuneSpeciesCode,
+                          stage: _collisionTuneStage,
+                          offsetX: v,
+                        );
+                        _safeSetState(() {});
+                        unawaited(_persistPetCollisionTune());
+                      },
+                    ),
+                    _buildYardTuningSliderRow(
+                      label: 'oY',
+                      value: tune.offsetY,
+                      min: -40,
+                      max: 40,
+                      onChanged: (v) {
+                        _yardGame.updatePetCollisionTune(
+                          speciesCode: _collisionTuneSpeciesCode,
+                          stage: _collisionTuneStage,
+                          offsetY: v,
+                        );
+                        _safeSetState(() {});
+                        unawaited(_persistPetCollisionTune());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _safeSetState(() => _isCollisionTunePanelOpen = false),
+                    child: const Text('Close', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orangeAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () {
+                      _yardGame.resetPetCollisionTune(
+                        speciesCode: _collisionTuneSpeciesCode,
+                        stage: _collisionTuneStage,
+                      );
+                      _safeSetState(() {});
+                      unawaited(_persistPetCollisionTune());
+                    },
+                    child: const Text(
+                      'Reset Slot',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -15966,7 +16380,6 @@ class _HomePageState extends State<HomePage>
                 ),
               ),
             ),
-            _buildPetCollisionToggleRow(),
             const SizedBox(height: 4),
             _buildPetDirectionPad(),
             const SizedBox(height: 6),
@@ -16510,6 +16923,11 @@ class _HomePageState extends State<HomePage>
     )) {
       return;
     }
+    if (action == 'meal') {
+      if (await _blockMealIfMatureWithoutPokedexComplete()) return;
+      await _openMealSheet(fromPetBanner: true);
+      return;
+    }
     if (_handleMaturePetBlockedInteraction()) return;
     if (action == 'play') {
       final err = _validateToyPlayEligibility();
@@ -16517,10 +16935,6 @@ class _HomePageState extends State<HomePage>
         return;
       }
       await _openToyPlaySheet(fromPetBanner: true);
-      return;
-    }
-    if (action == 'meal') {
-      await _openMealSheet(fromPetBanner: true);
       return;
     }
 
@@ -17898,7 +18312,7 @@ class _HomePageState extends State<HomePage>
 
     switch (action) {
       case 'meal':
-        if (_handleMaturePetBlockedInteraction()) return;
+        if (await _blockMealIfMatureWithoutPokedexComplete()) return;
         await _openMealSheet();
         break;
       case 'play':
@@ -18460,6 +18874,7 @@ class _HomePageState extends State<HomePage>
     if (_activePet == null) {
       return;
     }
+    if (await _blockMealIfMatureWithoutPokedexComplete()) return;
     if (_isUploadingMeal) return;
     if (!_isMealSlotAllowedNow(slot)) return;
 
@@ -18781,7 +19196,12 @@ class _HomePageState extends State<HomePage>
     ]);
 
     if (!mounted) return;
-    final petName = _activePetDisplayName(l10n);
+    // 도감 완성 후 성숙기 식단: 애정도 없음 + 최근 성숙기 펫 이름으로 피드백.
+    final dietOnlyNoAffection = _isCurrentPetMature();
+    final displayGain = dietOnlyNoAffection ? 0 : gain;
+    final petName = dietOnlyNoAffection
+        ? _petDisplayNameFrom(_latestMaturedPetForMealMessage(), l10n)
+        : _activePetDisplayName(l10n);
     final statusMessage = _buildAiStatusMessage(
       resultType: resultType,
       feedbackCodes: feedbackCodes,
@@ -18789,13 +19209,13 @@ class _HomePageState extends State<HomePage>
       l10n: l10n,
       isEnglish: _isEnglishLocale,
       petName: petName,
-      affectionGain: gain,
+      affectionGain: displayGain,
     );
 
     _safeSetState(() {
       _lastResultType = resultType;
       _lastFeedbackText = feedbackText;
-      _lastAffectionGain = gain;
+      _lastAffectionGain = displayGain;
       _lastStatusMessage = statusMessage;
     });
     if (resultType == 'perfect' ||
@@ -18825,7 +19245,7 @@ class _HomePageState extends State<HomePage>
     final isCompletedMealResult =
         resultType == 'perfect' || resultType == 'good' || resultType == 'bad';
 
-    if (gain > 0 && !_isCurrentPetMature()) {
+    if (displayGain > 0 && !dietOnlyNoAffection) {
       await _syncStageAfterAffectionChange(
         beforeStage: beforeStage,
         deferMaturityNotice: isCompletedMealResult,
@@ -18844,8 +19264,9 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    if (gain == 3 || gain == 5) {
+    if (resultType == 'perfect' || resultType == 'good') {
       _triggerPetHappyMotion();
+      _triggerPettingHeartEffect();
     }
     _invalidateAnalysisCache();
   }
@@ -18936,7 +19357,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _openMealSheet({bool fromPetBanner = false}) async {
     if (!await _guardAccountAliveBeforeUserAction('open meal panel')) return;
     if (_activePet == null) return;
-    if (_handleMaturePetBlockedInteraction()) return;
+    if (await _blockMealIfMatureWithoutPokedexComplete()) return;
 
     // 차단 상태 갱신 실패로 패널 오픈이 막히지 않도록 별도 처리.
     try {
@@ -23263,7 +23684,7 @@ class _HomePageState extends State<HomePage>
                         ),
                       )
                     : _buildPastelBlueGradientButtonText(
-                        '${l10n.start}!',
+                        l10n.start,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),

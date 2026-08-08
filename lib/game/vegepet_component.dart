@@ -4,6 +4,7 @@ import 'dart:ui' show BlurStyle, Canvas, MaskFilter, Offset, Paint, Rect;
 
 import 'package:flame/components.dart';
 import 'package:flutter/foundation.dart';
+import 'package:vegepet/game/pet_collision_tune.dart';
 import 'package:vegepet/game/pet_motion.dart';
 import 'package:vegepet/game/pet_shadow_tune.dart';
 import 'package:vegepet/game/pet_sprite_assets.dart';
@@ -17,9 +18,10 @@ final Vector2 kCatScoBabySpawnPosition = kDefaultPetSpawnPosition;
 const double kVegePetDisplaySize = 72;
 
 /// 발밑 충돌 footprint (이동 차단 전용). sprite 전체 박스가 아니다.
-const double kPetCollisionFootprintW = 34;
-const double kPetCollisionFootprintH = 18;
-const double kPetCollisionFootprintYOffset = -6;
+/// 런타임 값은 [PetCollisionTuneConfig] (종×단계). 아래는 기본값 alias.
+const double kPetCollisionFootprintW = kPetCollisionDefaultWidth;
+const double kPetCollisionFootprintH = kPetCollisionDefaultHeight;
+const double kPetCollisionFootprintYOffset = kPetCollisionDefaultOffsetY;
 
 /// 하위 호환 alias.
 const double kCatScoBabyCollisionFootprintW = kPetCollisionFootprintW;
@@ -29,6 +31,11 @@ const double kCatScoBabyCollisionFootprintYOffset = kPetCollisionFootprintYOffse
 /// walk / run 이동 속도 (논리 px/sec).
 const double kVegePetWalkSpeed = 38;
 const double kVegePetRunSpeed = 72;
+
+/// 펫 렌더 우선순위 베이스. 발 y 를 더해 아래쪽 펫이 앞에 오도록 한다.
+/// (지면 2·연기 3 위, 하트 이펙트보다 아래)
+const int kVegePetPriorityBase = 100;
+const int kVegePetPriorityYSpan = 500;
 
 typedef PetMoveValidator = bool Function(Vector2 current, Vector2 next);
 
@@ -56,6 +63,7 @@ class VegePetComponent extends PositionComponent
     required this.canMoveFootprintTo,
     this.isDebugOnly = false,
     this.isResident = false,
+    this.seedRandomAmbient = false,
     Vector2? initialPosition,
   }) : displaySize = petDisplaySizeForStage(stage),
        stageFolder = petStageAssetFolder(stage),
@@ -63,17 +71,25 @@ class VegePetComponent extends PositionComponent
          position: initialPosition ?? kDefaultPetSpawnPosition.clone(),
          anchor: Anchor.bottomCenter,
          size: Vector2.all(petDisplaySizeForStage(stage)),
-         priority: 8,
+         // 발 y 기준 정렬. update 에서 갱신 (아래쪽 펫이 위쪽 펫·그림자 앞에).
+         priority: kVegePetPriorityBase +
+             (initialPosition ?? kDefaultPetSpawnPosition).y.round().clamp(
+               0,
+               kVegePetPriorityYSpan,
+             ),
        );
 
   final String userPetId;
   final String speciesCode;
-  final String stage;
-  final String stageFolder;
-  final double displaySize;
+  String stage;
+  String stageFolder;
+  double displaySize;
   final PetFootprintMoveValidator canMoveFootprintTo;
   final bool isDebugOnly;
-  final bool isResident;
+  bool isResident;
+
+  /// true 이면 onLoad 시 위치·일상 모션을 랜덤으로 시드 (happy/play 제외).
+  final bool seedRandomAmbient;
 
   PetSpriteAssets? _assets;
   SpriteAnimationComponent? _animChild;
@@ -90,8 +106,12 @@ class VegePetComponent extends PositionComponent
   int _motionGeneration = 0;
   bool _eventMotionActive = false;
 
-  /// 고양이 happy 직후: 다음 자동 행동은 최소 1회 idle 강제.
-  bool _forceIdleAfterHappy = false;
+  /// play 종료 후, 또는 고양이 happy 종료 후: 다음 자동 행동은 최소 1회 idle 강제.
+  bool _forceIdleOnce = false;
+
+  /// 강아지 play 이동: 현재 좌/우 바라본 채 연속 재생한 사이클 수.
+  int _dogPlaySameFacingCycles = 0;
+  bool? _dogPlayFacingLeft;
 
   Vector2 _moveDirection = Vector2.zero();
   double _moveSpeed = kVegePetWalkSpeed;
@@ -113,21 +133,30 @@ class VegePetComponent extends PositionComponent
   bool get isCat => speciesCode == 'cat_rag' || speciesCode == 'cat_sco';
 
   Rect get collisionFootprintRect {
-    final cy = position.y + kPetCollisionFootprintYOffset;
+    final tune = game.petCollisionTuneFor(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
+    final cx = position.x + tune.offsetX;
+    final cy = position.y + tune.offsetY;
     return Rect.fromCenter(
-      center: Offset(position.x, cy),
-      width: kPetCollisionFootprintW,
-      height: kPetCollisionFootprintH,
+      center: Offset(cx, cy),
+      width: tune.width,
+      height: tune.height,
     );
   }
 
   List<Vector2> get collisionSamplePoints => collisionSamplePointsAt(position);
 
   List<Vector2> collisionSamplePointsAt(Vector2 footPos) {
-    final cx = footPos.x;
-    final cy = footPos.y + kPetCollisionFootprintYOffset;
-    final hw = kPetCollisionFootprintW / 2;
-    final hh = kPetCollisionFootprintH / 2;
+    final tune = game.petCollisionTuneFor(
+      speciesCode: speciesCode,
+      stage: stage,
+    );
+    final cx = footPos.x + tune.offsetX;
+    final cy = footPos.y + tune.offsetY;
+    final hw = tune.width / 2;
+    final hh = tune.height / 2;
     return [
       Vector2(cx, cy),
       Vector2(cx - hw, cy),
@@ -189,9 +218,237 @@ class VegePetComponent extends PositionComponent
       stageFolder: stageFolder,
     );
     size = Vector2.all(displaySize);
-    _facingLeft = true;
-    await _enterIdle(resetAuto: false);
-    _scheduleAutoBehavior(delay: _randomIdleDelay());
+    if (seedRandomAmbient) {
+      await _applyRandomAmbientPresence();
+    } else {
+      _facingLeft = true;
+      await _enterIdle(resetAuto: false);
+      _scheduleAutoBehavior(delay: _randomIdleDelay());
+    }
+  }
+
+  /// 앱 재진입 등: 걸을 수 있는 랜덤 위치 + happy/play 제외 일상 모션.
+  Future<void> _applyRandomAmbientPresence() async {
+    _relocateToRandomWalkablePosition();
+    _facingLeft = _random.nextBool();
+    _applyFacingFlip();
+    await _startRandomAmbientMotion();
+  }
+
+  void _relocateToRandomWalkablePosition() {
+    const attempts = 48;
+    final minX = 48.0;
+    final maxX = YardGame.gameWidth - 48.0;
+    final minY = 170.0;
+    final maxY = YardGame.gameHeight - 36.0;
+    if (maxX <= minX || maxY <= minY) return;
+
+    for (var i = 0; i < attempts; i++) {
+      final candidate = Vector2(
+        minX + _random.nextDouble() * (maxX - minX),
+        minY + _random.nextDouble() * (maxY - minY),
+      );
+      final samples = collisionSamplePointsAt(candidate);
+      if (canMoveFootprintTo(samples, samples)) {
+        position.setFrom(candidate);
+        _syncRenderPriorityByY();
+        return;
+      }
+    }
+  }
+
+  Future<void> _startRandomAmbientMotion() async {
+    final roll = _random.nextDouble();
+    if (roll < 0.28) {
+      await _enterIdle(resetAuto: true);
+    } else if (roll < 0.50) {
+      await playMotion(
+        PetMotion.walk,
+        fromAuto: true,
+        repeatCount: 1 + _random.nextInt(2),
+      );
+    } else if (roll < 0.68) {
+      await playMotion(PetMotion.run, fromAuto: true, repeatCount: 1);
+    } else if (roll < 0.86) {
+      await playMotion(PetMotion.sit, fromAuto: true);
+    } else {
+      // 이미 앉아 있는 것처럼 보이게 sittingIdle 로 시작.
+      _sittingIdleCycleCount = 1;
+      await _enterSittingIdle(resetAuto: true);
+    }
+  }
+
+  /// 성장 단계 asset 을 제거/재스폰 없이 제자리에서 교체한다.
+  /// 위치·진행 중 모션을 유지하고, 새 단계 스프라이트로 같은 모션을 최소 1사이클 이어간다.
+  Future<void> applyStageInPlace(String newStage) async {
+    final normalized = newStage;
+    final newFolder = petStageAssetFolder(normalized);
+    final newSize = petDisplaySizeForStage(normalized);
+
+    stage = normalized;
+    if (newFolder == stageFolder && (newSize - displaySize).abs() < 0.01) {
+      return;
+    }
+
+    // 진행 상태 스냅샷 (애셋 로드 전·후 모두 동일하게 복원).
+    final keepPos = position.clone();
+    final keepFacing = _facingLeft;
+    final keepMotion = _motion;
+    final keepSitting = _isSitting;
+    final keepSittingIdleCycles = _sittingIdleCycleCount;
+    final keepMoving = _isMoving;
+    final keepMoveDir = _moveDirection.clone();
+    final keepMoveSpeed = _moveSpeed;
+    final keepMoveTimeLeft = _moveTimeLeft;
+    final keepManual = _manualControl;
+    final keepManualRun = _manualRunActive;
+    final keepEvent = _eventMotionActive;
+    final keepRepeat = max(1, _repeatRemaining);
+    final keepForceIdle = _forceIdleOnce;
+    final keepDogPlayCycles = _dogPlaySameFacingCycles;
+    final keepDogPlayFacing = _dogPlayFacingLeft;
+
+    // 진행 중 await 를 끊되, 비주얼(size/anim)은 새 애셋 준비 전까지 건드리지 않는다.
+    // (size 를 먼저 키우면 bottomCenter 기준 young 스프라이트가 위로 튀는 것처럼 보임)
+    _autoTimer?.stop();
+    _motionTimer?.stop();
+    final gen = ++_motionGeneration;
+    _pendingMoveCycleFinish = false;
+
+    stageFolder = newFolder;
+    await PetSpriteAssets.preflightAssets(
+      game,
+      speciesCode: speciesCode,
+      stageFolder: stageFolder,
+    );
+    final loaded = await PetSpriteAssets.load(
+      game,
+      speciesCode: speciesCode,
+      stageFolder: stageFolder,
+    );
+    if (!isMounted || gen != _motionGeneration) return;
+
+    // 애셋·크기·애니메이션을 한 번에 교체 (발 위치 keepPos 유지).
+    _assets = loaded;
+    displaySize = newSize;
+    size = Vector2.all(displaySize);
+    position.setFrom(keepPos);
+
+    _facingLeft = keepFacing;
+    _isSitting = keepSitting;
+    _sittingIdleCycleCount = keepSittingIdleCycles;
+    _manualControl = keepManual;
+    _manualRunActive = keepManualRun;
+    _eventMotionActive = keepEvent;
+    _forceIdleOnce = keepForceIdle;
+    _dogPlaySameFacingCycles = keepDogPlayCycles;
+    _dogPlayFacingLeft = keepDogPlayFacing;
+    _repeatRemaining = keepRepeat;
+    _moveDirection = keepMoveDir;
+    _moveSpeed = keepMoveSpeed;
+    _moveTimeLeft = keepMoveTimeLeft;
+    _isMoving = keepMoving && !keepMoveDir.isZero();
+
+    final tune = game.petMotionTuneFor(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: keepMotion,
+    );
+    _speedMultiplier = tune.speedMultiplier.clamp(0.25, 3.0);
+
+    await _continueMotionAfterStageSwap(
+      motion: keepMotion,
+      generation: gen,
+    );
+  }
+
+  /// 단계 교체 직후: 스냅샷한 모션을 새 스프라이트로 최소 1사이클 이어 재생.
+  Future<void> _continueMotionAfterStageSwap({
+    required PetMotion motion,
+    required int generation,
+  }) async {
+    if (!isMounted || generation != _motionGeneration || _assets == null) {
+      return;
+    }
+
+    switch (motion) {
+      case PetMotion.idle:
+        await _enterIdle(resetAuto: false, generation: generation);
+        if (generation != _motionGeneration || !isMounted) return;
+        if (!_manualControl && !_eventMotionActive) {
+          final cycle = _animationCycleDuration(_assets!.idleAnimation);
+          _scheduleAutoBehavior(
+            delay: max(_randomIdleDelay(), cycle),
+          );
+        }
+      case PetMotion.walk:
+      case PetMotion.run:
+        await _resumeDirectionalMoveAfterStageSwap(
+          motion,
+          generation: generation,
+        );
+      case PetMotion.sit:
+        _repeatRemaining = max(1, _repeatRemaining);
+        await _playSit(generation: generation);
+      case PetMotion.sittingIdle:
+        await _enterSittingIdle(resetAuto: true, generation: generation);
+      case PetMotion.stand:
+        await _playStand(generation: generation, force: true);
+      case PetMotion.happy:
+        _eventMotionActive = true;
+        _manualControl = true;
+        _autoTimer?.stop();
+        _repeatRemaining = max(1, _repeatRemaining);
+        await _playHappy(generation: generation);
+      case PetMotion.play:
+        _eventMotionActive = true;
+        _manualControl = true;
+        _autoTimer?.stop();
+        _repeatRemaining = max(1, _repeatRemaining);
+        await _playPlay(generation: generation);
+    }
+  }
+
+  Future<void> _resumeDirectionalMoveAfterStageSwap(
+    PetMotion motion, {
+    required int generation,
+  }) async {
+    if (generation != _motionGeneration || _assets == null) return;
+    if (motion != PetMotion.walk && motion != PetMotion.run) return;
+
+    _motion = motion;
+    _isSitting = false;
+    _pendingMoveCycleFinish = false;
+    _moveSpeed =
+        motion == PetMotion.run ? kVegePetRunSpeed : kVegePetWalkSpeed;
+
+    if (_moveDirection.isZero()) {
+      _moveDirection =
+          kVegePetEightDirections[_random.nextInt(
+            kVegePetEightDirections.length,
+          )];
+    }
+    _updateFacingFromDirection(_moveDirection);
+    _isMoving = true;
+
+    final source = motion == PetMotion.run
+        ? _assets!.runAnimation
+        : _assets!.walkAnimation;
+    final anim = _cloneAnimation(source, loop: true);
+    await _showAnimation(anim);
+    if (generation != _motionGeneration || !isMounted) return;
+
+    // 새 단계 스프라이트로 최소 1사이클은 이동·모션 유지.
+    final cycle = _animationCycleDuration(anim);
+    if (_moveTimeLeft < cycle) {
+      _moveTimeLeft = cycle;
+    }
+    _repeatRemaining = max(1, _repeatRemaining);
+  }
+
+  double _animationCycleDuration(SpriteAnimation animation) {
+    if (animation.frames.isEmpty) return 0.14;
+    return animation.frames.fold<double>(0, (sum, f) => sum + f.stepTime);
   }
 
   @override
@@ -202,9 +459,20 @@ class VegePetComponent extends PositionComponent
     super.onRemove();
   }
 
+  /// 발 위치(y)가 클수록 앞에 그려 아래쪽 펫·그림자가 위쪽 펫을 가리게 한다.
+  void _syncRenderPriorityByY() {
+    final next =
+        kVegePetPriorityBase +
+        position.y.round().clamp(0, kVegePetPriorityYSpan);
+    if (priority != next) {
+      priority = next;
+    }
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
+    _syncRenderPriorityByY();
     if (_assets == null) return;
 
     final scaledDt = dt * _speedMultiplier;
@@ -264,6 +532,20 @@ class VegePetComponent extends PositionComponent
 
   void _handleMoveBlocked(Vector2 current) {
     if (_isSitting) {
+      _stopMovement();
+      return;
+    }
+
+    // 강아지 play 이동 중 장애물: 최소 2사이클 규칙 예외 — 즉시 방향 전환 허용.
+    if (_motion == PetMotion.play && isDog) {
+      final newDirection = _pickAlternativeDirection(current);
+      if (newDirection != null) {
+        _moveDirection = newDirection;
+        _updateFacingFromDirection(_moveDirection);
+        _dogPlaySameFacingCycles = 1;
+        _dogPlayFacingLeft = _facingLeft;
+        return;
+      }
       _stopMovement();
       return;
     }
@@ -455,8 +737,8 @@ class VegePetComponent extends PositionComponent
         await playMotion(PetMotion.sittingIdle, fromAuto: true);
         return;
       }
-      // 고양이 happy 후 idle 강제 대기 중이면 일어서서 idle 경로로 보낸다.
-      if (_forceIdleAfterHappy && isCat) {
+      // idle 강제 대기 중이면 일어서서 idle 경로로 보낸다.
+      if (_forceIdleOnce) {
         await playMotion(PetMotion.stand, fromAuto: true);
         return;
       }
@@ -468,9 +750,9 @@ class VegePetComponent extends PositionComponent
       return;
     }
 
-    // 고양이: happy 직후 다음 자동 동작은 반드시 idle 1회.
-    if (_forceIdleAfterHappy && isCat) {
-      _forceIdleAfterHappy = false;
+    // play/고양이 happy 직후 다음 자동 동작은 반드시 idle 1회.
+    if (_forceIdleOnce) {
+      _forceIdleOnce = false;
       await playMotion(PetMotion.idle, fromAuto: true);
       _scheduleAutoBehavior(delay: 2 + _random.nextDouble() * 3);
       return;
@@ -568,10 +850,15 @@ class VegePetComponent extends PositionComponent
     }
 
     // 고양이 run → idle 직전 마지막만 4프레임(0~3)에서 컷. 중간 루프는 5프레임 유지.
+    // 강아지 run → idle 직전 마지막만 3프레임(0~2)에서 컷. 중간 루프는 4프레임 유지.
     final useCatRunIdleCutoff =
         !shouldRepeat && motion == PetMotion.run && isCat;
+    final useDogRunIdleCutoff =
+        !shouldRepeat && motion == PetMotion.run && isDog;
     final remaining = useCatRunIdleCutoff
         ? _remainingUntilCatRunFourFrameCutoff()
+        : useDogRunIdleCutoff
+        ? _remainingUntilDogRunThreeFrameCutoff()
         : _remainingInCurrentAnimationCycle();
     if (remaining > 0.001) {
       await _waitDuration(remaining, generation: gen);
@@ -630,6 +917,27 @@ class VegePetComponent extends PositionComponent
     final elapsed = _animChild?.animationTicker?.elapsed ?? 0.0;
     final intoCycle = elapsed % cycle;
     // 이미 5번째 프레임 구간이면 즉시 idle.
+    if (intoCycle >= cutoff - 0.0005) return 0;
+    return cutoff - intoCycle;
+  }
+
+  /// 강아지 run idle 전환용: 4프레임 사이클에서 3프레임(인덱스 0~2) 끝까지만 대기.
+  double _remainingUntilDogRunThreeFrameCutoff() {
+    final animation = _animChild?.animation;
+    if (animation == null || animation.frames.length < 4) {
+      return _remainingInCurrentAnimationCycle();
+    }
+    final cycle = animation.frames.fold<double>(
+      0,
+      (sum, f) => sum + f.stepTime,
+    );
+    if (cycle <= 0) return 0;
+    final cutoff = animation.frames
+        .take(3)
+        .fold<double>(0, (sum, f) => sum + f.stepTime);
+    final elapsed = _animChild?.animationTicker?.elapsed ?? 0.0;
+    final intoCycle = elapsed % cycle;
+    // 이미 4번째 프레임 구간이면 즉시 idle.
     if (intoCycle >= cutoff - 0.0005) return 0;
     return cutoff - intoCycle;
   }
@@ -735,8 +1043,8 @@ class VegePetComponent extends PositionComponent
     final wasSitting = _isSitting;
     var remaining = _repeatRemaining;
     while (remaining > 0 && isMounted) {
+      // generation 불일치 시 플래그를 건드리지 않음 — 단계 교체 후 재개 루틴이 소유권을 가짐.
       if (generation != null && generation != _motionGeneration) {
-        _eventMotionActive = false;
         return;
       }
       final anim = _cloneAnimation(_assets!.happyAnimation, loop: false);
@@ -745,15 +1053,17 @@ class VegePetComponent extends PositionComponent
       remaining--;
     }
     if (generation != null && generation != _motionGeneration) {
-      _eventMotionActive = false;
       return;
     }
 
     _eventMotionActive = false;
     _manualControl = false;
 
+    // 고양이: happy 종료 후 반드시 idle(최소 1회). 앉은 상태여도 sittingIdle로 복귀하지 않음.
     if (isCat) {
-      _forceIdleAfterHappy = true;
+      _forceIdleOnce = true;
+      await _enterIdle(resetAuto: true, generation: generation);
+      return;
     }
 
     if (isDog) {
@@ -775,31 +1085,118 @@ class VegePetComponent extends PositionComponent
     _stopMovement();
     _motion = PetMotion.play;
 
-    final wasSitting = _isSitting;
-    var remaining = _repeatRemaining;
-    while (remaining > 0 && isMounted) {
-      if (generation != null && generation != _motionGeneration) {
-        _eventMotionActive = false;
-        return;
+    if (isDog) {
+      await _playDogPlayMoving(generation: generation);
+    } else {
+      var remaining = _repeatRemaining;
+      while (remaining > 0 && isMounted) {
+        // generation 불일치 시 플래그를 건드리지 않음 — 단계 교체 후 재개 루틴이 소유권을 가짐.
+        if (generation != null && generation != _motionGeneration) {
+          return;
+        }
+        final anim = _cloneAnimation(_assets!.playAnimation, loop: false);
+        await _showAnimation(anim);
+        await _waitForAnimation(anim, generation: generation);
+        remaining--;
       }
-      final anim = _cloneAnimation(_assets!.playAnimation, loop: false);
-      await _showAnimation(anim);
-      await _waitForAnimation(anim, generation: generation);
-      remaining--;
     }
+
     if (generation != null && generation != _motionGeneration) {
-      _eventMotionActive = false;
       return;
     }
 
     _eventMotionActive = false;
     _manualControl = false;
 
-    if (wasSitting) {
-      await _enterSittingIdle(resetAuto: true, generation: generation);
-    } else {
-      await _enterIdle(resetAuto: true, generation: generation);
+    // play 종료 후 반드시 idle(최소 1회).
+    _forceIdleOnce = true;
+    await _enterIdle(resetAuto: true, generation: generation);
+  }
+
+  /// 강아지 play: run 속도로 이동하며 사이클마다 방향 랜덤.
+  /// 같은 좌/우를 최소 2사이클 본 뒤에만 반대 방향이 랜덤 후보에 포함.
+  /// 장애물 충돌 시에는 즉시 방향 전환 허용(_handleMoveBlocked).
+  Future<void> _playDogPlayMoving({int? generation}) async {
+    if (_assets == null) return;
+    _isSitting = false;
+    _dogPlaySameFacingCycles = 0;
+    _dogPlayFacingLeft = null;
+    _moveSpeed = kVegePetRunSpeed;
+    _moveTimeLeft = double.infinity;
+    _pendingMoveCycleFinish = false;
+
+    var remaining = _repeatRemaining;
+    while (remaining > 0 && isMounted) {
+      if (generation != null && generation != _motionGeneration) {
+        _stopMovement();
+        return;
+      }
+
+      final allowFacingFlip = _dogPlaySameFacingCycles >= 2;
+      _assignDogPlayMoveDirection(allowFacingFlip: allowFacingFlip);
+      _isMoving = true;
+      _moveTimeLeft = double.infinity;
+
+      final facingBefore = _dogPlayFacingLeft;
+      _updateFacingFromDirection(_moveDirection);
+      if (facingBefore == null || facingBefore == _facingLeft) {
+        _dogPlaySameFacingCycles =
+            facingBefore == null ? 1 : _dogPlaySameFacingCycles + 1;
+      } else {
+        _dogPlaySameFacingCycles = 1;
+      }
+      _dogPlayFacingLeft = _facingLeft;
+
+      final anim = _cloneAnimation(_assets!.playAnimation, loop: false);
+      await _showAnimation(anim);
+      await _waitForAnimation(anim, generation: generation);
+      remaining--;
     }
+
+    _stopMovement();
+    _dogPlaySameFacingCycles = 0;
+    _dogPlayFacingLeft = null;
+  }
+
+  void _assignDogPlayMoveDirection({required bool allowFacingFlip}) {
+    final shuffled = List<Vector2>.from(kVegePetEightDirections)
+      ..shuffle(_random);
+
+    Vector2? pickFrom(Iterable<Vector2> dirs, {required bool requireReachable}) {
+      for (final dir in dirs) {
+        if (dir.isZero()) continue;
+        if (!allowFacingFlip && _dogPlayDirectionWouldFlipFacing(dir)) {
+          continue;
+        }
+        if (requireReachable && !_dogPlayDirectionReachable(dir)) continue;
+        return dir.clone();
+      }
+      return null;
+    }
+
+    final chosen =
+        pickFrom(shuffled, requireReachable: true) ??
+        pickFrom(shuffled, requireReachable: false) ??
+        kVegePetEightDirections[_random.nextInt(kVegePetEightDirections.length)]
+            .clone();
+
+    _moveDirection = chosen;
+  }
+
+  bool _dogPlayDirectionWouldFlipFacing(Vector2 dir) {
+    if (dir.x.abs() <= 0.01) return false;
+    final wouldFaceLeft = dir.x < -0.01;
+    return wouldFaceLeft != _facingLeft;
+  }
+
+  bool _dogPlayDirectionReachable(Vector2 dir) {
+    const probe = 6.0;
+    final current = position.clone();
+    final next = current + dir * probe;
+    return canMoveFootprintTo(
+      collisionSamplePointsAt(current),
+      collisionSamplePointsAt(next),
+    );
   }
 
   Future<void> _showAnimation(SpriteAnimation animation) async {

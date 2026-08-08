@@ -30,6 +30,14 @@ String petMotionTuneKey({
   return '$speciesCode|$folder|${motion.name}';
 }
 
+bool _isCatSpecies(String speciesCode) {
+  return speciesCode == 'cat_rag' || speciesCode == 'cat_sco';
+}
+
+bool _isDogSpecies(String speciesCode) {
+  return speciesCode == 'dog_bic' || speciesCode == 'dog_pom';
+}
+
 /// 모션별 spd/rep 설정 (한 슬롯).
 class PetMotionTuneConfig {
   PetMotionTuneConfig({
@@ -52,8 +60,16 @@ class PetMotionTuneConfig {
     );
   }
 
-  void resetToDefaultFor(PetMotion motion) {
-    final d = kPetMotionBuiltInDefaultFor(motion);
+  void resetToDefaultFor({
+    required String speciesCode,
+    required String stage,
+    required PetMotion motion,
+  }) {
+    final d = kPetMotionBuiltInDefaultFor(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
     speedMultiplier = d.speedMultiplier;
     repeatCount = d.repeatCount;
   }
@@ -68,8 +84,14 @@ class PetMotionTuneConfig {
   factory PetMotionTuneConfig.fromJson(
     Map<String, dynamic> json, {
     required PetMotion motion,
+    String speciesCode = 'cat_sco',
+    String stage = 'baby',
   }) {
-    final d = kPetMotionBuiltInDefaultFor(motion);
+    final d = kPetMotionBuiltInDefaultFor(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
     return PetMotionTuneConfig(
       speedMultiplier:
           (json['speedMultiplier'] as num?)?.toDouble() ?? d.speedMultiplier,
@@ -83,29 +105,103 @@ final PetMotionTuneConfig _kPetMotionFallbackSeed = PetMotionTuneConfig(
   repeatCount: 1,
 );
 
-/// 빌트인 기본값 시드 (종·단계 공통). 런타임에 mutate 하지 말 것 — 항상 clone 해서 사용.
-final Map<PetMotion, PetMotionTuneConfig> kPetMotionBuiltInDefaults = {
-  PetMotion.happy: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.idle: PetMotionTuneConfig(speedMultiplier: 0.7, repeatCount: 1),
-  PetMotion.play: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 6),
-  PetMotion.run: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.sit: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.sittingIdle: PetMotionTuneConfig(
-    speedMultiplier: 0.7,
-    repeatCount: 1,
-  ),
-  PetMotion.walk: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-  PetMotion.stand: PetMotionTuneConfig(speedMultiplier: 1.0, repeatCount: 1),
-};
-
-PetMotionTuneConfig kPetMotionBuiltInDefaultFor(PetMotion motion) {
-  final d = kPetMotionBuiltInDefaults[motion] ?? _kPetMotionFallbackSeed;
-  return d.clone();
+PetMotionTuneConfig _tune(double spd, [int rep = 1]) {
+  return PetMotionTuneConfig(speedMultiplier: spd, repeatCount: rep);
 }
 
-/// 하위 호환 alias.
+/// 표 기준 빌트인 기본값 (cat/dog × baby/young/teen × motion).
+/// 런타임에 mutate 하지 말 것 — 항상 clone 해서 사용.
+PetMotionTuneConfig kPetMotionBuiltInDefaultFor({
+  required String speciesCode,
+  required String stage,
+  required PetMotion motion,
+}) {
+  final folder = petStageAssetFolder(stage);
+  if (_isCatSpecies(speciesCode)) {
+    return _catMotionDefault(folder, motion).clone();
+  }
+  if (_isDogSpecies(speciesCode)) {
+    return _dogMotionDefault(folder, motion).clone();
+  }
+  return _kPetMotionFallbackSeed.clone();
+}
+
+PetMotionTuneConfig _catMotionDefault(String stageFolder, PetMotion motion) {
+  switch (stageFolder) {
+    case 'young':
+      return switch (motion) {
+        PetMotion.happy => _tune(0.9, 10),
+        PetMotion.idle => _tune(0.6),
+        PetMotion.play => _tune(0.8, 10),
+        PetMotion.run => _tune(1.1),
+        PetMotion.sit => _tune(1.0),
+        PetMotion.sittingIdle => _tune(0.6),
+        PetMotion.walk => _tune(0.9),
+        PetMotion.stand => _tune(1.0),
+      };
+    case 'teen':
+      return switch (motion) {
+        PetMotion.happy => _tune(0.9, 10),
+        PetMotion.idle => _tune(0.6),
+        PetMotion.play => _tune(0.8, 10),
+        PetMotion.run => _tune(1.2),
+        PetMotion.sit => _tune(1.0),
+        PetMotion.sittingIdle => _tune(0.6),
+        PetMotion.walk => _tune(1.0),
+        PetMotion.stand => _tune(1.0),
+      };
+    case 'baby':
+    default:
+      return switch (motion) {
+        PetMotion.happy => _tune(0.9, 10),
+        PetMotion.idle => _tune(0.6),
+        PetMotion.play => _tune(0.8, 10),
+        PetMotion.run => _tune(1.0),
+        PetMotion.sit => _tune(1.0),
+        PetMotion.sittingIdle => _tune(0.6),
+        PetMotion.walk => _tune(1.0),
+        PetMotion.stand => _tune(1.0),
+      };
+  }
+}
+
+PetMotionTuneConfig _dogMotionDefault(String stageFolder, PetMotion motion) {
+  switch (stageFolder) {
+    case 'teen':
+      return switch (motion) {
+        PetMotion.happy => _tune(1.1, 10),
+        PetMotion.idle => _tune(0.7),
+        PetMotion.play => _tune(1.1, 10),
+        PetMotion.run => _tune(1.1),
+        PetMotion.sit => _tune(1.0),
+        PetMotion.sittingIdle => _tune(0.7),
+        PetMotion.walk => _tune(1.1),
+        PetMotion.stand => _tune(1.0),
+      };
+    case 'baby':
+    case 'young':
+    default:
+      // baby / young 동일
+      return switch (motion) {
+        PetMotion.happy => _tune(1.1, 10),
+        PetMotion.idle => _tune(0.7),
+        PetMotion.play => _tune(1.1, 10),
+        PetMotion.run => _tune(1.0),
+        PetMotion.sit => _tune(1.0),
+        PetMotion.sittingIdle => _tune(0.7),
+        PetMotion.walk => _tune(1.0),
+        PetMotion.stand => _tune(1.0),
+      };
+  }
+}
+
+/// 하위 호환 alias (종·단계 미지정 시 cat baby 기준).
 PetMotionTuneConfig kPetMotionDefaultTuningFor(PetMotion motion) {
-  return kPetMotionBuiltInDefaultFor(motion);
+  return kPetMotionBuiltInDefaultFor(
+    speciesCode: 'cat_sco',
+    stage: 'baby',
+    motion: motion,
+  );
 }
 
 /// 종×단계×모션 튜닝 저장소.
@@ -129,7 +225,11 @@ class PetMotionTuneStore {
           );
           _byKey.putIfAbsent(
             key,
-            () => kPetMotionBuiltInDefaultFor(motion),
+            () => kPetMotionBuiltInDefaultFor(
+              speciesCode: species,
+              stage: stage,
+              motion: motion,
+            ),
           );
         }
       }
@@ -148,7 +248,11 @@ class PetMotionTuneStore {
     );
     return _byKey.putIfAbsent(
       key,
-      () => kPetMotionBuiltInDefaultFor(motion),
+      () => kPetMotionBuiltInDefaultFor(
+        speciesCode: speciesCode,
+        stage: stage,
+        motion: motion,
+      ),
     );
   }
 
@@ -172,7 +276,11 @@ class PetMotionTuneStore {
       speciesCode: speciesCode,
       stage: stage,
       motion: motion,
-    ).resetToDefaultFor(motion);
+    ).resetToDefaultFor(
+      speciesCode: speciesCode,
+      stage: stage,
+      motion: motion,
+    );
   }
 
   void resetSpeciesStage({
@@ -198,7 +306,8 @@ class PetMotionTuneStore {
 
 /// SharedPreferences 저장/복원.
 class PetMotionTunePreferences {
-  static const String keyMapJson = 'debug_pet_motion_tune_map_v1';
+  /// v2: 종×단계 표 기준 기본값. 구 v1 저장값은 무시하고 새 기본값으로 시드.
+  static const String keyMapJson = 'debug_pet_motion_tune_map_v2';
 
   static Future<PetMotionTuneStore> load() async {
     final store = PetMotionTuneStore();
@@ -216,6 +325,8 @@ class PetMotionTunePreferences {
         if (value is! Map) continue;
         final parts = key.split('|');
         if (parts.length != 3) continue;
+        final speciesCode = parts[0];
+        final stage = parts[1];
         final motionName = parts[2];
         PetMotion? motion;
         for (final m in PetMotion.values) {
@@ -228,6 +339,8 @@ class PetMotionTunePreferences {
         store._byKey[key] = PetMotionTuneConfig.fromJson(
           Map<String, dynamic>.from(value),
           motion: motion,
+          speciesCode: speciesCode,
+          stage: stage,
         );
       }
       store.ensureAllSlots();
