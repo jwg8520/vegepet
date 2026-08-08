@@ -286,11 +286,20 @@ class AvoPetComponent extends PositionComponent
     if (_assets != null && _animChild != null) {
       _markVisualReady();
       debugPrint(
-        'AvoPetComponent visualReady: id=$userPetId mounted=$isMounted',
+        'AvoPetComponent visualReady: id=$userPetId',
       );
       if (_pendingAmbientBootstrap) {
         _pendingAmbientBootstrap = false;
-        unawaited(_bootstrapAmbientAfterVisualReady());
+        // Flame 은 onMount() 반환 뒤에야 isMounted 비트를 켠다.
+        // 여기서 바로 bootstrap 하면 `if (!isMounted) return` 에 걸려
+        // cold-start ambient 루프가 영구히 시작되지 않는다.
+        scheduleMicrotask(() {
+          if (!isMounted || _assets == null) return;
+          debugPrint(
+            'AvoPetComponent ambient bootstrap start: id=$userPetId',
+          );
+          unawaited(_bootstrapAmbientAfterVisualReady());
+        });
       }
     } else {
       _failVisualReady(
@@ -312,9 +321,10 @@ class AvoPetComponent extends PositionComponent
       debugPrint(
         'AvoPetComponent ambient bootstrap failed id=$userPetId: $e\n$st',
       );
-      if (isMounted && _assets != null && _animChild == null) {
+      if (!isMounted || _assets == null) return;
+      if (_animChild == null) {
         await _enterIdle(resetAuto: true);
-      } else if (isMounted && _assets != null) {
+      } else {
         _scheduleAutoBehavior(delay: _randomIdleDelay());
       }
     }
