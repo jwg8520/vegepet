@@ -486,13 +486,13 @@
       "affectionGain": {"type": "int"}
     }
   },
-  "interactionPlayFailure1": "{petNameTopic} doesn’t seem to feel like playing.. Let’s try again tomorrow.",
+  "interactionPlayFailure1": "{petNameTopic} doesn't seem to feel like playing right now... Maybe {petNameTopic} is hungry?",
   "@interactionPlayFailure1": {
     "placeholders": {
       "petNameTopic": {"type": "String"}
     }
   },
-  "interactionPlayFailure2": "{petNameTopic} seems too tired to respond.. Let’s try playing again tomorrow.",
+  "interactionPlayFailure2": "{petNameTopic} seems low on energy and isn't responding... Maybe {petNameTopic} wants something healthy to eat?",
   "@interactionPlayFailure2": {
     "placeholders": {
       "petNameTopic": {"type": "String"}

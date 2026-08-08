@@ -1184,6 +1184,10 @@ class _HomePageState extends State<HomePage>
   /// Sign in with Apple 연타 방지 (실제 인증 로직은 다음 단계).
   bool _isAppleLinkBusy = false;
 
+  /// 계정 연동/전환 직후 user 데이터 재조회 중.
+  /// 캐시 비움 → fetch 사이 프레임에서 프로필 입력창이 깜빡이지 않게 막는다.
+  bool _isAuthChangeDataRefreshInFlight = false;
+
   /// [GoogleSignIn.initialize] 는 앱 생애주기당 정확히 한 번만 호출한다.
   bool _googleSignInInitialized = false;
 
@@ -1986,6 +1990,7 @@ class _HomePageState extends State<HomePage>
 
   /// anonymous guest + profile 없음인데 프로필 입력창이 안 떠 있는 먹통 상태를 복구한다.
   void _ensureFreshGuestProfileSetupVisible() {
+    if (_isAuthChangeDataRefreshInFlight) return;
     final user = supabase.auth.currentUser;
     if (user == null) return;
     if (!_isCurrentUserAnonymous()) return;
@@ -3228,14 +3233,19 @@ class _HomePageState extends State<HomePage>
   Future<void> _refreshAllUserDataAfterAuthChange({
     bool forceProfileFormSync = false,
   }) async {
-    _invalidateUserScopedAsyncWork(reason: 'authChangeRefresh');
-    // _linkedAccountProvider 는 여기서 초기화하지 않는다.
-    // (계정 전환/로그아웃에서만 _resetLinkedAccountProviderCache 호출)
-    _clearUserScopedCaches();
-    await _fetchCoreUserData();
-    await _refreshLinkedAccountProviderFromServer();
-    _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
-    _syncAccountDeletionWatchForCurrentSession();
+    _isAuthChangeDataRefreshInFlight = true;
+    try {
+      _invalidateUserScopedAsyncWork(reason: 'authChangeRefresh');
+      // _linkedAccountProvider 는 여기서 초기화하지 않는다.
+      // (계정 전환/로그아웃에서만 _resetLinkedAccountProviderCache 호출)
+      _clearUserScopedCaches();
+      await _fetchCoreUserData();
+      await _refreshLinkedAccountProviderFromServer();
+      _applyPostFetchUiState(forceProfileFormSync: forceProfileFormSync);
+      _syncAccountDeletionWatchForCurrentSession();
+    } finally {
+      _isAuthChangeDataRefreshInFlight = false;
+    }
   }
 
   /// Google/Apple identity 가 연결된 영구 계정 세션인지.
@@ -4777,6 +4787,8 @@ class _HomePageState extends State<HomePage>
       if (userSwitched) {
         // 이전 guest 의 캐시·입력값·Flame 펫이 새 계정으로 새어나가지 않게 한다.
         // 서버의 guest 데이터는 병합하지도, 삭제하지도 않는다.
+        // refresh 직전 clear 구간에서도 프로필 입력창 자동 표시를 막는다.
+        _isAuthChangeDataRefreshInFlight = true;
         _invalidateUserScopedAsyncWork(reason: 'existingAccountSignIn');
         _clearUserScopedCaches();
         _clearProfileFormState();
@@ -4822,6 +4834,7 @@ class _HomePageState extends State<HomePage>
         _logAccountLink(providerKey, 'refresh', 'success');
         debugPrint('account_auth:data_refresh:success');
       } catch (e) {
+        _isAuthChangeDataRefreshInFlight = false;
         _logAccountLink(
           providerKey,
           'refresh',
@@ -6244,26 +6257,46 @@ class _HomePageState extends State<HomePage>
       _pendingFreshAdoptPetId = null;
     }
 
-    // Flame spawn 은 UI 핵심 흐름과 분리. timeout/실패는 로그만 남긴다.
+    // Flame spawn: visualReady 까지 성공해야 shown=true.
+    // timeout 시 불완전 컴포넌트를 정리한 뒤 1회 재시도한다.
     bool shown = false;
+    Future<bool> spawnOnce() {
+      return _yardGame.showYardPet(
+        userPetId: petId,
+        speciesCode: code,
+        stage: stage,
+        seedRandomAmbient: isFreshAdopt ? false : null,
+      );
+    }
+
     try {
-      shown = await _yardGame
-          .showYardPet(
-            userPetId: petId,
-            speciesCode: code,
-            stage: stage,
-            seedRandomAmbient: isFreshAdopt ? false : null,
-          )
-          .timeout(
-            const Duration(seconds: 5),
-            onTimeout: () {
-              debugPrint('YardGame spawn timeout: petId=$petId');
-              return false;
-            },
-          );
+      shown = await spawnOnce().timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      debugPrint('YardGame spawn timeout: petId=$petId — abort incomplete');
+      await _yardGame.abortPetSpawn(userPetId: petId);
+      await _yardGame.waitUntilNoPetSpawnInFlight();
+      shown = false;
     } catch (e, st) {
       debugPrint('YardGame sync spawn failed (isolated): $e\n$st');
+      await _yardGame.abortPetSpawn(userPetId: petId);
+      await _yardGame.waitUntilNoPetSpawnInFlight();
       shown = false;
+    }
+
+    if (!shown &&
+        generation == _yardPetSyncGeneration &&
+        mounted &&
+        _activePet?['id']?.toString() == petId) {
+      debugPrint('YardGame sync: retry spawn once petId=$petId');
+      try {
+        await _yardGame.abortPetSpawn(userPetId: petId);
+        await _yardGame.waitUntilNoPetSpawnInFlight();
+        shown = await spawnOnce();
+      } catch (e, st) {
+        debugPrint('YardGame sync spawn retry failed: $e\n$st');
+        await _yardGame.abortPetSpawn(userPetId: petId);
+        shown = false;
+      }
     }
 
     if (generation != _yardPetSyncGeneration) {
@@ -11685,16 +11718,21 @@ class _HomePageState extends State<HomePage>
         _status != _ViewStatus.error &&
         !_isProfileSetupPanelVisible &&
         !_isProfileSetupClosing &&
+        !_isAuthChangeDataRefreshInFlight &&
         (isAnonymous || user == null || _freshGuestAuthResetInProgress)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        if (_isAuthChangeDataRefreshInFlight) return;
         _ensureFreshGuestProfileSetupVisible();
       });
     }
 
     final profileComplete = _isProfileComplete();
     final hasActivePet = _activePet != null;
-    final showProfileSetup = _status == _ViewStatus.ready && !profileComplete;
+    final showProfileSetup =
+        _status == _ViewStatus.ready &&
+        !profileComplete &&
+        !_isAuthChangeDataRefreshInFlight;
     final shouldMountProfileSetup = showProfileSetup || _isProfileSetupClosing;
     final showInitialAdoption =
         _status == _ViewStatus.ready && profileComplete && !hasActivePet;
@@ -11716,10 +11754,12 @@ class _HomePageState extends State<HomePage>
         !_isInitialAdoptionPanelVisible) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        if (_isAuthChangeDataRefreshInFlight) return;
         final canShow =
             _status == _ViewStatus.ready &&
             !_isProfileComplete() &&
-            !_isInitialAdoptionPanelVisible;
+            !_isInitialAdoptionPanelVisible &&
+            !_isAuthChangeDataRefreshInFlight;
         if (!canShow || _isProfileSetupClosing) return;
         setState(() {
           _isProfileSetupPanelVisible = true;
@@ -11809,8 +11849,13 @@ class _HomePageState extends State<HomePage>
 
     if (!mounted) return;
 
-    // 펫/resident spawn 은 로딩 dismiss 를 막지 않는다 (백그라운드 schedule).
-    _scheduleSyncActivePetToYardGame();
+    // active Flame 펫이 있으면 로딩 종료 전에 visualReady spawn 을 마친다.
+    // (collision-only 유령 펫이 로딩 직후 마당에 남는 것을 막는다)
+    if (_activePet != null && _shouldUseFlamePetForActivePet()) {
+      await _syncActivePetToYardGame();
+    } else {
+      _scheduleSyncActivePetToYardGame();
+    }
 
     _startupLoadingTimer?.cancel();
 
@@ -18583,27 +18628,8 @@ class _HomePageState extends State<HomePage>
       if (userId != supabase.auth.currentUser?.id) return;
 
       if (!_hasEligibleMealForToyPlay()) {
-        // 실패도 성공과 동일하게 당일 놀아주기를 소모한다 (재시도·드래그 불가).
-        final activePetId = _activePet?['id'];
-        if (activePetId != null) {
-          try {
-            await supabase
-                .from('user_pets')
-                .update({'last_played_on': today})
-                .eq('id', activePetId);
-            if (!mounted) return;
-            if (generation != _userDataGeneration) return;
-            if (userId != supabase.auth.currentUser?.id) return;
-            await _fetchActivePet();
-          } catch (e) {
-            if (!mounted) return;
-            debugPrint(
-              'play ineligible last_played_on update failed type=${e.runtimeType}',
-            );
-            _showCommunicationErrorNotice();
-            return;
-          }
-        }
+        // 식단 자격 미충족 실패는 당일 놀아주기를 소모하지 않는다.
+        // last_played_on / 애정도 / 성장 단계는 건드리지 않고 재시도 가능하게 둔다.
         if (!mounted) return;
         if (generation != _userDataGeneration) return;
         await _showInteractionStatusMessage(

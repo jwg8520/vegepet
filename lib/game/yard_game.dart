@@ -270,6 +270,11 @@ class YardGame extends FlameGame {
   Future<bool>? _petSpawnInFlight;
   String? _petSpawnInFlightUserId;
 
+  /// visualReady/_petsById 등록 전 world 에 올라간 in-flight 컴포넌트.
+  /// timeout abort 시 _petsById 에 없어도 제거하기 위해 추적한다.
+  AvoPetComponent? _spawnInProgressComponent;
+  String? _spawnInProgressUserId;
+
   bool _showPetCollisionDebug = true;
   _PetCollisionDebugComponent? _petCollisionDebug;
 
@@ -729,7 +734,9 @@ class YardGame extends FlameGame {
     return pet.isMounted || pet.parent != null;
   }
 
-  bool get hasActiveAvoPet => _isAvoPetAlive(_avoPetComponent);
+  bool get hasActiveAvoPet =>
+      _isAvoPetAlive(_avoPetComponent) &&
+      (_avoPetComponent?.isVisualReady ?? false);
 
   // ---------------------------------------------------------------------------
   // 활성 Flame 펫 tap hitbox 판정 API.
@@ -840,46 +847,114 @@ class YardGame extends FlameGame {
         excludingPetId: userPetId,
       ),
     );
-    _petsById[userPetId] = component;
-    if (!isResident) {
-      _avoPetComponent = component;
-      _activePetUserId = userPetId;
-    }
 
-    await world.add(component);
-    await Future<void>.delayed(Duration.zero);
+    _spawnInProgressComponent = component;
+    _spawnInProgressUserId = userPetId;
 
-    if (epoch != _petMutationEpoch) {
-      debugPrint('YardGame: spawn stale after add — removing orphan component');
-      component.removeFromParent();
-      if (identical(_petsById[userPetId], component)) {
-        _petsById.remove(userPetId);
+    try {
+      // world.add 는 onLoad(에셋+첫 스프라이트)까지 await 한다.
+      // visualReady 전에는 _petsById 에 올리지 않아 collision-only 유령을 막는다.
+      await world.add(component);
+      await component.whenVisualReady;
+
+      if (epoch != _petMutationEpoch) {
+        debugPrint(
+          'YardGame: spawn stale after visualReady — discarding component',
+        );
+        await _discardPetComponent(component, userPetId: userPetId);
+        return false;
       }
-      if (identical(_avoPetComponent, component)) {
-        _avoPetComponent = null;
-        _activePetUserId = null;
+
+      if (!component.isVisualReady || !_isAvoPetAlive(component)) {
+        _lastPetSpawnError =
+            'AvoPetComponent failed visualReady '
+            '(mounted=${component.isMounted}, visual=${component.isVisualReady})';
+        debugPrint('YardGame: $_lastPetSpawnError');
+        await _discardPetComponent(component, userPetId: userPetId);
+        return false;
       }
+
+      _petsById[userPetId] = component;
+      if (!isResident) {
+        _avoPetComponent = component;
+        _activePetUserId = userPetId;
+      }
+
+      debugPrint(
+        'YardGame: pet spawned id=$userPetId species=$speciesCode stage=$stage '
+        'resident=$isResident mounted=${component.isMounted} '
+        'visualReady=${component.isVisualReady}',
+      );
+      return true;
+    } catch (e, st) {
+      _lastPetSpawnError = e.toString();
+      debugPrint('YardGame: spawn failed id=$userPetId: $e\n$st');
+      await _discardPetComponent(component, userPetId: userPetId);
       return false;
+    } finally {
+      if (identical(_spawnInProgressComponent, component)) {
+        _spawnInProgressComponent = null;
+        _spawnInProgressUserId = null;
+      }
     }
+  }
 
-    final alive = _isAvoPetAlive(component);
-    if (!alive) {
-      _lastPetSpawnError =
-          'AvoPetComponent was not mounted after world.add (mounted=${component.isMounted}, parent=${component.parent != null})';
-      debugPrint('YardGame: $_lastPetSpawnError');
+  Future<void> _discardPetComponent(
+    AvoPetComponent component, {
+    required String userPetId,
+  }) async {
+    component.removeFromParent();
+    if (identical(_petsById[userPetId], component)) {
       _petsById.remove(userPetId);
-      if (identical(_avoPetComponent, component)) {
-        _avoPetComponent = null;
-        _activePetUserId = null;
+    }
+    if (identical(_avoPetComponent, component)) {
+      _avoPetComponent = null;
+      _activePetUserId = null;
+    }
+  }
+
+  /// timeout/실패 시 진행 중 spawn 을 무효화하고 불완전 컴포넌트를 제거한다.
+  Future<void> abortPetSpawn({String? userPetId}) async {
+    _petMutationEpoch++;
+
+    // visualReady 전(_petsById 미등록) in-flight 도 함께 제거한다.
+    final pending = _spawnInProgressComponent;
+    final pendingId = _spawnInProgressUserId;
+    if (pending != null &&
+        (userPetId == null ||
+            userPetId.isEmpty ||
+            pendingId == userPetId ||
+            pending.userPetId == userPetId)) {
+      debugPrint(
+        'YardGame: abort in-progress spawn id=${pending.userPetId}',
+      );
+      pending.removeFromParent();
+      if (identical(_spawnInProgressComponent, pending)) {
+        _spawnInProgressComponent = null;
+        _spawnInProgressUserId = null;
       }
-      return false;
     }
 
-    debugPrint(
-      'YardGame: pet spawned id=$userPetId species=$speciesCode stage=$stage '
-      'resident=$isResident mounted=${component.isMounted}',
-    );
-    return true;
+    if (userPetId == null || userPetId.isEmpty) {
+      await removeActivePetComponent(bumpEpoch: false);
+      return;
+    }
+    await _removePetById(userPetId, bumpEpoch: false);
+    if (_activePetUserId == userPetId) {
+      _avoPetComponent = null;
+      _activePetUserId = null;
+    }
+  }
+
+  /// 진행 중 showYardPet Future 가 끝날 때까지 기다린다 (재시도 전 join 경합 방지).
+  Future<void> waitUntilNoPetSpawnInFlight() async {
+    final inFlight = _petSpawnInFlight;
+    if (inFlight == null) return;
+    try {
+      await inFlight;
+    } catch (_) {
+      // 실패/abort 결과와 무관하게 in-flight 해제만 기다린다.
+    }
   }
 
   /// 종·단계 지정 Flame 펫을 마당에 표시한다 (active).
@@ -933,7 +1008,8 @@ class YardGame extends FlameGame {
       final existing = _petsById[userPetId];
       if (existing != null &&
           _isAvoPetAlive(existing) &&
-          existing.speciesCode == speciesCode) {
+          existing.speciesCode == speciesCode &&
+          existing.isVisualReady) {
         // 동일 펫: 단계만 바뀌면 제자리 교체 (사라졌다 나타나기 방지).
         if (existing.stage != stage ||
             petStageAssetFolder(existing.stage) !=
@@ -954,6 +1030,14 @@ class YardGame extends FlameGame {
           'YardGame: yard pet in-place update (userPetId=$userPetId stage=$stage)',
         );
         return true;
+      }
+
+      // 반쯤 남은(비주얼 미준비) 동일 id 컴포넌트는 재스폰 전에 제거한다.
+      if (existing != null && !existing.isVisualReady) {
+        debugPrint(
+          'YardGame: discarding incomplete pet before respawn id=$userPetId',
+        );
+        await _discardPetComponent(existing, userPetId: userPetId);
       }
 
       // 다른 펫으로 active 교체 시에는 이전 펫 위치를 물려받지 않는다.
@@ -977,8 +1061,10 @@ class YardGame extends FlameGame {
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
       debugPrint('YardGame.showYardPet failed: $e\n$st');
-      _petsById.remove(userPetId);
-      if (_activePetUserId == userPetId) {
+      final orphan = _petsById[userPetId];
+      if (orphan != null) {
+        await _discardPetComponent(orphan, userPetId: userPetId);
+      } else if (_activePetUserId == userPetId) {
         _avoPetComponent = null;
         _activePetUserId = null;
       }
@@ -1019,7 +1105,8 @@ class YardGame extends FlameGame {
       final existing = _petsById[spec.userPetId];
       if (existing != null &&
           _isAvoPetAlive(existing) &&
-          existing.speciesCode == spec.speciesCode) {
+          existing.speciesCode == spec.speciesCode &&
+          existing.isVisualReady) {
         if (existing.stage != spec.stage ||
             petStageAssetFolder(existing.stage) !=
                 petStageAssetFolder(spec.stage)) {
@@ -1033,9 +1120,14 @@ class YardGame extends FlameGame {
         continue;
       }
 
+      if (existing != null && !existing.isVisualReady) {
+        await _discardPetComponent(existing, userPetId: spec.userPetId);
+      }
+
       // 마당에 없던 resident: 위치 보존 재스폰은 유지, 신규(앱 재시작 등)는 랜덤 시드.
-      final preserved = (existing != null && _isAvoPetAlive(existing))
-          ? existing.position.clone()
+      final preservedPet = _petsById[spec.userPetId];
+      final preserved = (preservedPet != null && _isAvoPetAlive(preservedPet))
+          ? preservedPet.position.clone()
           : null;
       await _spawnYardPetComponent(
         userPetId: spec.userPetId,
@@ -1083,7 +1175,8 @@ class YardGame extends FlameGame {
 
       if (_avoPetComponent != null &&
           _activePetUserId == userPetId &&
-          _isAvoPetAlive(_avoPetComponent)) {
+          _isAvoPetAlive(_avoPetComponent) &&
+          (_avoPetComponent?.isVisualReady ?? false)) {
         debugPrint('YardGame: debug pet already shown');
         return true;
       }
@@ -1195,14 +1288,15 @@ class YardGame extends FlameGame {
   /// 활성 펫의 발밑 충돌 footprint 사각형(844×390 논리 좌표). 펫 없으면 null.
   Rect? get activePetCollisionFootprintRect {
     final pet = _avoPetComponent;
-    if (pet == null || !_isAvoPetAlive(pet)) return null;
+    if (pet == null || !_isAvoPetAlive(pet) || !pet.isVisualReady) return null;
     return pet.collisionFootprintRect;
   }
 
   /// 마당의 모든 펫 collision footprint (debug overlay 용).
+  /// visualReady 이전 컴포넌트는 유령 footprint 로 보이지 않게 제외한다.
   List<Rect> get allPetCollisionFootprintRects {
     return _petsById.values
-        .where(_isAvoPetAlive)
+        .where((p) => _isAvoPetAlive(p) && p.isVisualReady)
         .map((p) => p.collisionFootprintRect)
         .toList();
   }

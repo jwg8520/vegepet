@@ -94,6 +94,33 @@ class AvoPetComponent extends PositionComponent
   PetSpriteAssets? _assets;
   SpriteAnimationComponent? _animChild;
 
+  /// sprite/idle(또는 첫 애니메이션) 준비 완료 여부.
+  /// collision debug / sync 성공 판정은 이 플래그를 기준으로 한다.
+  bool _visualReady = false;
+  final Completer<void> _visualReadyCompleter = Completer<void>();
+
+  bool get isVisualReady =>
+      _visualReady && _assets != null && _animChild != null && isMounted;
+
+  Future<void> get whenVisualReady {
+    if (isVisualReady) return Future<void>.value();
+    return _visualReadyCompleter.future;
+  }
+
+  void _markVisualReady() {
+    if (_visualReady) return;
+    _visualReady = true;
+    if (!_visualReadyCompleter.isCompleted) {
+      _visualReadyCompleter.complete();
+    }
+  }
+
+  void _failVisualReady(Object error, StackTrace stackTrace) {
+    if (!_visualReadyCompleter.isCompleted) {
+      _visualReadyCompleter.completeError(error, stackTrace);
+    }
+  }
+
   PetMotion _motion = PetMotion.idle;
   bool _isSitting = false;
   int _sittingIdleCycleCount = 0;
@@ -207,32 +234,49 @@ class AvoPetComponent extends PositionComponent
       'AvoPetComponent onLoad: id=$userPetId species=$speciesCode '
       'stage=$stage folder=$stageFolder size=$displaySize',
     );
-    await PetSpriteAssets.preflightAssets(
-      game,
-      speciesCode: speciesCode,
-      stageFolder: stageFolder,
-    );
-    _assets = await PetSpriteAssets.load(
-      game,
-      speciesCode: speciesCode,
-      stageFolder: stageFolder,
-    );
-    size = Vector2.all(displaySize);
-    if (seedRandomAmbient) {
-      await _applyRandomAmbientPresence();
-    } else {
-      _facingLeft = true;
-      await _enterIdle(resetAuto: false);
-      _scheduleAutoBehavior(delay: _randomIdleDelay());
+    try {
+      // load() 가 필수 시트를 모두 읽으므로 중복 preflight 로 cold-start 를 늘리지 않는다.
+      _assets = await PetSpriteAssets.load(
+        game,
+        speciesCode: speciesCode,
+        stageFolder: stageFolder,
+      );
+      size = Vector2.all(displaySize);
+      if (seedRandomAmbient) {
+        // 재실행 복원: 먼저 idle 스프라이트를 올려 visualReady 를 확정한 뒤,
+        // ambient 모션은 spawn 완료를 막지 않도록 분리한다.
+        _relocateToRandomWalkablePosition();
+        _facingLeft = _random.nextBool();
+        await _enterIdle(resetAuto: false);
+        _markVisualReady();
+        unawaited(_bootstrapAmbientAfterVisualReady());
+      } else {
+        _facingLeft = true;
+        await _enterIdle(resetAuto: false);
+        _markVisualReady();
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
+    } catch (e, st) {
+      _failVisualReady(e, st);
+      rethrow;
     }
   }
 
-  /// 앱 재진입 등: 걸을 수 있는 랜덤 위치 + happy/play 제외 일상 모션.
-  Future<void> _applyRandomAmbientPresence() async {
-    _relocateToRandomWalkablePosition();
-    _facingLeft = _random.nextBool();
-    _applyFacingFlip();
-    await _startRandomAmbientMotion();
+  /// cold-start ambient: spawn/world.add 성공 판정 이후에 일상 모션을 이어간다.
+  Future<void> _bootstrapAmbientAfterVisualReady() async {
+    if (!isMounted || _assets == null) return;
+    try {
+      await _startRandomAmbientMotion();
+    } catch (e, st) {
+      debugPrint(
+        'AvoPetComponent ambient bootstrap failed id=$userPetId: $e\n$st',
+      );
+      if (isMounted && _assets != null && _animChild == null) {
+        await _enterIdle(resetAuto: true);
+      } else if (isMounted && _assets != null) {
+        _scheduleAutoBehavior(delay: _randomIdleDelay());
+      }
+    }
   }
 
   void _relocateToRandomWalkablePosition() {
@@ -456,6 +500,12 @@ class AvoPetComponent extends PositionComponent
     _autoTimer?.stop();
     _motionTimer?.stop();
     _motionGeneration++;
+    if (!_visualReady && !_visualReadyCompleter.isCompleted) {
+      _visualReadyCompleter.completeError(
+        StateError('AvoPetComponent removed before visualReady'),
+        StackTrace.current,
+      );
+    }
     super.onRemove();
   }
 

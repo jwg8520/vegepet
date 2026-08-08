@@ -1185,12 +1185,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String interactionPlayFailure1(String petNameTopic) {
-    return '$petNameTopic doesn’t seem to feel like playing.. Let’s try again tomorrow.';
+    return '$petNameTopic doesn\'t seem to feel like playing right now... Maybe $petNameTopic is hungry?';
   }
 
   @override
   String interactionPlayFailure2(String petNameTopic) {
-    return '$petNameTopic seems too tired to respond.. Let’s try playing again tomorrow.';
+    return '$petNameTopic seems low on energy and isn\'t responding... Maybe $petNameTopic wants something healthy to eat?';
   }
 
   @override

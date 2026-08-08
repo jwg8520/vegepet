@@ -1149,12 +1149,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String interactionPlayFailure1(String petNameTopic) {
-    return '$petNameTopic 별로 놀고 싶어 하지 않는 것 같다.. 내일 다시 놀아 줘 보자.';
+    return '$petNameTopic 지금은 놀고 싶지 않은 것 같다... 배가 고파서 그런 걸까?';
   }
 
   @override
   String interactionPlayFailure2(String petNameTopic) {
-    return '$petNameTopic 기운이 없는지 반응이 없다.. 내일 다시 놀아 줘 보자.';
+    return '$petNameTopic 기운이 없는지 반응이 없다... 건강한 음식을 먹고 싶은 걸까?';
   }
 
   @override
