@@ -308,7 +308,7 @@ class AnalysisPanelContent extends StatelessWidget {
         color: kAnalysisGoalAchievedColor,
       );
     }
-    return (text: '+${remaining.toStringAsFixed(1)}kg', color: null);
+    return (text: '-${remaining.toStringAsFixed(1)}kg', color: null);
   }
 
   Widget _metricColumn({

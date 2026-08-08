@@ -6251,21 +6251,24 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // 신규 분양 펫은 랜덤 배치 없이 기본 스폰 위치(오두막 문 앞)에 등장시킨다.
+    // 신규 분양: spawn 성공 전까지 pending 을 유지해 retry 에도
+    // seedRandomAmbient:false(오두막 앞)가 보장되게 한다.
     final isFreshAdopt = _pendingFreshAdoptPetId == petId;
-    if (isFreshAdopt) {
-      _pendingFreshAdoptPetId = null;
-    }
 
-    // Flame spawn: visualReady 까지 성공해야 shown=true.
+    // Flame spawn: visualReady(mount+idle) 까지 성공해야 shown=true.
     // timeout 시 불완전 컴포넌트를 정리한 뒤 1회 재시도한다.
     bool shown = false;
     Future<bool> spawnOnce() {
+      final fresh =
+          isFreshAdopt || _pendingFreshAdoptPetId == petId;
+      debugPrint(
+        'YardGame sync spawn begin petId=$petId freshAdopt=$fresh gen=$generation',
+      );
       return _yardGame.showYardPet(
         userPetId: petId,
         speciesCode: code,
         stage: stage,
-        seedRandomAmbient: isFreshAdopt ? false : null,
+        seedRandomAmbient: fresh ? false : null,
       );
     }
 
@@ -6299,6 +6302,10 @@ class _HomePageState extends State<HomePage>
       }
     }
 
+    if (shown && _pendingFreshAdoptPetId == petId) {
+      _pendingFreshAdoptPetId = null;
+    }
+
     if (generation != _yardPetSyncGeneration) {
       debugPrint('stale yard pet sync ignored after spawn');
       return;
@@ -6315,7 +6322,9 @@ class _HomePageState extends State<HomePage>
     }
     await _syncResidentPetsToYardGame();
     debugPrint(
-      'YardGame sync result: shown=$shown, hasActiveAvoPet=${_yardGame.hasActiveAvoPet}, error=${_yardGame.lastPetSpawnError}',
+      'YardGame sync result: shown=$shown, freshAdopt=$isFreshAdopt, '
+      'hasActiveAvoPet=${_yardGame.hasActiveAvoPet}, '
+      'error=${_yardGame.lastPetSpawnError}',
     );
     if (mounted) {
       _safeSetState(() {

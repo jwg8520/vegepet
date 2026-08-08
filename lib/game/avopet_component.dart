@@ -94,10 +94,16 @@ class AvoPetComponent extends PositionComponent
   PetSpriteAssets? _assets;
   SpriteAnimationComponent? _animChild;
 
-  /// sprite/idle(또는 첫 애니메이션) 준비 완료 여부.
+  /// sprite/idle 준비 + world mount 완료 여부.
   /// collision debug / sync 성공 판정은 이 플래그를 기준으로 한다.
+  ///
+  /// Flame 의 [Component.add] 는 onLoad 까지만 await 하고 mount 는 다음
+  /// game tick 이므로, visualReady 는 [onMount] 에서 확정한다.
   bool _visualReady = false;
   final Completer<void> _visualReadyCompleter = Completer<void>();
+
+  /// onLoad 에서 idle 까지 끝난 뒤, onMount 에서 ambient bootstrap 할지.
+  bool _pendingAmbientBootstrap = false;
 
   bool get isVisualReady =>
       _visualReady && _assets != null && _animChild != null && isMounted;
@@ -119,6 +125,15 @@ class AvoPetComponent extends PositionComponent
     if (!_visualReadyCompleter.isCompleted) {
       _visualReadyCompleter.completeError(error, stackTrace);
     }
+  }
+
+  /// mount 전에 abort/discard 될 때 onRemove 가 호출되지 않을 수 있으므로
+  /// spawn 측에서 명시적으로 completer 를 실패시킨다.
+  void notifySpawnAborted([Object? error]) {
+    _failVisualReady(
+      error ?? StateError('AvoPetComponent spawn aborted before visualReady'),
+      StackTrace.current,
+    );
   }
 
   PetMotion _motion = PetMotion.idle;
@@ -243,26 +258,52 @@ class AvoPetComponent extends PositionComponent
       );
       size = Vector2.all(displaySize);
       if (seedRandomAmbient) {
-        // 재실행 복원: 먼저 idle 스프라이트를 올려 visualReady 를 확정한 뒤,
-        // ambient 모션은 spawn 완료를 막지 않도록 분리한다.
+        // 재실행 복원: idle 스프라이트까지 onLoad 에서 준비하고,
+        // visualReady/ambient 는 onMount 이후(실제 렌더 가능 시점)로 미룬다.
         _relocateToRandomWalkablePosition();
         _facingLeft = _random.nextBool();
         await _enterIdle(resetAuto: false);
-        _markVisualReady();
-        unawaited(_bootstrapAmbientAfterVisualReady());
+        _pendingAmbientBootstrap = true;
       } else {
         _facingLeft = true;
         await _enterIdle(resetAuto: false);
-        _markVisualReady();
         _scheduleAutoBehavior(delay: _randomIdleDelay());
       }
+      debugPrint(
+        'AvoPetComponent onLoad done: id=$userPetId '
+        'assets=${_assets != null} anim=${_animChild != null}',
+      );
     } catch (e, st) {
       _failVisualReady(e, st);
       rethrow;
     }
   }
 
-  /// cold-start ambient: spawn/world.add 성공 판정 이후에 일상 모션을 이어간다.
+  @override
+  void onMount() {
+    super.onMount();
+    // 최소 readiness: 필수 sprite/idle + mount. ambient walk/run 은 포함하지 않는다.
+    if (_assets != null && _animChild != null) {
+      _markVisualReady();
+      debugPrint(
+        'AvoPetComponent visualReady: id=$userPetId mounted=$isMounted',
+      );
+      if (_pendingAmbientBootstrap) {
+        _pendingAmbientBootstrap = false;
+        unawaited(_bootstrapAmbientAfterVisualReady());
+      }
+    } else {
+      _failVisualReady(
+        StateError(
+          'AvoPetComponent mounted without assets/anim '
+          '(assets=${_assets != null}, anim=${_animChild != null})',
+        ),
+        StackTrace.current,
+      );
+    }
+  }
+
+  /// cold-start ambient: visualReady(mount) 이후에 일상 모션을 이어간다.
   Future<void> _bootstrapAmbientAfterVisualReady() async {
     if (!isMounted || _assets == null) return;
     try {

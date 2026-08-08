@@ -851,15 +851,28 @@ class YardGame extends FlameGame {
     _spawnInProgressComponent = component;
     _spawnInProgressUserId = userPetId;
 
+    debugPrint(
+      'YardGame: spawn begin id=$userPetId species=$speciesCode stage=$stage '
+      'resident=$isResident freshAmbient=$seedAmbient epoch=$epoch',
+    );
+
     try {
-      // world.add 는 onLoad(에셋+첫 스프라이트)까지 await 한다.
+      // world.add 는 onLoad 까지만 await 한다. mount 는 다음 lifecycle tick.
+      // visualReady 는 onMount 에서 확정되므로 lifecycle 처리 후 기다린다.
       // visualReady 전에는 _petsById 에 올리지 않아 collision-only 유령을 막는다.
       await world.add(component);
+      debugPrint('YardGame: world.add onLoad done id=$userPetId epoch=$epoch');
+      await lifecycleEventsProcessed;
       await component.whenVisualReady;
+      debugPrint(
+        'YardGame: visualReady id=$userPetId mounted=${component.isMounted} '
+        'epoch=$epoch',
+      );
 
       if (epoch != _petMutationEpoch) {
         debugPrint(
-          'YardGame: spawn stale after visualReady — discarding component',
+          'YardGame: spawn stale after visualReady — discarding id=$userPetId '
+          'epoch=$epoch current=$_petMutationEpoch',
         );
         await _discardPetComponent(component, userPetId: userPetId);
         return false;
@@ -869,7 +882,7 @@ class YardGame extends FlameGame {
         _lastPetSpawnError =
             'AvoPetComponent failed visualReady '
             '(mounted=${component.isMounted}, visual=${component.isVisualReady})';
-        debugPrint('YardGame: $_lastPetSpawnError');
+        debugPrint('YardGame: discard — $_lastPetSpawnError');
         await _discardPetComponent(component, userPetId: userPetId);
         return false;
       }
@@ -881,7 +894,7 @@ class YardGame extends FlameGame {
       }
 
       debugPrint(
-        'YardGame: pet spawned id=$userPetId species=$speciesCode stage=$stage '
+        'YardGame: spawn ok id=$userPetId species=$speciesCode stage=$stage '
         'resident=$isResident mounted=${component.isMounted} '
         'visualReady=${component.isVisualReady}',
       );
@@ -903,6 +916,8 @@ class YardGame extends FlameGame {
     AvoPetComponent component, {
     required String userPetId,
   }) async {
+    // mount 전 remove 는 onRemove 를 건너뛸 수 있어 completer 를 명시 실패시킨다.
+    component.notifySpawnAborted();
     component.removeFromParent();
     if (identical(_petsById[userPetId], component)) {
       _petsById.remove(userPetId);
@@ -928,6 +943,7 @@ class YardGame extends FlameGame {
       debugPrint(
         'YardGame: abort in-progress spawn id=${pending.userPetId}',
       );
+      pending.notifySpawnAborted();
       pending.removeFromParent();
       if (identical(_spawnInProgressComponent, pending)) {
         _spawnInProgressComponent = null;
@@ -1051,13 +1067,15 @@ class YardGame extends FlameGame {
         seedAmbient = false;
       }
 
-      return await _spawnYardPetComponent(
+      final ok = await _spawnYardPetComponent(
         userPetId: userPetId,
         speciesCode: speciesCode,
         stage: stage,
         position: spawnPosition,
         seedRandomAmbient: seedAmbient,
       );
+      debugPrint('YardGame.showYardPet result=$ok id=$userPetId');
+      return ok;
     } catch (e, st) {
       _lastPetSpawnError = e.toString();
       debugPrint('YardGame.showYardPet failed: $e\n$st');
@@ -1068,6 +1086,7 @@ class YardGame extends FlameGame {
         _avoPetComponent = null;
         _activePetUserId = null;
       }
+      debugPrint('YardGame.showYardPet result=false id=$userPetId');
       return false;
     }
   }
