@@ -1,7 +1,8 @@
 import 'package:vegepet/features/analysis/analysis_models.dart';
 
-DateTime analysisKstToday() {
-  final d = DateTime.now().toUtc().add(const Duration(hours: 9));
+/// 기기 현지 날짜 기준 "오늘" (시/분/초 절삭).
+DateTime analysisLocalToday() {
+  final d = DateTime.now();
   return DateTime(d.year, d.month, d.day);
 }
 
@@ -37,7 +38,7 @@ DateTime analysisSubtractCalendarMonths(DateTime date, int months) {
 }
 
 ({DateTime start, DateTime end}) analysisDateRangeFor(AnalysisPeriod period) {
-  final end = analysisKstToday();
+  final end = analysisLocalToday();
   switch (period) {
     case AnalysisPeriod.sevenDays:
       return (start: end.subtract(const Duration(days: 6)), end: end);

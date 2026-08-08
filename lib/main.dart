@@ -940,8 +940,8 @@ class _HomePageState extends State<HomePage>
   // 초기화되지 않게 한다.
   //
   // HomePage 쪽 [_diaryVisibleMonth] / [_diaryLogsByDate] 는 현재 조회 중인 월과
-  // 해당 월 meal_logs 캐시를 기억한다. 식단일지 창을 열 때는 매번 오늘(KST)이
-  // 속한 월을 초기 진입 월로 사용한다.
+  // 해당 월 meal_logs 캐시를 기억한다. 식단일지 창을 열 때는 매번 기기 현지
+  // 날짜 기준 오늘이 속한 월을 초기 진입 월로 사용한다.
   //
   // 범위: 2026-01 ~ 2035-12 (10년치)
   static final DateTime _diaryMinMonth = DateTime(2026, 1);
@@ -1228,6 +1228,12 @@ class _HomePageState extends State<HomePage>
   bool _mealReminderPushEnabled = false;
   bool _isNotificationInitialized = false;
   bool _isSchedulingMealReminders = false;
+
+  /// 기기 IANA timezone ID (예: Asia/Seoul, America/Los_Angeles).
+  /// 알림 스케줄링과 Edge Function 호출이 같은 값을 공유한다.
+  /// resumed 시 재조회하며, 변경되면 tz.local / 식사 알림도 갱신한다.
+  String _deviceTimezoneId = 'UTC';
+  bool _isDeviceTimezoneLoaded = false;
   bool _backgroundMusicEnabled = true;
   bool _soundEffectsEnabled = true;
   bool _isSoundInitialized = false;
@@ -1248,7 +1254,10 @@ class _HomePageState extends State<HomePage>
   static const String _kAdDailyCountPrefKey = 'vegepet_ad_daily_count';
   static const String _kAdDailySlotsPrefKey = 'vegepet_ad_daily_slots';
   static const String _kAdLastShownAtMsPrefKey = 'vegepet_ad_last_shown_at_ms';
-  static const String _kAdRecordKstDatePrefKey = 'vegepet_ad_record_kst_date';
+  /// 광고 일일 카운트가 기록된 "현지 날짜" (yyyy-MM-dd).
+  /// 저장 key 문자열은 기존 설치 앱과의 호환을 위해 그대로 둔다.
+  static const String _kAdRecordLocalDatePrefKey =
+      'vegepet_ad_record_kst_date';
   static const Duration _kAdMinInterval = Duration(hours: 3);
   static const int _kAdDailyMaxCount = 2;
   static const int _kMealReminderNotificationIdBase = 120000;
@@ -1553,6 +1562,7 @@ class _HomePageState extends State<HomePage>
       text: _pettingHeartColorHexInput,
     );
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_ensureDeviceTimezoneLoaded());
     unawaited(_loadPetShadowTuneFromPrefs());
     unawaited(_loadPetMotionTuneFromPrefs());
     unawaited(_loadPettingHeartTuneFromPrefs());
@@ -1626,6 +1636,7 @@ class _HomePageState extends State<HomePage>
       // 오래된 meal_logs 스냅샷을 강제 유지하지 않게 한다.
       unawaited(_onAppResumedMealDiaryCachePolicy());
       unawaited(_fetchTodayMealVerificationAttempts());
+      unawaited(_refreshDeviceTimezoneOnResume());
     }
   }
 
@@ -3766,16 +3777,67 @@ class _HomePageState extends State<HomePage>
     return code == 'en' ? 'en' : 'ko';
   }
 
+  /// 기기 timezone ID 를 조회해 캐시한다.
+  ///
+  /// [forceRefresh] 가 true 이면 캐시를 무시하고 다시 조회한다.
+  /// 조회 실패 시 이미 확보한 값은 유지하고, 최초 실패로 재시도를 영구 차단하지 않는다.
+  Future<String> _ensureDeviceTimezoneLoaded({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh && _isDeviceTimezoneLoaded) return _deviceTimezoneId;
+    try {
+      final timezone = (await FlutterTimezone.getLocalTimezone()).trim();
+      if (timezone.isNotEmpty) {
+        _deviceTimezoneId = timezone;
+        _isDeviceTimezoneLoaded = true;
+        return _deviceTimezoneId;
+      }
+    } catch (e) {
+      debugPrint('device timezone lookup failed: $e');
+    }
+    // 실패: 기존 정상 값을 UTC 로 덮지 않으며, 미확보 상태면 다음 호출에서 재시도한다.
+    return _deviceTimezoneId;
+  }
+
+  /// foreground 복귀 시 기기 timezone 을 재조회하고, 변경됐으면 알림 스케줄을 맞춘다.
+  Future<void> _refreshDeviceTimezoneOnResume() async {
+    final previousId = _deviceTimezoneId;
+    final nextId = await _ensureDeviceTimezoneLoaded(forceRefresh: true);
+    if (!mounted) return;
+    if (nextId == previousId) return;
+
+    try {
+      tz.initializeTimeZones();
+      tz.setLocalLocation(tz.getLocation(nextId));
+    } catch (e) {
+      debugPrint('timezone location refresh failed: $e');
+    }
+
+    if (!_mealReminderPushEnabled) return;
+    try {
+      await _initNotificationsIfNeeded();
+      final localeCode = await _loadSavedLocaleCodeForNotifications();
+      final texts = _mealNotificationTextsForLocaleCode(localeCode);
+      await _scheduleMealReminderNotifications(
+        notificationTitle: texts.title,
+        notificationMessages: texts.messages,
+        revertToggleWhenDenied: false,
+      );
+    } catch (e) {
+      debugPrint('meal reminder reschedule after timezone change failed: $e');
+    }
+  }
+
   Future<void> _initNotificationsIfNeeded() async {
     if (_isNotificationInitialized) return;
 
     tz.initializeTimeZones();
+    final timezoneId = await _ensureDeviceTimezoneLoaded();
     try {
-      final timezone = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(timezone));
+      tz.setLocalLocation(tz.getLocation(timezoneId));
     } catch (e) {
-      debugPrint('timezone init failed: $e');
-      tz.setLocalLocation(tz.getLocation('Asia/Seoul'));
+      // 특정 지역 시간대로 강제하지 않는다. tz 기본값(UTC)을 그대로 둔다.
+      debugPrint('timezone location lookup failed: $e');
     }
 
     const androidSettings = AndroidInitializationSettings(
@@ -6722,9 +6784,9 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _rollAdDailyPrefsIfNeeded(SharedPreferences prefs) async {
     final today = _todayDateStr();
-    final recorded = prefs.getString(_kAdRecordKstDatePrefKey);
+    final recorded = prefs.getString(_kAdRecordLocalDatePrefKey);
     if (recorded == today) return;
-    await prefs.setString(_kAdRecordKstDatePrefKey, today);
+    await prefs.setString(_kAdRecordLocalDatePrefKey, today);
     await prefs.setInt(_kAdDailyCountPrefKey, 0);
     await prefs.setStringList(_kAdDailySlotsPrefKey, <String>[]);
   }
@@ -6751,7 +6813,7 @@ class _HomePageState extends State<HomePage>
       _kAdLastShownAtMsPrefKey,
       DateTime.now().millisecondsSinceEpoch,
     );
-    await prefs.setString(_kAdRecordKstDatePrefKey, _todayDateStr());
+    await prefs.setString(_kAdRecordLocalDatePrefKey, _todayDateStr());
   }
 
   /// 정책·UI·생명주기 조건을 보고 전면 광고를 1회 시도한다.
@@ -7263,11 +7325,13 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  // Edge Function(meal-evaluate)이 KST 기준으로 meal_date 를 저장하므로,
-  // Flutter 쪽 조회/비교 기준도 KST(UTC+9)로 고정한다.
-  // (기기 로컬 타임존과 무관하게 항상 동일한 meal_date 문자열이 나오도록 처리)
+  /// 앱 전체 "지금"의 단일 소스. 사용자의 기기 현지시간을 그대로 쓴다.
+  /// (앱 언어 설정과 무관하며, 특정 지역 시간대로 고정하지 않는다.)
+  DateTime _deviceLocalNow() => DateTime.now();
+
+  /// 기기 현지 날짜 기준 yyyy-MM-dd. meal_date/하루 제한 비교의 공통 기준.
   String _todayDateStr() {
-    final d = DateTime.now().toUtc().add(const Duration(hours: 9));
+    final d = _deviceLocalNow();
     final m = d.month.toString().padLeft(2, '0');
     final day = d.day.toString().padLeft(2, '0');
     return '${d.year}-$m-$day';
@@ -7357,15 +7421,11 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // 식단일지/식단 인증과 동일하게 KST(UTC+9) 기준 "오늘" 날짜.
-  DateTime _todayKstDate() {
-    return DateTime.now().toUtc().add(const Duration(hours: 9));
-  }
-
   /// 릴리즈에서만 아점(06~16시)·저녁(17~23시) 시간대 제한. 디버그/프로파일은 항상 허용.
+  /// 시각 판정 기준은 기기 현지시간이다.
   bool _isMealSlotAllowedNow(String slot) {
     if (!kReleaseMode) return true;
-    final hour = _todayKstDate().hour;
+    final hour = _deviceLocalNow().hour;
     switch (slot) {
       case 'brunch':
         return hour >= 6 && hour <= 16;
@@ -7376,9 +7436,9 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // 오늘이 속한 달(1일 기준)을 2026-01 ~ 2035-12 범위로 보정.
+  // 기기 현지 날짜가 속한 달(1일 기준)을 2026-01 ~ 2035-12 범위로 보정.
   DateTime _todayDiaryMonth() {
-    final now = _todayKstDate();
+    final now = _deviceLocalNow();
     return _clampDiaryMonth(DateTime(now.year, now.month, 1));
   }
 
@@ -19117,6 +19177,8 @@ class _HomePageState extends State<HomePage>
   }) async {
     final sw = Stopwatch()..start();
     debugPrint('meal_photo:edge_function_start');
+    // timezone 과 locale 은 서로 무관한 값이다. 각각 별도로 전달한다.
+    final timezoneId = await _ensureDeviceTimezoneLoaded();
     try {
       final res = await supabase.functions.invoke(
         _kMealEvaluateFunction,
@@ -19124,6 +19186,7 @@ class _HomePageState extends State<HomePage>
           'slot': slot,
           'imagePath': imagePath,
           'locale_code': _currentLocaleCodeForAi(),
+          'timezone_id': timezoneId,
         },
       );
       final data = res.data;
@@ -22631,7 +22694,7 @@ class _HomePageState extends State<HomePage>
   // StatefulWidget [_DietDiaryDetailPanel] 으로 분리해 controller 수명을 거기서 관리한다.
   // ==========================================================================
 
-  // 사용자에게 보여줄 yyyy-MM-dd 문자열 (KST 기준 _todayDateStr 와 같은 포맷).
+  // 사용자에게 보여줄 yyyy-MM-dd 문자열 (_todayDateStr 와 같은 포맷).
   // diary_date / meal_date 모두 이 포맷을 사용한다.
   String _dateKey(DateTime d) {
     final m = d.month.toString().padLeft(2, '0');
