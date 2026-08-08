@@ -868,6 +868,8 @@ class YardGame extends FlameGame {
         'YardGame: visualReady id=$userPetId mounted=${component.isMounted} '
         'epoch=$epoch',
       );
+      // spawn/stage footprint 확정 후 obstacle 겹침이면 최근접 안전 위치로 보정.
+      component.resolveCollisionOverlapIfNeeded();
 
       if (epoch != _petMutationEpoch) {
         debugPrint(

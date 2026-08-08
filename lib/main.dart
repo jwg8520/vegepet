@@ -1050,6 +1050,11 @@ class _HomePageState extends State<HomePage>
   late AnimationController _gameStorySwapController;
   late Animation<double> _gameStorySwapCurve;
 
+  /// 메뉴/온보딩 스토리 이미지 locale별 precache 완료 여부 (`ko` / `en`).
+  final Set<String> _storyImagesPrecachedLocales = <String>{};
+  Future<void>? _storyImagesPrecacheInFlight;
+  String? _storyImagesPrecacheInFlightLocale;
+
   /// 게임 메뉴 ↔ 설정 패널 전환 (프로필/식단일지와 동일 계열).
   bool _isSettingsPanelOpen = false;
   bool _settingsPanelSwapInProgress = false;
@@ -2400,6 +2405,9 @@ class _HomePageState extends State<HomePage>
     final notificationTexts = _mealNotificationTextsForLocaleCode(targetCode);
     await localeScope.setLocale(Locale(targetCode));
     if (!mounted) return;
+
+    // 언어 변경 직후 해당 locale 스토리 3장을 백그라운드 precache.
+    unawaited(_ensureStoryPageImagesPrecached());
 
     if (_mealReminderPushEnabled) {
       try {
@@ -6860,6 +6868,38 @@ class _HomePageState extends State<HomePage>
     runAd();
   }
 
+  /// 마지막 교감 상태 메시지 dismiss 완료 후 첫 식단 계정 연동 추천을 연결한다.
+  /// 기존 onDismissed(광고/성장 등)는 덮어쓰지 않고 compose 한다.
+  void _bindAccountLinkInviteToLastInteractionStatus() {
+    VoidCallback compose(VoidCallback? existing) {
+      return () {
+        existing?.call();
+        unawaited(_maybeShowAccountLinkInviteAfterFirstMeal());
+      };
+    }
+
+    if (_interactionStatusQueue.isNotEmpty) {
+      final last = _interactionStatusQueue.removeLast();
+      _interactionStatusQueue.add(
+        _InteractionStatusEntry(
+          last.message,
+          onDismissed: compose(last.onDismissed),
+        ),
+      );
+      return;
+    }
+
+    if (_isInteractionStatusOpen || _interactionStatusTransitionInProgress) {
+      _interactionStatusCurrentOnDismissed = compose(
+        _interactionStatusCurrentOnDismissed,
+      );
+      return;
+    }
+
+    // 교감 메시지가 없으면 즉시 추천(이론상 드묾).
+    unawaited(_maybeShowAccountLinkInviteAfterFirstMeal());
+  }
+
   Future<void> _rollAdDailyPrefsIfNeeded(SharedPreferences prefs) async {
     final today = _todayDateStr();
     final recorded = prefs.getString(_kAdRecordLocalDatePrefKey);
@@ -7215,20 +7255,9 @@ class _HomePageState extends State<HomePage>
     if (user == null) return false;
 
     try {
-      if (_petSpecies.isEmpty) {
-        await _fetchPetSpecies();
-      }
-
-      // 도감 완성 = MVP 4종(code 기준) 전부 등록. id 재배치에도 안전.
-      final allSpeciesIds = _initialAdoptionSpecies
-          .map((s) => s['id'])
-          .where((id) => id != null)
-          .map((id) => int.tryParse(id.toString()))
-          .whereType<int>()
-          .toSet();
-      if (allSpeciesIds.isEmpty) {
-        allSpeciesIds.addAll(kMvpSpeciesIds);
-      }
+      // 완성 기준은 runtime 부분 로드된 _initialAdoptionSpecies 가 아니라
+      // canonical MVP 4종(kMvpSpeciesIds) 전체다.
+      final allSpeciesIds = Set<int>.from(kMvpSpeciesIds);
 
       final rows = await supabase
           .from('pokedex_entries')
@@ -8738,6 +8767,9 @@ class _HomePageState extends State<HomePage>
     await _closeProfileSelectOverlay(notify: false, animated: false);
     await _waitForUiSettle();
     if (!mounted) return;
+    // 페이지 전환 깜빡임 방지: 현재 언어 스토리 3장 decode/cache 보장.
+    await _ensureStoryPageImagesPrecached();
+    if (!mounted) return;
     _gameStorySwapController.stop();
     _gameStorySwapController.value = 0.0;
     _safeSetState(() {
@@ -9051,6 +9083,8 @@ class _HomePageState extends State<HomePage>
       illustrationChild = Image.asset(
         paths[index],
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+        gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) => const SizedBox.expand(),
       );
     }
@@ -10251,25 +10285,16 @@ class _HomePageState extends State<HomePage>
     unawaited(_resolveRandomTicketUseConfirm(false));
   }
 
-  /// 도감에 아직 없는 MVP 종 중 하나를 무작위로 고른다. 없으면 null.
-  Future<int?> _pickRandomMvpSpeciesIdNotInPokedex(String userId) async {
-    if (_petSpecies.isEmpty) {
-      try {
-        await _fetchPetSpecies();
-      } catch (e) {
-        debugPrint('pick MVP species: fetch failed: $e');
-      }
-    }
-
-    final candidates = _mvpPetSpecies()
-        .map((s) => s['id'])
-        .map((id) => id is int ? id : int.tryParse(id?.toString() ?? ''))
-        .whereType<int>()
-        .where(isMvpSpeciesId)
-        .toSet();
-    if (candidates.isEmpty) {
-      candidates.addAll(kMvpSpeciesIds);
-    }
+  /// 도감에 아직 없는 MVP 종 중 하나를 무작위로 고른다.
+  ///
+  /// - [fetchFailed]: pokedex 조회 실패 (fail-closed — 후보를 추정하지 않음)
+  /// - [speciesId] null + fetchFailed false: 조회 성공, 미등록 후보 0
+  /// - [speciesId] non-null: 조회 성공, 분양 가능 후보
+  ///
+  /// 후보 source 는 runtime partial `_petSpecies` 가 아니라 canonical [kMvpSpeciesIds].
+  Future<({int? speciesId, bool fetchFailed})>
+  _pickRandomMvpSpeciesIdNotInPokedex(String userId) async {
+    final candidates = Set<int>.from(kMvpSpeciesIds);
 
     try {
       final rows = await supabase
@@ -10282,11 +10307,14 @@ class _HomePageState extends State<HomePage>
       }
     } catch (e) {
       debugPrint('pick MVP species: pokedex fetch failed: $e');
+      return (speciesId: null, fetchFailed: true);
     }
 
-    if (candidates.isEmpty) return null;
+    if (candidates.isEmpty) {
+      return (speciesId: null, fetchFailed: false);
+    }
     final list = candidates.toList()..shuffle();
-    return list.first;
+    return (speciesId: list.first, fetchFailed: false);
   }
 
   /// 가방에서 랜덤 분양권을 실제로 사용해 새 아보펫을 분양받는다.
@@ -10315,6 +10343,29 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
     if (isPokedexComplete) {
       await _showPokedexCompleteTicketNotice();
+      return;
+    }
+
+    // RPC 선차감 방지: 도감 조회 성공 + 미등록 후보 존재할 때만 RPC 허용.
+    final eligiblePick = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
+    if (!mounted) return;
+    if (eligiblePick.fetchFailed) {
+      debugPrint('random ticket: pokedex fetch failed — skip RPC');
+      _showCommunicationErrorNotice();
+      return;
+    }
+    final eligibleSpeciesId = eligiblePick.speciesId;
+    if (eligibleSpeciesId == null) {
+      final completeAgain = await _isPokedexCompleteForCurrentUser();
+      if (!mounted) return;
+      if (completeAgain) {
+        await _showPokedexCompleteTicketNotice();
+      } else {
+        debugPrint(
+          'random ticket: eligible null but pokedex incomplete — data mismatch',
+        );
+        _showCommunicationErrorNotice();
+      }
       return;
     }
 
@@ -10369,12 +10420,31 @@ class _HomePageState extends State<HomePage>
 
       // MVP: 푸리/코리 등 비활성 종이 RPC에서 나와도 분양하지 않고 MVP 4종으로 대체.
       if (!isMvpSpeciesId(speciesId)) {
-        final fallbackId = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
-        if (fallbackId == null) {
-          if (!mounted) return;
+        final fallbackPick = await _pickRandomMvpSpeciesIdNotInPokedex(user.id);
+        if (!mounted) return;
+        if (fallbackPick.fetchFailed) {
           await _fetchRandomTicketCount();
           if (mounted) setState(() {});
-          await _showPokedexCompleteTicketNotice();
+          debugPrint(
+            'random ticket fallback: pokedex fetch failed — skip continue',
+          );
+          _showCommunicationErrorNotice();
+          return;
+        }
+        final fallbackId = fallbackPick.speciesId;
+        if (fallbackId == null) {
+          await _fetchRandomTicketCount();
+          if (mounted) setState(() {});
+          final completeAgain = await _isPokedexCompleteForCurrentUser();
+          if (!mounted) return;
+          if (completeAgain) {
+            await _showPokedexCompleteTicketNotice();
+          } else {
+            debugPrint(
+              'random ticket fallback: eligible null but incomplete — mismatch',
+            );
+            _showCommunicationErrorNotice();
+          }
           return;
         }
         debugPrint(
@@ -11902,23 +11972,67 @@ class _HomePageState extends State<HomePage>
       _showStartupLoadingOverlay = false;
     });
 
+    // 메뉴 > 스토리 첫 진입 깜빡임 방지: 현재 언어 이미지를 백그라운드 precache.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_ensureStoryPageImagesPrecached());
+    });
+
     // 전원 종료 등으로 이름이 비어 있으면 강제 이름 짓기 패널을 다시 연다.
     _ensurePendingPetNamingIfNeeded();
   }
 
-  Future<void> _precacheIntroStoryImages() async {
+  /// 현재 언어 스토리 이미지 3장을 Flutter image cache에 decode/precache.
+  /// 이미 완료된 locale은 건너뛰고, 동일 locale in-flight 는 join 한다.
+  Future<void> _ensureStoryPageImagesPrecached() async {
     if (!mounted) return;
-    for (final path in _storyPageAssetPaths) {
+    final locale = _isEnglishLocale ? 'en' : 'ko';
+    if (_storyImagesPrecachedLocales.contains(locale)) return;
+
+    final inFlight = _storyImagesPrecacheInFlight;
+    if (inFlight != null && _storyImagesPrecacheInFlightLocale == locale) {
+      await inFlight;
+      return;
+    }
+
+    final future = _precacheStoryPageImagesForLocale(locale);
+    _storyImagesPrecacheInFlight = future;
+    _storyImagesPrecacheInFlightLocale = locale;
+    try {
+      await future;
+    } finally {
+      if (identical(_storyImagesPrecacheInFlight, future)) {
+        _storyImagesPrecacheInFlight = null;
+        _storyImagesPrecacheInFlightLocale = null;
+      }
+    }
+  }
+
+  Future<void> _precacheStoryPageImagesForLocale(String locale) async {
+    if (_storyImagesPrecachedLocales.contains(locale)) return;
+    if (!mounted) return;
+    final paths = <String>[
+      'assets/images/story/story_${locale}_01.png',
+      'assets/images/story/story_${locale}_02.png',
+      'assets/images/story/story_${locale}_03.png',
+    ];
+    for (final path in paths) {
       try {
         await precacheImage(
           AssetImage(path),
           context,
         ).timeout(const Duration(seconds: 8), onTimeout: () {});
-      } catch (e) {
-        debugPrint('intro story precache skipped');
+      } catch (_) {
+        debugPrint('story precache skipped: $path');
       }
       if (!mounted) return;
     }
+    if (!mounted) return;
+    _storyImagesPrecachedLocales.add(locale);
+  }
+
+  Future<void> _precacheIntroStoryImages() async {
+    await _ensureStoryPageImagesPrecached();
   }
 
   Future<void> _hideStartupLoadingOverlayOnError() async {
@@ -13738,7 +13852,6 @@ class _HomePageState extends State<HomePage>
         _isWithdrawConfirmOpen ||
         _isWithdrawFinalConfirmOpen ||
         _isWithdrawErrorNoticeOpen ||
-        _isAccountLinkInviteNoticeOpen ||
         _isAccountLinkSuccessNoticeOpen ||
         _isMealRecognitionFailureNoticeOpen ||
         _isMealVerificationLimitNoticeOpen;
@@ -19197,8 +19310,9 @@ class _HomePageState extends State<HomePage>
         debugPrint(
           'meal_photo:flow_complete elapsed_ms=${flowSw.elapsedMilliseconds}',
         );
+        // 교감 상태 메시지 dismiss(퇴장 애니메이션 완료) 이후에만 계정 연동 추천.
         if (wasFirstEver) {
-          await _maybeShowAccountLinkInviteAfterFirstMeal();
+          _bindAccountLinkInviteToLastInteractionStatus();
         }
         return;
       }
@@ -23118,6 +23232,16 @@ class _HomePageState extends State<HomePage>
                   child: Image.network(
                     imageUrl,
                     fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    },
                     errorBuilder: (context, error, stackTrace) => const Padding(
                       padding: EdgeInsets.all(40),
                       child: Text(
@@ -25547,6 +25671,16 @@ class _DietDiaryDetailPanelState extends State<_DietDiaryDetailPanel> {
                     Image.network(
                       url,
                       fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return const Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        );
+                      },
                       errorBuilder: (context, error, stackTrace) => Center(
                         child: Text(
                           label,
